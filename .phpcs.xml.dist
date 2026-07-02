@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<ruleset name="TheAnotherSEO">
+	<description>WordPress Coding Standards and Automattic VIP Coding Standards for The Another SEO plugin</description>
+
+	<file>./includes</file>
+	<file>./the-another-seo.php</file>
+	<file>./blocks</file>
+	<exclude-pattern>*/vendor/*</exclude-pattern>
+	<exclude-pattern>*/node_modules/*</exclude-pattern>
+	<exclude-pattern>*/dist/*</exclude-pattern>
+	<exclude-pattern>*/.git/*</exclude-pattern>
+
+	<arg value="sp"/>
+	<arg name="basepath" value="./"/>
+	<arg name="colors"/>
+	<arg name="extensions" value="php"/>
+	<arg name="parallel" value="8"/>
+
+	<config name="testVersion" value="8.3-"/>
+	<config name="minimum_supported_wp_version" value="6.9"/>
+
+	<rule ref="WordPress">
+		<exclude name="WordPress.Files.FileName"/>
+		<exclude name="WordPress.NamingConventions.PrefixAllGlobals"/>
+	</rule>
+
+	<rule ref="WordPress-VIP-Go">
+		<exclude name="WordPressVIPMinimum.Functions.RestrictedFunctions"/>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.ValidFunctionName.MethodNameInvalid">
+		<severity>5</severity>
+	</rule>
+</ruleset>

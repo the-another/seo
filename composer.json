@@ -1,0 +1,48 @@
+{
+  "name": "theanother/the-another-seo",
+  "description": "Performance-first SEO for WordPress at catalog scale: template-driven titles and meta, Open Graph and Twitter Cards, Schema.org JSON-LD, breadcrumbs, and an indexable table built for millions of objects.",
+  "type": "wordpress-plugin",
+  "license": "GPL-2.0-or-later",
+  "version": "0.1.0",
+  "author": {
+    "name": "The Another",
+    "email": "hello@theanother.org",
+    "url": "https://theanother.org"
+  },
+  "keywords": ["wordpress", "plugin", "seo", "open-graph", "schema-org", "breadcrumbs"],
+  "homepage": "https://theanother.org/plugin/seo/",
+  "require": {
+    "php": ">=8.3",
+    "woocommerce/action-scheduler": "^3.9"
+  },
+  "require-dev": {
+    "automattic/vipwpcs": "^3.0",
+    "brain/monkey": "^2.6",
+    "mockery/mockery": "^1.6",
+    "php-stubs/wordpress-stubs": "^6.9",
+    "phpunit/phpunit": "^11.0",
+    "squizlabs/php_codesniffer": "^3.9",
+    "wp-coding-standards/wpcs": "^3.0"
+  },
+  "autoload": {
+    "psr-4": {
+      "TheAnother\\Plugin\\SEO\\": "includes/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "TheAnother\\Plugin\\SEO\\Tests\\": "tests/"
+    }
+  },
+  "config": {
+    "allow-plugins": {
+      "dealerdirect/phpcodesniffer-composer-installer": true
+    },
+    "sort-packages": true
+  },
+  "scripts": {
+    "phpcs": "phpcs",
+    "phpcbf": "phpcbf",
+    "test": "phpunit"
+  }
+}
