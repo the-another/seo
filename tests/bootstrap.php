@@ -66,3 +66,12 @@ if ( ! function_exists( 'esc_html' ) ) {
 		return htmlspecialchars( $text, ENT_QUOTES, 'UTF-8' );
 	}
 }
+
+if ( ! defined( 'ARRAY_A' ) ) {
+	define( 'ARRAY_A', 'ARRAY_A' );
+}
+if ( ! function_exists( 'esc_sql' ) ) {
+	function esc_sql( $data ) {
+		return $data;
+	}
+}
