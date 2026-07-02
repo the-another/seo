@@ -98,6 +98,46 @@ class SettingsPageTest extends TestCase {
 		unset( $_POST['taseo_settings_nonce'] );
 	}
 
+	public function test_handle_save_sanitizes_and_persists_settings(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['taseo_settings']       = array( 'separator' => '|' );
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&updated=1' );
+		Functions\expect( 'wp_safe_redirect' )->once()->with(
+			Mockery::on( fn( $url ): bool => str_contains( $url, 'updated=1' ) )
+		);
+
+		$this->settings->shouldReceive( 'update' )->once()->with(
+			Mockery::on( fn( array $v ): bool => '|' === $v['separator'] )
+		);
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'] );
+		unset( $_POST['taseo_settings'] );
+	}
+
+	public function test_handle_save_bails_without_capability(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['taseo_settings']       = array( 'separator' => '|' );
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->andReturn( false );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+
+		$this->settings->shouldNotReceive( 'update' );
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'] );
+		unset( $_POST['taseo_settings'] );
+	}
+
 	public function test_detect_conflicting_plugin_finds_yoast(): void {
 		if ( ! defined( 'WPSEO_VERSION' ) ) {
 			define( 'WPSEO_VERSION', '23.0' );
