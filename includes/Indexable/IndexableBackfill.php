@@ -74,13 +74,18 @@ class IndexableBackfill {
 	/**
 	 * Action Scheduler entry point.
 	 *
-	 * @param mixed $args Action args (array with 'mode', or the mode string).
+	 * Enqueued args are array( 'mode' => ... ), which PHP 8 binds as the named
+	 * parameter $mode when Action Scheduler dispatches via call_user_func_array.
+	 *
+	 * @param mixed $mode Mode string (named-arg binding), or legacy array args.
 	 * @return void
 	 */
-	public function handle_batch_action( $args = array() ): void {
-		$mode = is_array( $args ) ? ( $args['mode'] ?? 'full' ) : (string) $args;
+	public function handle_batch_action( $mode = 'full' ): void {
+		if ( is_array( $mode ) ) {
+			$mode = $mode['mode'] ?? 'full';
+		}
 
-		$this->process_batch( $mode );
+		$this->process_batch( (string) $mode );
 	}
 
 	/**
@@ -237,11 +242,13 @@ class IndexableBackfill {
 	/**
 	 * Progress for the settings-screen indicator.
 	 *
+	 * Reports honestly across both phases: total = post_total + term_total;
+	 * processed = post_done while in the posts phase, or post_total + term_done
+	 * while in the terms phase (posts are, by definition, all done by then).
+	 *
 	 * @return array{phase: string, total: int, processed: int, percentage: float} Progress.
 	 */
 	public function get_progress(): array {
-		global $wpdb;
-
 		$progress = get_option( self::PROGRESS_OPTION, false );
 
 		if ( ! is_array( $progress ) ) {
@@ -253,29 +260,100 @@ class IndexableBackfill {
 			);
 		}
 
-		$types        = $this->settings->get_enabled_post_types();
-		$placeholders = implode( ',', array_fill( 0, max( 1, count( $types ) ), '%s' ) );
+		$types      = $this->settings->get_enabled_post_types();
+		$taxonomies = $this->settings->get_enabled_taxonomies();
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare
-		$total = (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders})",
-				$types
-			)
-		);
-		$done  = (int) $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders}) AND ID <= %d",
-				array_merge( $types, array( (int) $progress['last_id'] ) )
-			)
-		);
-		// phpcs:enable
+		$post_total = $this->count_posts( $types );
+		$term_total = $this->count_terms( $taxonomies );
+		$total      = $post_total + $term_total;
+
+		if ( 'terms' === $progress['phase'] ) {
+			$processed = $post_total + $this->count_terms( $taxonomies, (int) $progress['last_id'] );
+		} else {
+			$processed = $this->count_posts( $types, (int) $progress['last_id'] );
+		}
 
 		return array(
 			'phase'      => (string) $progress['phase'],
 			'total'      => $total,
-			'processed'  => 'terms' === $progress['phase'] ? $total : $done,
-			'percentage' => $total > 0 ? round( ( ( 'terms' === $progress['phase'] ? $total : $done ) / $total ) * 100, 2 ) : 100.0,
+			'processed'  => $processed,
+			'percentage' => $total > 0 ? round( ( $processed / $total ) * 100, 2 ) : 100.0,
 		);
+	}
+
+	/**
+	 * Count enabled-type posts, optionally capped at an ID.
+	 *
+	 * Empty type lists contribute 0 without touching the database, avoiding a
+	 * placeholder-less IN() clause.
+	 *
+	 * @param array<int, string> $types  Enabled post types.
+	 * @param int|null           $max_id Only count IDs up to (and including) this, or null for all.
+	 * @return int Post count.
+	 */
+	private function count_posts( array $types, ?int $max_id = null ): int {
+		global $wpdb;
+
+		if ( array() === $types ) {
+			return 0;
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $types ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		if ( null === $max_id ) {
+			return (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders})",
+					$types
+				)
+			);
+		}
+
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ({$placeholders}) AND ID <= %d",
+				array_merge( $types, array( $max_id ) )
+			)
+		);
+		// phpcs:enable
+	}
+
+	/**
+	 * Count enabled-taxonomy terms, optionally capped at an ID.
+	 *
+	 * Empty taxonomy lists contribute 0 without touching the database, avoiding
+	 * a placeholder-less IN() clause.
+	 *
+	 * @param array<int, string> $taxonomies Enabled taxonomies.
+	 * @param int|null           $max_id     Only count term_ids up to (and including) this, or null for all.
+	 * @return int Term count.
+	 */
+	private function count_terms( array $taxonomies, ?int $max_id = null ): int {
+		global $wpdb;
+
+		if ( array() === $taxonomies ) {
+			return 0;
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $taxonomies ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		if ( null === $max_id ) {
+			return (int) $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT COUNT(*) FROM {$wpdb->terms} t INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id WHERE tt.taxonomy IN ({$placeholders})",
+					$taxonomies
+				)
+			);
+		}
+
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$wpdb->terms} t INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id WHERE tt.taxonomy IN ({$placeholders}) AND t.term_id <= %d",
+				array_merge( $taxonomies, array( $max_id ) )
+			)
+		);
+		// phpcs:enable
 	}
 }

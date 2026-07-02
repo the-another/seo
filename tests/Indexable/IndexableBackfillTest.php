@@ -171,4 +171,114 @@ class IndexableBackfillTest extends TestCase {
 
 		$this->backfill->process_batch( 'full' );
 	}
+
+	public function test_handle_batch_action_survives_action_scheduler_named_arg_dispatch(): void {
+		// Action Scheduler dispatches via call_user_func_array( $callback, array( 'mode' => 'full' ) ).
+		// Since PHP 8 binds string-keyed arrays as named args, this exercises the real failure mode.
+		Functions\expect( 'get_option' )
+			->once()
+			->with( IndexableBackfill::PROGRESS_OPTION, false )
+			->andReturn( false );
+		Functions\expect( 'as_enqueue_async_action' )->never();
+
+		call_user_func_array( array( $this->backfill, 'handle_batch_action' ), array( 'mode' => 'full' ) );
+	}
+
+	public function test_handle_batch_action_accepts_plain_string_mode(): void {
+		Functions\expect( 'get_option' )
+			->once()
+			->with( IndexableBackfill::PROGRESS_OPTION, false )
+			->andReturn( false );
+		Functions\expect( 'as_enqueue_async_action' )->never();
+
+		$this->backfill->handle_batch_action( 'full' );
+	}
+
+	public function test_get_progress_is_idle_when_no_progress_option(): void {
+		Functions\expect( 'get_option' )
+			->once()
+			->with( IndexableBackfill::PROGRESS_OPTION, false )
+			->andReturn( false );
+
+		$this->assertSame(
+			array(
+				'phase'      => 'idle',
+				'total'      => 0,
+				'processed'  => 0,
+				'percentage' => 100.0,
+			),
+			$this->backfill->get_progress()
+		);
+	}
+
+	public function test_get_progress_posts_phase_reports_partial_progress(): void {
+		Functions\expect( 'get_option' )
+			->once()
+			->andReturn( array( 'phase' => 'posts', 'last_id' => 40, 'mode' => 'full' ) );
+
+		// Call order: post_total, term_total, post_done.
+		$this->wpdb->shouldReceive( 'prepare' )->times( 3 )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->times( 3 )->andReturn( 100, 20, 40 );
+
+		$progress = $this->backfill->get_progress();
+
+		$this->assertSame( 'posts', $progress['phase'] );
+		$this->assertSame( 120, $progress['total'] );
+		$this->assertSame( 40, $progress['processed'] );
+		$this->assertSame( 33.33, $progress['percentage'] );
+	}
+
+	public function test_get_progress_terms_phase_reports_partial_progress_not_complete(): void {
+		Functions\expect( 'get_option' )
+			->once()
+			->andReturn( array( 'phase' => 'terms', 'last_id' => 5, 'mode' => 'full' ) );
+
+		// Call order: post_total, term_total, term_done.
+		$this->wpdb->shouldReceive( 'prepare' )->times( 3 )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->times( 3 )->andReturn( 100, 20, 5 );
+
+		$progress = $this->backfill->get_progress();
+
+		$this->assertSame( 'terms', $progress['phase'] );
+		$this->assertSame( 120, $progress['total'] );
+		$this->assertSame( 105, $progress['processed'] ); // post_total (100) + term_done (5).
+		$this->assertSame( 87.5, $progress['percentage'] );
+		$this->assertNotEquals( 100.0, $progress['percentage'] );
+	}
+
+	public function test_get_progress_skips_post_count_when_no_enabled_post_types(): void {
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array() );
+
+		Functions\expect( 'get_option' )
+			->once()
+			->andReturn( array( 'phase' => 'posts', 'last_id' => 0, 'mode' => 'full' ) );
+
+		// Only the term_total query runs; post_total and post_done are skipped (empty types).
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->andReturn( 20 );
+
+		$progress = $this->backfill->get_progress();
+
+		$this->assertSame( 20, $progress['total'] );
+		$this->assertSame( 0, $progress['processed'] );
+		$this->assertSame( 0.0, $progress['percentage'] );
+	}
+
+	public function test_get_progress_skips_term_count_when_no_enabled_taxonomies(): void {
+		$this->settings->shouldReceive( 'get_enabled_taxonomies' )->andReturn( array() );
+
+		Functions\expect( 'get_option' )
+			->once()
+			->andReturn( array( 'phase' => 'terms', 'last_id' => 3, 'mode' => 'full' ) );
+
+		// Only the post_total query runs; term_total and term_done are skipped (empty taxonomies).
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->andReturn( 100 );
+
+		$progress = $this->backfill->get_progress();
+
+		$this->assertSame( 100, $progress['total'] );
+		$this->assertSame( 100, $progress['processed'] );
+		$this->assertSame( 100.0, $progress['percentage'] );
+	}
 }
