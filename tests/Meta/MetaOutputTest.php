@@ -78,6 +78,22 @@ class MetaOutputTest extends TestCase {
 		$this->assertSame( 'WP Default', $this->output->filter_document_title( 'WP Default' ) );
 	}
 
+	public function test_title_is_escaped(): void {
+		$this->context->shouldReceive( 'resolve' )->andReturn(
+			$this->product_context( array( 'title' => 'A <b>bold</b> & risky title', 'description' => null ) )
+		);
+
+		$result = $this->output->filter_document_title( 'WP Default' );
+
+		// Verify that HTML entities are escaped.
+		$this->assertStringContainsString( '&lt;b&gt;', $result );
+		$this->assertStringContainsString( '&lt;/b&gt;', $result );
+		$this->assertStringContainsString( '&amp;', $result );
+		// Raw angle brackets should be escaped, not present as-is.
+		$this->assertStringNotContainsString( '<b>', $result );
+		$this->assertStringNotContainsString( '</b>', $result );
+	}
+
 	public function test_head_tags_print_description_canonical_from_live_permalink(): void {
 		$this->context->shouldReceive( 'resolve' )->andReturn( $this->product_context( null ) );
 		Functions\when( 'esc_attr' )->returnArg();

@@ -58,7 +58,7 @@ class MetaOutput {
 			return $title;
 		}
 
-		return $this->resolve_title( $ctx );
+		return esc_html( $this->resolve_title( $ctx ) );
 	}
 
 	/**
