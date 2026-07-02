@@ -89,7 +89,19 @@ class CurrentContext {
 		}
 
 		if ( is_front_page() || is_home() ) {
-			return $this->build( 'system_page', 'home', 0, $this->site_vars(), (string) home_url( '/' ) );
+			$permalink = (string) home_url( '/' );
+
+			// Static-front-page + posts-page setup: is_home() is the blog page
+			// (e.g. /blog/), which must not canonicalize to the site root.
+			if ( is_home() && ! is_front_page() ) {
+				$page_for_posts = (int) get_option( 'page_for_posts' );
+
+				if ( $page_for_posts > 0 ) {
+					$permalink = (string) get_permalink( $page_for_posts );
+				}
+			}
+
+			return $this->build( 'system_page', 'home', 0, $this->site_vars(), $permalink );
 		}
 
 		if ( is_search() ) {
