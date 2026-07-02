@@ -33,6 +33,7 @@ class TemplateResolverTest extends TestCase {
 			'whitespace collapsed'        => array( '%%missing%%  %%title%%  ', $context, 'Vintage Watch' ),
 			'empty template'              => array( '', $context, '' ),
 			'empty context value removed' => array( '%%excerpt%% %%title%%', array_merge( $context, array( 'excerpt' => '' ) ), 'Vintage Watch' ),
+			'uppercase token matches case-insensitively' => array( '%%TITLE%% %%sep%% %%Sitename%%', $context, 'Vintage Watch – Acme Auctions' ),
 		);
 	}
 
