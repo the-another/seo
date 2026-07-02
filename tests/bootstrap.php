@@ -14,6 +14,20 @@ if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', '/tmp/wordpress/' );
 }
 
+// Pre-create and pre-load the wp-admin upgrade.php stub so production code's
+// require_once is a no-op under Patchwork (which would otherwise emit stream-
+// wrapper output mid-test and trip failOnRisky).
+$taseo_upgrade_stub = ABSPATH . 'wp-admin/includes/upgrade.php';
+
+if ( ! file_exists( $taseo_upgrade_stub ) ) {
+	if ( ! is_dir( dirname( $taseo_upgrade_stub ) ) ) {
+		mkdir( dirname( $taseo_upgrade_stub ), 0777, true );
+	}
+	file_put_contents( $taseo_upgrade_stub, "<?php\n" );
+}
+
+require_once $taseo_upgrade_stub;
+
 if ( ! defined( 'THE_ANOTHER_SEO_VERSION' ) ) {
 	define( 'THE_ANOTHER_SEO_VERSION', '0.1.0' );
 }
