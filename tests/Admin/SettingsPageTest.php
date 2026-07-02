@@ -121,6 +121,92 @@ class SettingsPageTest extends TestCase {
 		unset( $_POST['taseo_settings'] );
 	}
 
+	public function test_handle_save_social_tab_forces_unchecked_checkboxes_to_false(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'social';
+		$_POST['taseo_settings']       = array( 'facebook_app_id' => 'fb123' ); // both checkboxes absent (unchecked).
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&updated=1' );
+		Functions\expect( 'wp_safe_redirect' )->once();
+
+		$this->settings->shouldReceive( 'update' )->once()->with(
+			Mockery::on(
+				function ( array $v ): bool {
+					return array_key_exists( 'open_graph_enabled', $v )
+						&& false === $v['open_graph_enabled']
+						&& array_key_exists( 'twitter_enabled', $v )
+						&& false === $v['twitter_enabled'];
+				}
+			)
+		);
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
+	}
+
+	public function test_handle_save_types_tab_forces_empty_lists_when_nothing_checked(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'types';
+		$_POST['taseo_settings']       = array(); // no post type / taxonomy checkboxes submitted.
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&updated=1' );
+		Functions\expect( 'wp_safe_redirect' )->once();
+
+		$this->settings->shouldReceive( 'update' )->once()->with(
+			Mockery::on(
+				function ( array $v ): bool {
+					return array_key_exists( 'enabled_post_types', $v )
+						&& array() === $v['enabled_post_types']
+						&& array_key_exists( 'enabled_taxonomies', $v )
+						&& array() === $v['enabled_taxonomies'];
+				}
+			)
+		);
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
+	}
+
+	public function test_handle_save_general_tab_preserves_merge_for_absent_booleans(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'general';
+		$_POST['taseo_settings']       = array( 'separator' => '|' );
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&updated=1' );
+		Functions\expect( 'wp_safe_redirect' )->once();
+
+		$this->settings->shouldReceive( 'update' )->once()->with(
+			Mockery::on(
+				function ( array $v ): bool {
+					return ! array_key_exists( 'open_graph_enabled', $v )
+						&& ! array_key_exists( 'twitter_enabled', $v )
+						&& ! array_key_exists( 'breadcrumb_link_current', $v )
+						&& ! array_key_exists( 'breadcrumb_include_taxonomy_ancestors', $v )
+						&& ! array_key_exists( 'enabled_post_types', $v )
+						&& ! array_key_exists( 'enabled_taxonomies', $v );
+				}
+			)
+		);
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
+	}
+
 	public function test_handle_save_bails_without_capability(): void {
 		$_POST['taseo_settings_nonce'] = 'nonce';
 		$_POST['taseo_settings']       = array( 'separator' => '|' );

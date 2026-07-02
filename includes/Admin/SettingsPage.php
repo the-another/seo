@@ -413,8 +413,9 @@ class SettingsPage {
 		}
 
 		$raw = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
+		$tab = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
 
-		$this->settings->update( $this->sanitize_settings( $raw ) );
+		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
 
 		// phpcs:ignore WordPressVIPMinimum.Security.ExitAfterRedirect.NoExit -- conditional exit based on testability flag.
 		wp_safe_redirect( admin_url( 'options-general.php?page=taseo&updated=1' ) );
@@ -469,10 +470,16 @@ class SettingsPage {
 	/**
 	 * Sanitize a raw settings submission.
 	 *
+	 * Boolean and checkbox-list keys owned by the submitted tab are force-set
+	 * from $raw (so unchecking the last box in a tab actually clears it);
+	 * keys belonging to other tabs are merge-preserved by Settings::update(),
+	 * since a tab's form never submits fields it doesn't own.
+	 *
 	 * @param array<string, mixed> $raw Raw values.
+	 * @param string               $tab Active tab slug (from the posted 'tab' field).
 	 * @return array<string, mixed> Clean values.
 	 */
-	public function sanitize_settings( array $raw ): array {
+	public function sanitize_settings( array $raw, string $tab = '' ): array {
 		$clean = array();
 
 		foreach ( array( 'enabled_post_types', 'enabled_taxonomies' ) as $list_key ) {
@@ -530,6 +537,21 @@ class SettingsPage {
 				$clean['schema_types'][ sanitize_key( (string) $subtype ) ] =
 					in_array( $type, self::SCHEMA_TYPE_CHOICES, true ) ? $type : 'WebPage';
 			}
+		}
+
+		if ( 'social' === $tab ) {
+			$clean['open_graph_enabled'] = ! empty( $raw['open_graph_enabled'] );
+			$clean['twitter_enabled']    = ! empty( $raw['twitter_enabled'] );
+		}
+
+		if ( 'schema' === $tab ) {
+			$clean['breadcrumb_link_current']               = ! empty( $raw['breadcrumb_link_current'] );
+			$clean['breadcrumb_include_taxonomy_ancestors'] = ! empty( $raw['breadcrumb_include_taxonomy_ancestors'] );
+		}
+
+		if ( 'types' === $tab ) {
+			$clean['enabled_post_types'] = $clean['enabled_post_types'] ?? array();
+			$clean['enabled_taxonomies'] = $clean['enabled_taxonomies'] ?? array();
 		}
 
 		return $clean;
