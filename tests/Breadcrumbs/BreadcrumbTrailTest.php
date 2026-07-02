@@ -31,6 +31,7 @@ class BreadcrumbTrailTest extends TestCase {
 		$this->settings->shouldReceive( 'get_breadcrumb_home_label' )->andReturn( 'Home' )->byDefault();
 		$this->settings->shouldReceive( 'breadcrumb_include_taxonomy_ancestors' )->andReturn( true )->byDefault();
 		$this->repository->shouldReceive( 'find_for_post' )->andReturn( null )->byDefault();
+		$this->repository->shouldReceive( 'find_for_term' )->andReturn( null )->byDefault();
 
 		Functions\when( 'home_url' )->justReturn( 'https://example.com/' );
 
@@ -127,6 +128,30 @@ class BreadcrumbTrailTest extends TestCase {
 		$this->assertSame( 'Cyclic Nine', $trail[1]['title'] );
 		$this->assertSame( 'Cyclic Ten', $trail[2]['title'] );
 		$this->assertSame( 'Corrupted Data Product', $trail[3]['title'] );
+	}
+
+	public function test_term_lineage_uses_breadcrumb_title_override(): void {
+		$this->mock_singular_post( 88123, 'product', 'Vintage Watch' );
+		Functions\when( 'get_ancestors' )->justReturn( array() );
+		Functions\when( 'get_post_type_archive_link' )->justReturn( false );
+
+		$leaf_term          = Mockery::mock( 'WP_Term' );
+		$leaf_term->term_id = 10;
+		$leaf_term->name    = 'Vintage';
+		$leaf_term->parent  = 0;
+
+		Functions\when( 'get_the_terms' )->justReturn( array( $leaf_term ) );
+		Functions\when( 'get_term_link' )->justReturn( 'https://example.com/vintage/' );
+
+		$this->repository->shouldReceive( 'find_for_term' )
+			->with( 10 )
+			->andReturn( array( 'breadcrumb_title' => 'Short Cat' ) );
+
+		$trail = $this->trail->build();
+
+		$this->assertSame( 'Home', $trail[0]['title'] );
+		$this->assertSame( 'Short Cat', $trail[1]['title'] );
+		$this->assertSame( 'Vintage Watch', $trail[2]['title'] );
 	}
 
 	public function test_breadcrumb_title_override_replaces_current_title(): void {

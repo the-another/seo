@@ -127,10 +127,13 @@ class BreadcrumbTrail {
 			$link = get_term_link( $cursor );
 
 			if ( ! is_wp_error( $link ) ) {
+				$row   = $this->repository->find_for_term( (int) $cursor->term_id );
+				$title = ! empty( $row['breadcrumb_title'] ) ? (string) $row['breadcrumb_title'] : (string) $cursor->name;
+
 				array_unshift(
 					$lineage,
 					array(
-						'title' => (string) $cursor->name,
+						'title' => $title,
 						'url'   => (string) $link,
 					)
 				);
