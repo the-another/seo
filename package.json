@@ -1,0 +1,14 @@
+{
+  "name": "the-another-seo",
+  "version": "0.1.0",
+  "description": "Blocks for The Another SEO.",
+  "license": "GPL-2.0-or-later",
+  "scripts": {
+    "build": "wp-scripts build blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
+    "start": "wp-scripts start blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
+    "lint:js": "wp-scripts lint-js blocks"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "^30.0.0"
+  }
+}

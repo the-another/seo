@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "the-another/seo-breadcrumbs",
+  "title": "Breadcrumbs (The Another SEO)",
+  "category": "widgets",
+  "icon": "ellipsis",
+  "description": "Displays the breadcrumb trail for the current page. Matches the BreadcrumbList structured data exactly.",
+  "textdomain": "the-another-seo",
+  "supports": {
+    "html": false,
+    "spacing": {
+      "margin": true,
+      "padding": true
+    },
+    "typography": {
+      "fontSize": true
+    }
+  },
+  "editorScript": "file:../../dist/breadcrumbs/index.js",
+  "render": "file:./render.php"
+}
