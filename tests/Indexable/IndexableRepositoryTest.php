@@ -133,6 +133,33 @@ class IndexableRepositoryTest extends TestCase {
 		);
 	}
 
+	public function test_save_overrides_never_writes_null_for_schema_disabled(): void {
+		// Row exists already.
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'FIND_SQL' );
+		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'FIND_SQL', ARRAY_A )->andReturn( array( 'id' => '7' ) );
+
+		$this->wpdb->shouldReceive( 'update' )
+			->once()
+			->with(
+				'wp_taseo_indexables',
+				array(
+					'schema_disabled' => 0,
+					'description'     => null,
+				),
+				array( 'id' => 7 )
+			);
+
+		$this->repository->save_overrides(
+			'post',
+			'product',
+			88123,
+			array(
+				'schema_disabled' => '', // must coerce to 0, never NULL: column is NOT NULL.
+				'description'     => '', // still clears to NULL for nullable columns.
+			)
+		);
+	}
+
 	public function test_save_overrides_creates_row_when_absent(): void {
 		$this->wpdb->shouldReceive( 'prepare' )->times( 3 )->andReturn( 'SQL' );
 		$this->wpdb->shouldReceive( 'get_row' )

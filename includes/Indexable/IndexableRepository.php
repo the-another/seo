@@ -151,7 +151,9 @@ class IndexableRepository {
 
 	/**
 	 * Persist admin override values. Empty string means "clear the override"
-	 * and is stored as NULL. Unknown keys are dropped.
+	 * and is stored as NULL. Unknown keys are dropped. schema_disabled is a
+	 * NOT NULL TINYINT(1) column, so it is coerced to 0/1 instead — writing
+	 * NULL there fails the UPDATE outright under MySQL strict mode.
 	 *
 	 * @param string $object_type    Object type.
 	 * @param string $object_subtype Object subtype.
@@ -179,6 +181,12 @@ class IndexableRepository {
 			if ( ! in_array( $column, self::OVERRIDE_COLUMNS, true ) ) {
 				continue;
 			}
+
+			if ( 'schema_disabled' === $column ) {
+				$data[ $column ] = empty( $value ) ? 0 : 1;
+				continue;
+			}
+
 			$data[ $column ] = ( '' === $value ) ? null : $value;
 		}
 
