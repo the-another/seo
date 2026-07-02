@@ -140,4 +140,66 @@ class SocialOutputTest extends TestCase {
 		$this->assertStringContainsString( '<meta property="product:price:currency" content="USD" />', $html );
 		$this->assertStringContainsString( '<meta property="og:availability" content="instock" />', $html );
 	}
+
+	public function test_twitter_disabled_suppresses_twitter_but_not_og(): void {
+		$this->settings->shouldReceive( 'is_twitter_enabled' )->andReturn( false );
+		$this->context->shouldReceive( 'resolve' )->andReturn( $this->page_context() );
+
+		ob_start();
+		$this->social->print_tags();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'og:title', $html );
+		$this->assertStringNotContainsString( 'twitter:', $html );
+	}
+
+	public function test_out_of_stock_product_reports_oos_availability(): void {
+		$ctx                   = $this->page_context();
+		$ctx['object_subtype'] = 'product';
+		$ctx['object_id']      = 88456;
+		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
+
+		$product = Mockery::mock( 'WC_Product' );
+		$product->shouldReceive( 'get_price' )->andReturn( '79.99' );
+		$product->shouldReceive( 'is_in_stock' )->andReturn( false );
+
+		Functions\when( 'wc_get_product' )->justReturn( $product );
+		Functions\when( 'get_woocommerce_currency' )->justReturn( 'USD' );
+
+		ob_start();
+		$this->social->print_tags();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( '<meta property="og:availability" content="oos" />', $html );
+	}
+
+	public function test_twitter_overrides_and_twitter_image_win(): void {
+		$row = array(
+			'twitter_title'       => 'TW Title',
+			'twitter_description' => 'TW Desc',
+			'twitter_image_id'    => '88',
+		);
+		$this->context->shouldReceive( 'resolve' )->andReturn( $this->page_context( $row ) );
+		Functions\expect( 'wp_get_attachment_image_url' )->once()->with( 88, 'full' )->andReturn( 'https://example.com/tw.jpg' );
+
+		ob_start();
+		$this->social->print_tags();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'twitter:title" content="TW Title"', $html );
+		$this->assertStringContainsString( 'twitter:description" content="TW Desc"', $html );
+		$this->assertStringContainsString( '<meta name="twitter:image" content="https://example.com/tw.jpg" />', $html );
+	}
+
+	public function test_site_default_image_used_when_no_override(): void {
+		$this->settings->shouldReceive( 'get_default_social_image_id' )->andReturn( 55 );
+		$this->context->shouldReceive( 'resolve' )->andReturn( $this->page_context() );
+		Functions\expect( 'wp_get_attachment_image_url' )->atLeast()->once()->with( 55, 'full' )->andReturn( 'https://example.com/default.jpg' );
+
+		ob_start();
+		$this->social->print_tags();
+		$html = ob_get_clean();
+
+		$this->assertStringContainsString( 'og:image" content="https://example.com/default.jpg"', $html );
+	}
 }
