@@ -46,12 +46,15 @@ This table stays small regardless of catalog size — at 4 million products and 
 
 ## Assignment algorithm
 
-Runs as part of `Indexable_Sync` (from the meta tags design), triggered whenever an object's `is_indexable` flag changes — **only for rows where `object_type` is `post` or `term`**. `system_page` rows (home/search/404/archive templates from the meta tags module) never participate, regardless of their `is_indexable` value; they exist solely to hold title/description templates for those special pages, not to represent sitemap-eligible content (see assumption 5).
+Runs as part of `IndexableSync` (from the meta tags design), triggered whenever an object's `is_indexable` flag changes — **only for rows where `object_type` is `post` or `term`**. `system_page` rows (home/search/404/archive templates from the meta tags module) never participate, regardless of their `is_indexable` value; they exist solely to hold title/description templates for those special pages, not to represent sitemap-eligible content (see assumption 5).
 
 **Becomes indexable** (new object, or re-entering eligibility) **and has no `sitemap_file_id`:**
 1. Find the lowest-numbered chunk for this `object_subtype` with `link_count < max` (the configured cap).
-2. If found: assign (`sitemap_file_id` = that chunk), increment its `link_count`, mark it dirty.
-3. If none found (all chunks full or none exist): create a new chunk (`chunk_number` = current max + 1, or `1` if none exist), assign, `link_count = 1`, mark dirty.
+2. If found: claim a slot **atomically** — `UPDATE taseo_sitemap_files SET link_count = link_count + 1, is_dirty = 1 WHERE id = %d AND link_count < %d`. A read-then-write here would let two concurrent saves both land in a chunk's last slot and overshoot the cap; the conditional update makes the claim safe — if it affects zero rows (another process just took the last slot), re-run the search.
+3. If no chunk has room (or none exists): create a new chunk (`chunk_number` = current max + 1, or `1` if none exist), assign, `link_count = 1`, mark dirty.
+
+**Already assigned and stays indexable** (content edit, permalink change, `last_modified` bump):
+1. Mark its chunk dirty — nothing else. This is the path that gets updated `<lastmod>` and `<loc>` values into the physical file via the next cron sweep; without it, edits to existing objects would never reach their sitemap file.
 
 **Becomes non-indexable, or is permanently deleted:**
 1. If it has a `sitemap_file_id`: decrement that chunk's `link_count`, mark it dirty, clear the object's `sitemap_file_id`.
@@ -59,9 +62,11 @@ Runs as part of `Indexable_Sync` (from the meta tags design), triggered whenever
 
 No object is ever moved between chunks after its initial assignment. A chunk's `link_count` can sit below the cap indefinitely; that's an accepted trade-off (see assumption 4) — it costs nothing SEO-wise and avoids ever touching more than one chunk per add/remove.
 
+**Initial population**: the [indexable backfill](2026-07-02-meta-social-tags-design.md#backfill-for-existing-content) performs chunk assignment inline as it indexes each batch (chunks fill sequentially during backfill, so the "find a chunk with room" lookup is effectively free — it's always the current tail chunk). Without this, the sitemap would only ever cover objects created after plugin activation.
+
 ## Regeneration
 
-`Sitemap_File_Writer::rebuild( $chunk_id )`:
+`SitemapFileWriter::rebuild( $chunk_id )`:
 1. Query `SELECT permalink, last_modified FROM taseo_indexables WHERE sitemap_file_id = %d AND is_indexable = 1 ORDER BY id` — bounded to at most the chunk cap (≤1000) rows, so this is always cheap regardless of total catalog size.
 2. Build a `<urlset>` document: one `<url>` per row with `<loc>` and `<lastmod>` only.
 3. Write to `wp-content/uploads/taseo-sitemaps/{object_subtype}-sitemap-{chunk_number}.xml` via the WP Filesystem API.
@@ -75,7 +80,10 @@ Generated **live**, on each request, by a WP rewrite endpoint that queries `tase
 
 This is a deliberate asymmetry, not an inconsistency: "no on-the-fly generation" refers to the expensive part — building a 1000-URL list from a 4-million-row catalog. The root index is a query over a few thousand small rows, cheap enough on every request that adding a "regenerate the root index" step would only add complexity for no benefit (it's always current, with no dirty-tracking needed for it specifically).
 
-**Serving the chunk files**: since they're plain files under `wp-content/uploads/`, which WordPress already serves directly and publicly by default, the root index can reference their natural uploads URLs directly — no additional rewrite rules or webserver configuration needed for the chunk files themselves, only for the `/sitemap.xml` root endpoint.
+**Serving the chunk files — root-level URLs, not uploads URLs**: the sitemaps.org protocol scopes a sitemap file to URLs at or below its own directory — a `<urlset>` served from `/wp-content/uploads/taseo-sitemaps/` cannot legitimately list site URLs like `/product/foo/`. Google relaxes this rule for sitemaps submitted via robots.txt, but Bing and strict validators enforce it. So chunk files are **referenced at root-level URLs** (`/product-sitemap-3.xml`) in the root index, and served from the physical uploads path via an internal rewrite:
+
+- **Preferred**: a webserver-level static rewrite (`^([a-z0-9_-]+)-sitemap-(\d+)\.xml$` → the uploads path) — added to `.htaccess` on Apache, documented as a copy-paste snippet for Nginx. Still a pure static-file serve; WordPress never loads.
+- **Fallback**: a WP rewrite rule matching the same pattern that streams the physical file via `readfile()` with the correct content type. Slower (WordPress boots) but generation is still never on-the-fly — it only reads the pre-built file. Used automatically on hosts where the webserver config can't be modified.
 
 ## Admin UI
 
@@ -92,6 +100,7 @@ No per-post-type sitemap toggle beyond what already exists (Post Types & Taxonom
 - **Uploads directory not writable**: sitemap generation is disabled with a clear admin notice, rather than silently failing or fataling. This is the same class of environment problem that would already break WordPress media uploads, so it's surfaced the same way — not solved uniquely by this plugin.
 - **Cron falling behind**: if churn produces dirty chunks faster than the cron sweep drains them, the status panel's dirty-chunk count makes this visible rather than it silently going stale.
 - **Disabling a previously-enabled post type** (in the meta tags module's registry): its objects' `is_indexable` flips false, which flows through the same decrement/delete-at-zero path as any other removal — no special-case code needed, module 1 and module 2 compose correctly through `is_indexable`.
+- **Permalink structure changes**: the meta tags module fires `taseo_permalinks_rebuilt` after re-backfilling the cached permalink column (see its sync strategy section); the sitemap module listens and marks **all** chunks dirty, so every file regenerates with the new URLs via the normal cron sweep. This is the one legitimate "everything regenerates" event — triggered by an explicit admin action, not by content churn.
 - **Full-page caching**: if a page-cache plugin caches `/sitemap.xml` (the live-generated root index), newly added/removed chunk entries won't reflect until that cache entry expires. Worth excluding `/sitemap.xml` from full-page cache rules; the chunk files themselves are already static and cache-friendly by nature.
 - **Concurrent rebuild races**: accepted as harmless (see Regeneration above) — no locking mechanism needed.
 
@@ -99,8 +108,9 @@ No per-post-type sitemap toggle beyond what already exists (Post Types & Taxonom
 
 PHPUnit with Brain Monkey, matching the existing `composer test` pattern:
 
-- Assignment: new object claims the lowest-numbered under-capacity chunk; claims a gap left by a prior removal; seals a chunk and opens a new one once all existing chunks are full; decrements and deletes a chunk at zero.
-- `Sitemap_File_Writer`: valid `<urlset>` output, correct `<loc>`/`<lastmod>`, respects `is_indexable` filtering, correct file path/naming.
+- Assignment: new object claims the lowest-numbered under-capacity chunk; claims a gap left by a prior removal; seals a chunk and opens a new one once all existing chunks are full; decrements and deletes a chunk at zero; the atomic claim re-runs the search when the conditional update affects zero rows (simulated lost race); an edit to an already-assigned object marks its chunk dirty without changing assignment.
+- Permalink rebuild: `taseo_permalinks_rebuilt` marks every chunk dirty.
+- `SitemapFileWriter`: valid `<urlset>` output, correct `<loc>`/`<lastmod>`, respects `is_indexable` filtering, correct file path/naming.
 - Root index: reflects current `taseo_sitemap_files` rows immediately after a chunk is created or deleted (no caching lag on our side).
 - Dirty-flag lifecycle: set on the relevant mutation events, cleared only after a successful rebuild, cron batch size is respected.
 - Uploads-not-writable path surfaces the admin notice and does not fatal or partially write.

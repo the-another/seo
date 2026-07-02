@@ -53,12 +53,15 @@ Unique key on `(object_type, object_subtype, object_id)`.
 
 ## Sync strategy
 
-`wp_posts`/`wp_terms` remain the source of truth. The indexable table is a derived index kept current via hooks, following the same shape as Aucteeon's `HPS_Sync_Handler`:
+`wp_posts`/`wp_terms` remain the source of truth. The indexable table is a derived index kept current via hooks, following the same shape as Aucteeno's `HPS_Sync_Handler`:
 
-- `Indexable_Sync` (registered through `Hook_Manager`, not raw `add_action`) listens to `save_post`, `transition_post_status`, `wp_trash_post`, `before_delete_post`, `create_term`, `edited_term`, `delete_term`.
-- `save_post`, `transition_post_status`, `wp_trash_post`, `create_term`, and `edited_term` recompute `is_indexable`, `permalink`, and `last_modified`, then **upsert** the row via `Indexable_Repository`. A trashed post's row is kept (with `is_indexable` set to `false`) so a later restore-from-trash simply re-syncs it, rather than needing to be reindexed from scratch.
+- `IndexableSync` (registered through `HookManager`, not raw `add_action`) listens to `save_post`, `transition_post_status`, `wp_trash_post`, `before_delete_post`, `create_term`, `edited_term`, `delete_term`.
+- Sync bails early for revisions, autosaves, and any post type/taxonomy not enabled in the plugin's registry — `save_post` fires for all of these, and at catalog scale every skipped no-op write matters.
+- `save_post`, `transition_post_status`, `wp_trash_post`, `create_term`, and `edited_term` recompute `is_indexable`, `permalink`, and `last_modified`, then **upsert** the row via `IndexableRepository`. A trashed post's row is kept (with `is_indexable` set to `false`) so a later restore-from-trash simply re-syncs it, rather than needing to be reindexed from scratch.
 - `before_delete_post` and `delete_term` — permanent deletion — **delete** the indexable row outright. There's no reason to keep a row once the underlying object is gone for good.
 - Override columns are untouched by any sync event — they only change when an admin edits them directly through the metabox.
+
+**Permalink-structure changes invalidate the cached `permalink` column in bulk.** Changing the permalink structure (or WooCommerce's product/category base) silently changes the true URL of potentially every row while the cached values stay stale — wrong canonicals, wrong `og:url`, and wrong sitemap `<loc>` entries at 4M-row scale. `IndexableSync` hooks `permalink_structure_changed` (and the WooCommerce permalink option updates) to queue a full permalink re-backfill through the same `IndexableBackfill` batch machinery, and fires a `taseo_permalinks_rebuilt` action on completion that the sitemap module listens to (to mark all chunks dirty). Frontend output is unaffected by cache staleness by construction: on a singular view the object is already loaded, so canonical/`og:url` always use live `get_permalink()` — the cached column exists solely for bulk consumers (the sitemap module), never for rendering the current page.
 
 ## Backfill for existing content
 
@@ -72,7 +75,7 @@ The table doesn't exist retroactively, so activation (or first run after upgrade
 
 Global, variable-based templates per post type and per taxonomy (e.g. `%%title%% %%sep%% %%sitename%%` for Products), because with millions of untouched products nobody is hand-writing individual titles. Per-object overrides (stored in the indexable row) take precedence when set.
 
-**Resolution order:** per-object override → post type/taxonomy template → hardcoded fallback (post title / trimmed excerpt) → `Template_Resolver` expands `%%variables%%` against the object's context → `Output` escapes and prints.
+**Resolution order:** per-object override → post type/taxonomy template → hardcoded fallback (post title / trimmed excerpt) → `TemplateResolver` expands `%%variables%%` against the object's context → `Output` escapes and prints.
 
 **Available variables:** `%%title%%`, `%%sitename%%`, `%%tagline%%`, `%%sep%%`, `%%excerpt%%`, `%%primary_category%%` (or taxonomy term name in a term context), `%%date%%`, `%%page%%` (for paginated archives), plus WooCommerce-only variables (`%%price%%`, `%%sku%%`) that are silently omitted, not broken, when WooCommerce is inactive.
 
@@ -90,7 +93,7 @@ Per-object `breadcrumb_title` overrides (from the indexable table) replace the d
 
 ## Structured data (Schema.org / JSON-LD)
 
-A single `@graph`-style JSON-LD `<script>` per page (the same pattern Yoast/RankMath use), built by a new `Schema_Graph` class and printed by `Output` in `wp_head`. Nodes are interlinked via `@id` rather than duplicated:
+A single `@graph`-style JSON-LD `<script>` per page (the same pattern Yoast/RankMath use), built by a new `SchemaGraph` class and printed by `Output` in `wp_head`. Nodes are interlinked via `@id` rather than duplicated:
 
 - **`WebSite`** — site-wide, printed on every page.
 - **`Organization` or `Person`** — the site's represented identity (admin choice, like Yoast's "represents" setting): name, logo, `sameAs` social profile URLs.
@@ -117,12 +120,14 @@ When WooCommerce is active and the current object is a product, Open Graph outpu
 
 ## Code conventions
 
-Matches the established house style (`aucteeno`, `aucteeno-nexus`, `the-another-multi-domain-global-styles`):
+Matches the house architecture (`aucteeno`, `aucteeno-nexus`) with the newer underscore-free naming convention established in `the-another-multi-domain-global-styles`:
 
 - PHP 8.3+, WordPress 6.9+
-- Namespace: `The_Another\Plugin\SEO`; text domain `the-another-seo`; prefix `taseo`
-- Container-based DI (`Container` singleton + `Hook_Manager`) — no scattered `add_action()` calls in container-managed classes
-- Repository pattern for the indexable table (`Indexable_Repository`), mirroring `Database_Auctions`/`Database_Items`
+- Namespace root: `TheAnother\Plugin\SEO` — StudlyCaps, no underscores anywhere (not the older `The_Another\Plugin\*` style of the sibling plugins); text domain `the-another-seo`; prefix `taseo` for the DB table, hooks, and template tags (method names stay snake_case per WP idiom)
+- Class + file names: StudlyCaps PSR-4 (`IndexableRepository.php`, `HookManager.php`), not WP-style `class-*.php`; `includes/` organized by domain (`Indexable/`, `Schema/`, `Breadcrumbs/`, `Social/`) rather than technical layer
+- Plugin URI drops the `the-another-` prefix: `https://theanother.org/plugin/seo/` (folder and text domain keep the full slug)
+- Container-based DI (`Container` singleton + `HookManager`) — no scattered `add_action()` calls in container-managed classes
+- Repository pattern for the indexable table (`IndexableRepository`), mirroring the role of Aucteeno's `Database_Auctions`/`Database_Items`
 - Composer-managed, PSR-4 autoload (`includes/`)
 - `@wordpress/scripts`-based build (`blocks/`, `dist/`, `package.json`) for the breadcrumbs block, matching `the-another-blocks-for-dokan` — the only part of the plugin with a JS build step
 - Standalone plugin — no dependency on the other Aucteeno/Dokan/Nexus plugins
@@ -140,14 +145,14 @@ Matches the established house style (`aucteeno`, `aucteeno-nexus`, `the-another-
 
 PHPUnit with Brain Monkey, matching the existing `composer test` pattern used across these plugins:
 
-- `Template_Resolver` variable expansion (all variables, missing variables, WooCommerce-variables-when-inactive)
-- `Indexable_Repository` CRUD and upsert-by-unique-key behavior
-- `Indexable_Sync` hook coverage: save/trash/delete for posts, create/edit/delete for terms, each producing the correct `is_indexable`/`permalink`/`last_modified` state
-- `Indexable_Backfill` batch resumability and idempotency (interrupted mid-run, restarted, no duplicate/missed rows)
+- `TemplateResolver` variable expansion (all variables, missing variables, WooCommerce-variables-when-inactive)
+- `IndexableRepository` CRUD and upsert-by-unique-key behavior
+- `IndexableSync` hook coverage: save/trash/delete for posts, create/edit/delete for terms, each producing the correct `is_indexable`/`permalink`/`last_modified` state
+- `IndexableBackfill` batch resumability and idempotency (interrupted mid-run, restarted, no duplicate/missed rows)
 - Frontend output correctness: override-present vs. override-absent, Open Graph toggle on/off, Twitter Card toggle on/off, product vs. non-product Open Graph shape
 - `Breadcrumbs` trail correctness: hierarchical pages, taxonomy term ancestors, custom post types with/without archives, `breadcrumb_title` overrides
 - Breadcrumb output parity: template tag, shortcode, and block all render the same trail for the same object
-- `Schema_Graph` node composition per configured schema type (`Article`, `Product`, `WebPage`), `BreadcrumbList` node matches the `Breadcrumbs` trail, `schema_disabled` suppresses output
+- `SchemaGraph` node composition per configured schema type (`Article`, `Product`, `WebPage`), `BreadcrumbList` node matches the `Breadcrumbs` trail, `schema_disabled` suppresses output
 
 ## Out of scope for v1
 
@@ -155,4 +160,4 @@ PHPUnit with Brain Monkey, matching the existing `composer test` pattern used ac
 - The XML sitemap generator (separate, upcoming design — will consume `is_indexable`/`last_modified`/`permalink` from this same table)
 - Multisite-specific handling
 - Instagram-specific meta tags (not a real protocol — see assumption 4 above)
-- Schema types beyond `WebSite`/`Organization`/`Person`/`WebPage`/`Article`/`Product`/`BreadcrumbList` (e.g. `FAQPage`, `Review`, `LocalBusiness`, `Recipe`) — can be added later without restructuring `Schema_Graph`
+- Schema types beyond `WebSite`/`Organization`/`Person`/`WebPage`/`Article`/`Product`/`BreadcrumbList` (e.g. `FAQPage`, `Review`, `LocalBusiness`, `Recipe`) — can be added later without restructuring `SchemaGraph`
