@@ -15,7 +15,7 @@ An XML sitemap generator built to handle catalogs up to millions of products wit
 Two of the clarifying questions here went unanswered (you may have been away) — I proceeded with the recommended option in both cases, flagged below:
 
 1. **Chunk size is admin-configurable, default and max 1000** — matches your stated ceiling while allowing it to be lowered later without a code change.
-2. **Regeneration is dirty-flag + WP-Cron sweep, not synchronous** — a save/delete hook only flips a cheap `is_dirty` flag; a recurring cron job rebuilds dirty chunk files in small batches. This keeps admin saves and bulk imports/deletes fast even under heavy churn, matching the WP-Cron batch pattern already used for the [indexable backfill](2026-07-02-meta-social-tags-design.md#backfill-for-existing-content).
+2. **Regeneration is dirty-flag + asynchronous sweep, not synchronous** — a save/delete hook only flips a cheap `is_dirty` flag; a recurring background job rebuilds dirty chunk files in small batches via Action Scheduler (bundled — see the [Background jobs section of the meta tags design](2026-07-02-meta-social-tags-design.md#background-jobs--action-scheduler-bundled)). This keeps admin saves and bulk imports/deletes fast even under heavy churn.
 3. **Physical `.xml` files under `wp-content/uploads/taseo-sitemaps/`, served directly by the webserver** — per your choice. This means WordPress never loads to serve a sitemap request, which is the fastest possible path, but it assumes a single-server setup or shared/synced storage across servers; a multi-server, non-shared-filesystem host would need an out-of-band sync step this design doesn't cover.
 4. **Any under-capacity chunk can receive new objects, not just the newest one** — a refinement over what I described in chat. A brand-new object claims the lowest-numbered chunk (for its subtype) with room, falling back to a new chunk only when none has room. This keeps sitemap files packed over time without reintroducing any cascade: claiming a free slot only ever touches the one target chunk, exactly like removal does.
 5. **System pages (home/search/404) are never included in the sitemap** — only `post` and `term` indexable rows participate. Search result pages and 404s should never be indexed, and the homepage is either the front page (already a normal `post`/`page` object) or excluded entirely if using the posts-page default.
@@ -54,11 +54,11 @@ Runs as part of `IndexableSync` (from the meta tags design), triggered whenever 
 3. If no chunk has room (or none exists): create a new chunk (`chunk_number` = current max + 1, or `1` if none exist), assign, `link_count = 1`, mark dirty.
 
 **Already assigned and stays indexable** (content edit, permalink change, `last_modified` bump):
-1. Mark its chunk dirty — nothing else. This is the path that gets updated `<lastmod>` and `<loc>` values into the physical file via the next cron sweep; without it, edits to existing objects would never reach their sitemap file.
+1. Mark its chunk dirty — nothing else. This is the path that gets updated `<lastmod>` and `<loc>` values into the physical file via the next background sweep; without it, edits to existing objects would never reach their sitemap file.
 
 **Becomes non-indexable, or is permanently deleted:**
 1. If it has a `sitemap_file_id`: decrement that chunk's `link_count`, mark it dirty, clear the object's `sitemap_file_id`.
-2. If the chunk's `link_count` reaches `0`: delete the chunk row (which drops it from the root index the next time that's read) and delete its physical file immediately — no need to wait for the cron sweep for a deletion, it's a cheap unlink.
+2. If the chunk's `link_count` reaches `0`: delete the chunk row (which drops it from the root index the next time that's read) and delete its physical file immediately — no need to wait for the sweep for a deletion, it's a cheap unlink.
 
 No object is ever moved between chunks after its initial assignment. A chunk's `link_count` can sit below the cap indefinitely; that's an accepted trade-off (see assumption 4) — it costs nothing SEO-wise and avoids ever touching more than one chunk per add/remove.
 
@@ -72,7 +72,7 @@ No object is ever moved between chunks after its initial assignment. A chunk's `
 3. Write to `wp-content/uploads/taseo-sitemaps/{object_subtype}-sitemap-{chunk_number}.xml` via the WP Filesystem API.
 4. Update the chunk row: `is_dirty = 0`, `generated_at = now()`, `last_modified` = the max `last_modified` just queried.
 
-A recurring WP-Cron event (e.g. every 5 minutes) selects a bounded batch of dirty chunks (e.g. 20 per run) and rebuilds each — bounding execution time per run regardless of how much churn happened. Two processes racing to rebuild the same dirty chunk is harmless: rebuild is idempotent (it always reflects current DB state), so a race just means a redundant write, not corruption — no locking needed.
+A recurring Action Scheduler action (e.g. every 5 minutes) selects a bounded batch of dirty chunks (e.g. 20 per run) and rebuilds each — bounding execution time per run regardless of how much churn happened. When the sweep finds more dirty chunks than its batch size (e.g. after a permalink rebuild marks all ~4,000 dirty), it immediately schedules a follow-up action rather than waiting for the next 5-minute tick — the backlog drains as a chain of short jobs, per the mass-operation rule in the meta tags design. Two processes racing to rebuild the same dirty chunk is harmless: rebuild is idempotent (it always reflects current DB state), so a race just means a redundant write, not corruption — no locking needed.
 
 ## Root index (`/sitemap.xml`)
 
@@ -90,7 +90,7 @@ This is a deliberate asymmetry, not an inconsistency: "no on-the-fly generation"
 New **Sitemap** settings tab:
 - Enable/disable the sitemap feature entirely.
 - Links per file (default/max 1000, per assumption 1).
-- Status panel: per-subtype chunk count, total dirty-chunk count, most recent regeneration time — operational visibility given regeneration happens asynchronously via cron.
+- Status panel: per-subtype chunk count, total dirty-chunk count, most recent regeneration time — operational visibility given regeneration happens asynchronously via Action Scheduler.
 - Manual "regenerate now" action, for clearing a backlog or forcing an immediate rebuild.
 
 No per-post-type sitemap toggle beyond what already exists (Post Types & Taxonomies registry) and `is_indexable` — see assumption 6.
@@ -98,9 +98,9 @@ No per-post-type sitemap toggle beyond what already exists (Post Types & Taxonom
 ## Error handling & edge cases
 
 - **Uploads directory not writable**: sitemap generation is disabled with a clear admin notice, rather than silently failing or fataling. This is the same class of environment problem that would already break WordPress media uploads, so it's surfaced the same way — not solved uniquely by this plugin.
-- **Cron falling behind**: if churn produces dirty chunks faster than the cron sweep drains them, the status panel's dirty-chunk count makes this visible rather than it silently going stale.
+- **Sweep falling behind**: if churn produces dirty chunks faster than the background sweep drains them, the status panel's dirty-chunk count makes this visible rather than it silently going stale.
 - **Disabling a previously-enabled post type** (in the meta tags module's registry): its objects' `is_indexable` flips false, which flows through the same decrement/delete-at-zero path as any other removal — no special-case code needed, module 1 and module 2 compose correctly through `is_indexable`.
-- **Permalink structure changes**: the meta tags module fires `taseo_permalinks_rebuilt` after re-backfilling the cached permalink column (see its sync strategy section); the sitemap module listens and marks **all** chunks dirty, so every file regenerates with the new URLs via the normal cron sweep. This is the one legitimate "everything regenerates" event — triggered by an explicit admin action, not by content churn.
+- **Permalink structure changes**: the meta tags module fires `taseo_permalinks_rebuilt` after re-backfilling the cached permalink column (see its sync strategy section); the sitemap module listens and marks **all** chunks dirty, so every file regenerates with the new URLs via the normal background sweep. This is the one legitimate "everything regenerates" event — triggered by an explicit admin action, not by content churn.
 - **Full-page caching**: if a page-cache plugin caches `/sitemap.xml` (the live-generated root index), newly added/removed chunk entries won't reflect until that cache entry expires. Worth excluding `/sitemap.xml` from full-page cache rules; the chunk files themselves are already static and cache-friendly by nature.
 - **Concurrent rebuild races**: accepted as harmless (see Regeneration above) — no locking mechanism needed.
 
@@ -112,7 +112,7 @@ PHPUnit with Brain Monkey, matching the existing `composer test` pattern:
 - Permalink rebuild: `taseo_permalinks_rebuilt` marks every chunk dirty.
 - `SitemapFileWriter`: valid `<urlset>` output, correct `<loc>`/`<lastmod>`, respects `is_indexable` filtering, correct file path/naming.
 - Root index: reflects current `taseo_sitemap_files` rows immediately after a chunk is created or deleted (no caching lag on our side).
-- Dirty-flag lifecycle: set on the relevant mutation events, cleared only after a successful rebuild, cron batch size is respected.
+- Dirty-flag lifecycle: set on the relevant mutation events, cleared only after a successful rebuild, sweep batch size is respected and a follow-up action is scheduled when a backlog remains.
 - Uploads-not-writable path surfaces the admin notice and does not fatal or partially write.
 
 ## Out of scope for v1

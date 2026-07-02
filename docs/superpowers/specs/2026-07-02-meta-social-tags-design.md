@@ -61,15 +61,23 @@ Unique key on `(object_type, object_subtype, object_id)`.
 - `before_delete_post` and `delete_term` — permanent deletion — **delete** the indexable row outright. There's no reason to keep a row once the underlying object is gone for good.
 - Override columns are untouched by any sync event — they only change when an admin edits them directly through the metabox.
 
-**Permalink-structure changes invalidate the cached `permalink` column in bulk.** Changing the permalink structure (or WooCommerce's product/category base) silently changes the true URL of potentially every row while the cached values stay stale — wrong canonicals, wrong `og:url`, and wrong sitemap `<loc>` entries at 4M-row scale. `IndexableSync` hooks `permalink_structure_changed` (and the WooCommerce permalink option updates) to queue a full permalink re-backfill through the same `IndexableBackfill` batch machinery, and fires a `taseo_permalinks_rebuilt` action on completion that the sitemap module listens to (to mark all chunks dirty). Frontend output is unaffected by cache staleness by construction: on a singular view the object is already loaded, so canonical/`og:url` always use live `get_permalink()` — the cached column exists solely for bulk consumers (the sitemap module), never for rendering the current page.
+**Permalink-structure changes invalidate the cached `permalink` column in bulk.** Changing the permalink structure (or WooCommerce's product/category base) silently changes the true URL of potentially every row while the cached values stay stale — wrong canonicals, wrong `og:url`, and wrong sitemap `<loc>` entries at 4M-row scale. `IndexableSync` hooks `permalink_structure_changed` (and the WooCommerce permalink option updates) to dispatch a full permalink re-backfill as an Action Scheduler job chain (see "Background jobs" below — never one long-running request), and fires a `taseo_permalinks_rebuilt` action when the chain completes, which the sitemap module listens to (to mark all chunks dirty). Frontend output is unaffected by cache staleness by construction: on a singular view the object is already loaded, so canonical/`og:url` always use live `get_permalink()` — the cached column exists solely for bulk consumers (the sitemap module), never for rendering the current page.
+
+## Background jobs — Action Scheduler, bundled
+
+**Design rule for every mass operation in this plugin** (initial backfill, permalink rebuild, full rescan — and the sitemap module's regeneration sweeps): the operation is never executed as one long-running request. It's dispatched as a **series of small Action Scheduler jobs**, each processing one bounded ID-range slice and scheduling the next slice when it finishes. A 4M-row operation becomes ~4,000 short jobs that drain at whatever pace the site can sustain — no single request runs long enough to hit time/memory limits, a mid-run failure retries only its own slice (Action Scheduler's built-in retry), and the whole queue is visible and cancellable under Tools → Scheduled Actions. A massive admin action can never brick the site.
+
+**Action Scheduler is bundled** via Composer (`woocommerce/action-scheduler`), because WooCommerce may or may not be present. This is safe by design: Action Scheduler self-deduplicates — every bundled copy registers its version and only the newest one loads, so coexisting with WooCommerce (or other bundling plugins) never conflicts. It is deliberately **excluded from Mozart namespace-prefixing**: it must stay in its global namespace for that version-negotiation mechanism to work. This is the standard, supported way to ship it.
 
 ## Backfill for existing content
 
-The table doesn't exist retroactively, so activation (or first run after upgrade) needs to index everything already in the database. Reuses Aucteeno's `Lot_Sort_Backfill` pattern rather than introducing a new dependency (e.g., Action Scheduler), since this plugin has no hard WooCommerce dependency to rely on:
+The table doesn't exist retroactively, so activation (or first run after upgrade) needs to index everything already in the database — the first application of the job-chain rule above. The batching mechanics follow Aucteeno's `Lot_Sort_Backfill` pattern, driven by Action Scheduler instead of WP-Cron:
 
-- `Indexable_Backfill::process_batch()` selects the next batch by ID range (`WHERE ID > %d ORDER BY ID ASC LIMIT %d` via `$wpdb`, not `WP_Query` offset pagination, which degrades badly past a few hundred thousand rows) and upserts indexable rows for that batch.
-- Last-processed ID is tracked in an option, so batches are resumable and idempotent.
-- Driven by a WP-Cron recurring event (e.g., every minute) until exhausted, with a `get_progress()` method (total / processed / remaining / percentage) surfaced as a progress indicator in the plugin's settings screen.
+- `IndexableBackfill::process_batch()` selects the next batch by ID range (`WHERE ID > %d ORDER BY ID ASC LIMIT %d` via `$wpdb`, not `WP_Query` offset pagination, which degrades badly past a few hundred thousand rows) and upserts indexable rows for that batch.
+- Last-processed ID is tracked in an option, so the chain is resumable and idempotent; each job schedules the next until a batch comes back short of the batch size.
+- A `get_progress()` method (total / processed / remaining / percentage) feeds a progress indicator in the plugin's settings screen.
+
+The same machinery powers a **"Rescan everything"** admin action: re-runs the full chain from ID 0, recomputing `is_indexable`/`permalink`/`last_modified` for every row (override columns untouched, as always). This is the recovery tool for any suspected drift between WordPress and the indexable table — e.g., after a direct-DB import or a plugin conflict.
 
 ## Title/description generation — templates
 
@@ -128,7 +136,7 @@ Matches the house architecture (`aucteeno`, `aucteeno-nexus`) with the newer und
 - Plugin URI drops the `the-another-` prefix: `https://theanother.org/plugin/seo/` (folder and text domain keep the full slug)
 - Container-based DI (`Container` singleton + `HookManager`) — no scattered `add_action()` calls in container-managed classes
 - Repository pattern for the indexable table (`IndexableRepository`), mirroring the role of Aucteeno's `Database_Auctions`/`Database_Items`
-- Composer-managed, PSR-4 autoload (`includes/`)
+- Composer-managed, PSR-4 autoload (`includes/`); bundles `woocommerce/action-scheduler` (excluded from Mozart prefixing — see "Background jobs")
 - `@wordpress/scripts`-based build (`blocks/`, `dist/`, `package.json`) for the breadcrumbs block, matching `the-another-blocks-for-dokan` — the only part of the plugin with a JS build step
 - Standalone plugin — no dependency on the other Aucteeno/Dokan/Nexus plugins
 
@@ -148,7 +156,7 @@ PHPUnit with Brain Monkey, matching the existing `composer test` pattern used ac
 - `TemplateResolver` variable expansion (all variables, missing variables, WooCommerce-variables-when-inactive)
 - `IndexableRepository` CRUD and upsert-by-unique-key behavior
 - `IndexableSync` hook coverage: save/trash/delete for posts, create/edit/delete for terms, each producing the correct `is_indexable`/`permalink`/`last_modified` state
-- `IndexableBackfill` batch resumability and idempotency (interrupted mid-run, restarted, no duplicate/missed rows)
+- `IndexableBackfill` batch resumability and idempotency (interrupted mid-run, restarted, no duplicate/missed rows); each job schedules its successor and the chain terminates on a short batch; the rescan action restarts the chain from ID 0 without touching override columns
 - Frontend output correctness: override-present vs. override-absent, Open Graph toggle on/off, Twitter Card toggle on/off, product vs. non-product Open Graph shape
 - `Breadcrumbs` trail correctness: hierarchical pages, taxonomy term ancestors, custom post types with/without archives, `breadcrumb_title` overrides
 - Breadcrumb output parity: template tag, shortcode, and block all render the same trail for the same object
