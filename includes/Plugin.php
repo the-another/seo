@@ -8,11 +8,26 @@
 
 namespace TheAnother\Plugin\SEO;
 
+use TheAnother\Plugin\SEO\Admin\Metabox;
+use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
+use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
+use TheAnother\Plugin\SEO\Database\IndexablesTable;
+use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
+use TheAnother\Plugin\SEO\Indexable\IndexableSync;
+use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\MetaOutput;
+use TheAnother\Plugin\SEO\Meta\TemplateResolver;
+use TheAnother\Plugin\SEO\Schema\SchemaGraph;
+use TheAnother\Plugin\SEO\Schema\SchemaOutput;
+use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Social\SocialOutput;
+
 /**
  * Class Plugin
  *
- * Registers services and wires hooks. Task 15 fills in the full service
- * graph; this task only establishes the singleton shape.
+ * Registers the full service graph and wires all hooks.
  */
 class Plugin {
 
@@ -55,6 +70,127 @@ class Plugin {
 	 * @return void
 	 */
 	public function start(): void {
-		// Filled in by Task 15.
+		IndexablesTable::maybe_upgrade();
+
+		$this->register_services();
+		$this->init_services();
+		$this->maybe_dispatch_initial_backfill();
+	}
+
+	/**
+	 * Register the service graph.
+	 *
+	 * @return void
+	 */
+	private function register_services(): void {
+		$c = $this->container;
+
+		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'template_resolver', fn() => new TemplateResolver() );
+		$c->register( 'indexable_repository', fn() => new IndexableRepository() );
+		$c->register(
+			'indexable_backfill',
+			fn( Container $c ) => new IndexableBackfill( $c->get( 'indexable_sync' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'indexable_sync',
+			fn( Container $c ) => new IndexableSync(
+				$c->get( 'indexable_repository' ),
+				$c->get( 'settings' ),
+				function () use ( $c ): void {
+					$c->get( 'indexable_backfill' )->dispatch( 'permalink' );
+				}
+			)
+		);
+		$c->register(
+			'current_context',
+			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'meta_output',
+			fn( Container $c ) => new MetaOutput( $c->get( 'current_context' ), $c->get( 'template_resolver' ) )
+		);
+		$c->register(
+			'social_output',
+			fn( Container $c ) => new SocialOutput( $c->get( 'current_context' ), $c->get( 'meta_output' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'breadcrumb_trail',
+			fn( Container $c ) => new BreadcrumbTrail( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'breadcrumb_renderer',
+			fn( Container $c ) => new BreadcrumbRenderer( $c->get( 'breadcrumb_trail' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'schema_graph',
+			fn( Container $c ) => new SchemaGraph(
+				$c->get( 'current_context' ),
+				$c->get( 'meta_output' ),
+				$c->get( 'breadcrumb_trail' ),
+				$c->get( 'settings' )
+			)
+		);
+		$c->register( 'schema_output', fn( Container $c ) => new SchemaOutput( $c->get( 'schema_graph' ) ) );
+		$c->register(
+			'metabox',
+			fn( Container $c ) => new Metabox( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
+		);
+		$c->register(
+			'settings_page',
+			fn( Container $c ) => new SettingsPage( $c->get( 'settings' ), $c->get( 'indexable_backfill' ) )
+		);
+		$c->register( 'blocks', fn() => new Blocks() );
+	}
+
+	/**
+	 * Initialize hook-bearing services.
+	 *
+	 * @return void
+	 */
+	private function init_services(): void {
+		$hook_manager = $this->container->get_hook_manager();
+
+		$this->container->get( 'indexable_sync' )->init( $hook_manager );
+		$this->container->get( 'indexable_backfill' )->init( $hook_manager );
+		$this->container->get( 'meta_output' )->init( $hook_manager );
+		$this->container->get( 'social_output' )->init( $hook_manager );
+		$this->container->get( 'schema_output' )->init( $hook_manager );
+		$this->container->get( 'breadcrumb_renderer' )->init( $hook_manager );
+		$this->container->get( 'blocks' )->init( $hook_manager );
+
+		if ( is_admin() ) {
+			$this->container->get( 'metabox' )->init( $hook_manager );
+			$this->container->get( 'settings_page' )->init( $hook_manager );
+		}
+	}
+
+	/**
+	 * Dispatch the initial backfill chain flagged by Installer::activate().
+	 *
+	 * Runs on plugins_loaded-time start(), but the dispatch itself is
+	 * deferred to init so Action Scheduler is fully booted.
+	 *
+	 * @return void
+	 */
+	private function maybe_dispatch_initial_backfill(): void {
+		if ( '1' !== get_option( Installer::NEEDS_BACKFILL_OPTION, '' ) ) {
+			return;
+		}
+
+		$container = $this->container;
+
+		$this->container->get_hook_manager()->register_action(
+			'init',
+			static function () use ( $container ): void {
+				if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+					return; // Action Scheduler unavailable; retry next request.
+				}
+
+				$container->get( 'indexable_backfill' )->dispatch( 'full' );
+				delete_option( Installer::NEEDS_BACKFILL_OPTION );
+			},
+			20
+		);
 	}
 }
