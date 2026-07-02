@@ -116,6 +116,31 @@ class SchemaGraphTest extends TestCase {
 		$this->assertSame( array(), $this->graph->build() );
 	}
 
+	public function test_empty_permalink_falls_back_to_home_for_ids(): void {
+		$ctx               = $this->page_context();
+		$ctx['permalink']  = '';
+		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
+
+		$graph      = $this->graph->build();
+		$webpage    = null;
+		$breadcrumb = null;
+
+		foreach ( $graph as $node ) {
+			if ( 'WebPage' === $node['@type'] ) {
+				$webpage = $node;
+			}
+			if ( 'BreadcrumbList' === $node['@type'] ) {
+				$breadcrumb = $node;
+			}
+		}
+
+		$this->assertNotNull( $webpage );
+		$this->assertNotNull( $breadcrumb );
+		$this->assertSame( 'https://example.com/#webpage', $webpage['@id'] );
+		$this->assertSame( 'https://example.com/#breadcrumb', $webpage['breadcrumb']['@id'] );
+		$this->assertSame( 'https://example.com/#breadcrumb', $breadcrumb['@id'] );
+	}
+
 	public function test_article_type_adds_article_node_as_main_entity(): void {
 		$this->settings->shouldReceive( 'get_schema_type' )->with( 'post' )->andReturn( 'Article' );
 
@@ -133,15 +158,26 @@ class SchemaGraphTest extends TestCase {
 
 		$this->assertContains( 'Article', $types );
 
+		$article = null;
+		$webpage = null;
+
 		foreach ( $graph as $node ) {
 			if ( 'Article' === $node['@type'] ) {
+				$article = $node;
 				$this->assertSame( 'About Us', $node['headline'] );
 				$this->assertSame( '2026-07-01', $node['datePublished'] );
+				$this->assertSame( '2026-07-02', $node['dateModified'] );
+				$this->assertSame( array( '@type' => 'Person', 'name' => 'Jane Editor' ), $node['author'] );
 			}
 			if ( 'WebPage' === $node['@type'] ) {
+				$webpage = $node;
 				$this->assertArrayHasKey( 'mainEntity', $node );
 			}
 		}
+
+		$this->assertNotNull( $article );
+		$this->assertNotNull( $webpage );
+		$this->assertSame( $article['@id'], $webpage['mainEntity']['@id'] );
 	}
 
 	public function test_product_type_adds_product_node_with_offer(): void {
@@ -164,8 +200,11 @@ class SchemaGraphTest extends TestCase {
 
 		foreach ( $graph as $node ) {
 			if ( 'Product' === $node['@type'] ) {
+				$this->assertSame( 'About Us', $node['name'] );
 				$this->assertSame( 'VW-1', $node['sku'] );
 				$this->assertSame( '129.00', $node['offers']['price'] );
+				$this->assertSame( 'USD', $node['offers']['priceCurrency'] );
+				$this->assertSame( 'https://example.com/about/', $node['offers']['url'] );
 				$this->assertSame( 'https://schema.org/InStock', $node['offers']['availability'] );
 				return;
 			}

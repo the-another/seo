@@ -53,7 +53,7 @@ class SchemaOutput {
 		);
 
 		echo '<script type="application/ld+json">'
-			. wp_json_encode( $payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE )
-			. '</script>' . "\n"; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- wp_json_encode output inside script tag.
+			. wp_json_encode( $payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_HEX_TAG )
+			. '</script>' . "\n";
 	}
 }
