@@ -44,6 +44,32 @@ Unique key on `(object_subtype, chunk_number)`. Index on `(object_subtype, link_
 
 This table stays small regardless of catalog size — at 4 million products and a 1000-link cap, that's ~4,000 rows, trivially fast to query in full.
 
+## How objects link to sitemap files — the stored pointer
+
+The linkage lives on the **object's row in the indexable table**, not in the registry: each indexable row's `sitemap_file_id` points at one registry row. A registry row doesn't store a list of its members — membership is always answered by the reverse lookup, "which rows point at me."
+
+```
+taseo_indexables (4M rows)                taseo_sitemap_files (~4,000 rows)
+┌────────┬─────────┬──────────────────┐   ┌────┬──────────┬───────┬────────────┐
+│ obj_id │ subtype │ sitemap_file_id ─┼─▶ │ id │ subtype  │ chunk │ link_count │
+├────────┼─────────┼──────────────────┤   ├────┼──────────┼───────┼────────────┤
+│ 88123  │ product │ 3               ─┼─▶ │ 3  │ product  │  3    │ 1000       │
+│ 88124  │ product │ 3               ─┼─▶ │    │ → product-sitemap-3.xml       │
+│ 88125  │ product │ 7               ─┼─▶ │ 7  │ product  │  7    │ 412        │
+│ 512    │ page    │ 41              ─┼─▶ │ 41 │ page     │  1    │ 87         │
+└────────┴─────────┴──────────────────┘   └────┴──────────┴───────┴────────────┘
+```
+
+One product through its life:
+
+1. **Created** → its indexable row is inserted with `sitemap_file_id = NULL`. Assignment finds the lowest product chunk with room — say chunk #7 at 412/1000 — and writes `sitemap_file_id = 7` on the product's row, bumps chunk 7's `link_count` to 413, flags it dirty. That column write is the entire "add to sitemap" operation.
+2. **File rebuild** (background sweep) → `SELECT permalink, last_modified FROM taseo_indexables WHERE sitemap_file_id = 7` returns exactly the ≤1000 rows pointing at chunk 7, and `product-sitemap-7.xml` is written from that result. The file is just a rendering of "everyone currently pointing at me."
+3. **Edited** → its chunk is flagged dirty; the next sweep re-renders that one file with the fresh `<lastmod>`.
+4. **Deleted** → read its `sitemap_file_id` (7), decrement chunk 7 to 412, flag dirty, remove the indexable row. The next sweep re-renders `product-sitemap-7.xml` — now 412 links, because one fewer row points at it. Chunks 1–6 and 8+ are untouched: nothing ever pointed their members anywhere else, so there is nothing to recompute.
+5. **Chunk empties** → when a chunk's `link_count` reaches 0 (no rows point at it anymore), its registry row is deleted, its physical file unlinked, and `/sitemap.xml` stops listing it — the root index is generated from whatever registry rows exist.
+
+The contrast that makes this scale: offset-based generators (the Yoast approach) *compute* membership positionally — "sitemap page 3 = products 2001–3000 via `ORDER BY id LIMIT 1000 OFFSET 2000`" — so deleting product #1500 shifts every later product back one slot and changes the contents of every subsequent page. Here membership is **stored, never computed from position**. Deleting a product doesn't move anyone; it just leaves its old chunk one link lighter.
+
 ## Assignment algorithm
 
 Runs as part of `IndexableSync` (from the meta tags design), triggered whenever an object's `is_indexable` flag changes — **only for rows where `object_type` is `post` or `term`**. `system_page` rows (home/search/404/archive templates from the meta tags module) never participate, regardless of their `is_indexable` value; they exist solely to hold title/description templates for those special pages, not to represent sitemap-eligible content (see assumption 5).
