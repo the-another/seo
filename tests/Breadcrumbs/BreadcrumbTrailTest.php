@@ -100,6 +100,35 @@ class BreadcrumbTrailTest extends TestCase {
 		$this->assertSame( 'Vintage Watch', $trail[4]['title'] );
 	}
 
+	public function test_term_lineage_breaks_circular_parent_chain(): void {
+		$this->mock_singular_post( 40001, 'product', 'Corrupted Data Product' );
+		Functions\when( 'get_ancestors' )->justReturn( array() );
+		Functions\when( 'get_post_type_archive_link' )->justReturn( false );
+
+		// Circular taxonomy data: term 9's parent is term 10, and term 10's parent is term 9.
+		$term_nine            = Mockery::mock( 'WP_Term' );
+		$term_nine->term_id   = 9;
+		$term_nine->name      = 'Cyclic Nine';
+		$term_nine->parent    = 10;
+		$term_ten             = Mockery::mock( 'WP_Term' );
+		$term_ten->term_id    = 10;
+		$term_ten->name       = 'Cyclic Ten';
+		$term_ten->parent     = 9;
+
+		Functions\when( 'get_the_terms' )->justReturn( array( $term_ten ) );
+		Functions\when( 'get_term' )->alias( fn( $term_id ) => 9 === $term_id ? $term_nine : $term_ten );
+		Functions\when( 'get_term_link' )->alias( fn( $t ) => "https://example.com/term-{$t->term_id}/" );
+
+		$trail = $this->trail->build();
+
+		// Home, the two cyclic terms (each visited once), and the current product — bounded, not infinite.
+		$this->assertCount( 4, $trail );
+		$this->assertSame( 'Home', $trail[0]['title'] );
+		$this->assertSame( 'Cyclic Nine', $trail[1]['title'] );
+		$this->assertSame( 'Cyclic Ten', $trail[2]['title'] );
+		$this->assertSame( 'Corrupted Data Product', $trail[3]['title'] );
+	}
+
 	public function test_breadcrumb_title_override_replaces_current_title(): void {
 		$this->mock_singular_post( 88123, 'page', 'A Very Long Original Product Title' );
 		Functions\when( 'get_ancestors' )->justReturn( array() );

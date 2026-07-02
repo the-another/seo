@@ -114,8 +114,16 @@ class BreadcrumbTrail {
 
 		// Walk up via parent pointers.
 		$cursor = $term;
+		$seen   = array();
 
 		while ( $cursor ) {
+			if ( isset( $seen[ $cursor->term_id ] ) ) {
+				// Circular parent chain in corrupted taxonomy data — stop instead of looping forever.
+				break;
+			}
+
+			$seen[ $cursor->term_id ] = true;
+
 			$link = get_term_link( $cursor );
 
 			if ( ! is_wp_error( $link ) ) {

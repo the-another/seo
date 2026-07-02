@@ -6,7 +6,6 @@
  * @since 1.0.0
  */
 
-// phpcs:ignoreFile -- Global template tag function is intentionally in this file.
 namespace TheAnother\Plugin\SEO\Breadcrumbs;
 
 use TheAnother\Plugin\SEO\Container;
@@ -40,7 +39,7 @@ class BreadcrumbRenderer {
 	 * @param HookManager $hook_manager Hook manager.
 	 * @return void
 	 */
-	public function init( HookManager $hook_manager ): void {
+	public function init( HookManager $hook_manager ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- init(HookManager) is the uniform registration signature; this class registers via add_shortcode() instead.
 		add_shortcode( 'taseo_breadcrumbs', array( $this, 'render' ) );
 	}
 
@@ -85,7 +84,7 @@ if ( ! function_exists( 'taseo_breadcrumbs' ) ) {
 	 *
 	 * @return void
 	 */
-	function taseo_breadcrumbs(): void {
+	function taseo_breadcrumbs(): void { // phpcs:ignore Universal.Files.SeparateFunctionsFromOO.Mixed -- global template tag function is intentionally colocated with the class it renders.
 		echo Container::get_instance()->get( 'breadcrumb_renderer' )->render(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- render() escapes internally.
 	}
 }
