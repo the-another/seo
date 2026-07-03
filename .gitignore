@@ -3,6 +3,7 @@ node_modules/
 dist/
 .phpunit.cache/
 .superpowers/
+.claude/
 build/
 test-results/
 playwright-report/

@@ -4,6 +4,7 @@
 /.idea/
 /.vscode/
 /.superpowers/
+/.claude/
 .DS_Store
 
 # Development dependencies and caches
