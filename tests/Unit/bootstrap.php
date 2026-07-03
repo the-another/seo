@@ -7,8 +7,8 @@
 
 declare(strict_types=1);
 
-require_once dirname( __DIR__ ) . '/vendor/autoload.php';
-require_once dirname( __DIR__ ) . '/vendor/brain/monkey/inc/patchwork-loader.php';
+require_once dirname( __DIR__, 2 ) . '/vendor/autoload.php';
+require_once dirname( __DIR__, 2 ) . '/vendor/brain/monkey/inc/patchwork-loader.php';
 
 if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', '/tmp/wordpress/' );

@@ -31,7 +31,7 @@
   },
   "autoload-dev": {
     "psr-4": {
-      "TheAnother\\Plugin\\SEO\\Tests\\": "tests/"
+      "TheAnother\\Plugin\\SEO\\Tests\\": "tests/Unit/"
     }
   },
   "config": {
