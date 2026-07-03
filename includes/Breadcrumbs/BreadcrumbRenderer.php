@@ -12,6 +12,10 @@ use TheAnother\Plugin\SEO\Container;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+
 /**
  * Class BreadcrumbRenderer
  *

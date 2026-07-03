@@ -8,7 +8,7 @@ Stable tag: 0.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Performance-first SEO for WordPress at catalog scale: templated titles and meta, Open Graph and Twitter Cards, Schema.org JSON-LD, breadcrumbs, and sitemaps.
+Performance-first SEO for WordPress at catalog scale: templated titles/meta, Open Graph, Twitter Cards, Schema.org JSON-LD, breadcrumbs, sitemaps.
 
 == Description ==
 
