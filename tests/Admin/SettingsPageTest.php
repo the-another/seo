@@ -12,6 +12,9 @@ use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 
 #[CoversClass( SettingsPage::class )]
 class SettingsPageTest extends TestCase {
@@ -19,6 +22,9 @@ class SettingsPageTest extends TestCase {
 
 	private $settings;
 	private $backfill;
+	private $sitemap_files;
+	private $sitemap_writer;
+	private $sitemap_sweeper;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -33,7 +39,17 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'esc_url_raw' )->returnArg();
 		Functions\when( 'absint' )->alias( fn( $v ) => abs( (int) $v ) );
 
-		$this->page = new SettingsPage( $this->settings, $this->backfill );
+		$this->sitemap_files   = Mockery::mock( SitemapFileRepository::class );
+		$this->sitemap_writer  = Mockery::mock( SitemapFileWriter::class );
+		$this->sitemap_sweeper = Mockery::mock( SitemapSweeper::class );
+
+		$this->page = new SettingsPage(
+			$this->settings,
+			$this->backfill,
+			$this->sitemap_files,
+			$this->sitemap_writer,
+			$this->sitemap_sweeper
+		);
 	}
 
 	protected function tearDown(): void {
@@ -230,5 +246,71 @@ class SettingsPageTest extends TestCase {
 		}
 
 		$this->assertSame( 'Yoast SEO', $this->page->detect_conflicting_plugin() );
+	}
+
+	public function test_sanitize_settings_clamps_sitemap_max_links(): void {
+		$this->assertSame( 1000, $this->page->sanitize_settings( array( 'sitemap_max_links' => '5000' ) )['sitemap_max_links'] );
+		$this->assertSame( 1, $this->page->sanitize_settings( array( 'sitemap_max_links' => '0' ) )['sitemap_max_links'] );
+		$this->assertSame( 500, $this->page->sanitize_settings( array( 'sitemap_max_links' => '500' ) )['sitemap_max_links'] );
+	}
+
+	public function test_sanitize_settings_sitemap_tab_forces_unchecked_toggle_off(): void {
+		$clean = $this->page->sanitize_settings( array( 'sitemap_max_links' => '1000' ), 'sitemap' );
+
+		$this->assertArrayHasKey( 'sitemap_enabled', $clean );
+		$this->assertFalse( $clean['sitemap_enabled'] );
+	}
+
+	public function test_handle_sitemap_regenerate_dispatches_full_regeneration(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'wp_safe_redirect' )->once();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&tab=sitemap' );
+
+		$this->sitemap_sweeper->shouldReceive( 'dispatch_full_regeneration' )->once();
+
+		$this->page->handle_sitemap_regenerate( false );
+
+		unset( $_POST['taseo_settings_nonce'] );
+	}
+
+	public function test_handle_sitemap_regenerate_bails_without_capability(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->andReturn( false );
+		Functions\when( 'wp_unslash' )->returnArg();
+
+		$this->sitemap_sweeper->shouldNotReceive( 'dispatch_full_regeneration' );
+
+		$this->page->handle_sitemap_regenerate( false );
+
+		unset( $_POST['taseo_settings_nonce'] );
+	}
+
+	public function test_sitemap_storage_notice_prints_when_uploads_unwritable(): void {
+		Functions\when( 'esc_html__' )->returnArg();
+
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->sitemap_writer->shouldReceive( 'is_writable' )->andReturn( false );
+
+		ob_start();
+		$this->page->maybe_print_sitemap_storage_notice();
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( 'notice-error', $output );
+	}
+
+	public function test_sitemap_storage_notice_silent_when_writable(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->sitemap_writer->shouldReceive( 'is_writable' )->andReturn( true );
+
+		ob_start();
+		$this->page->maybe_print_sitemap_storage_notice();
+
+		$this->assertSame( '', ob_get_clean() );
 	}
 }

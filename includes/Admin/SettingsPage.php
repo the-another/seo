@@ -11,13 +11,16 @@ namespace TheAnother\Plugin\SEO\Admin;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 
 /**
  * Class SettingsPage
  *
  * Tabbed options screen. Tabs: General, Post Types & Taxonomies, Titles &
- * Templates, Social Networks, Schema & Breadcrumbs. General carries the
- * backfill progress indicator and the Rescan everything action.
+ * Templates, Social Networks, Schema & Breadcrumbs, Sitemap. General carries
+ * the backfill progress indicator and the Rescan everything action.
  */
 class SettingsPage {
 
@@ -39,17 +42,24 @@ class SettingsPage {
 		'templates' => 'Titles & Templates',
 		'social'    => 'Social Networks',
 		'schema'    => 'Schema & Breadcrumbs',
+		'sitemap'   => 'Sitemap',
 	);
 
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings          $settings Settings.
-	 * @param IndexableBackfill $backfill Backfill.
+	 * @param Settings              $settings        Settings.
+	 * @param IndexableBackfill     $backfill        Backfill.
+	 * @param SitemapFileRepository $sitemap_files   Sitemap registry (status panel).
+	 * @param SitemapFileWriter     $sitemap_writer  Sitemap writer (writability probe).
+	 * @param SitemapSweeper        $sitemap_sweeper Sitemap sweeper (regenerate action).
 	 */
 	public function __construct(
 		private readonly Settings $settings,
-		private readonly IndexableBackfill $backfill
+		private readonly IndexableBackfill $backfill,
+		private readonly SitemapFileRepository $sitemap_files,
+		private readonly SitemapFileWriter $sitemap_writer,
+		private readonly SitemapSweeper $sitemap_sweeper
 	) {
 	}
 
@@ -61,9 +71,13 @@ class SettingsPage {
 	 */
 	public function init( HookManager $hook_manager ): void {
 		$hook_manager->register_action( 'admin_menu', array( $this, 'register_menu' ) );
-		$hook_manager->register_action( 'admin_post_taseo_save_settings', array( $this, 'handle_save' ) );
-		$hook_manager->register_action( 'admin_post_taseo_rescan', array( $this, 'handle_rescan' ) );
+		// 0 accepted args: WP passes a legacy '' to 1-arg callbacks on no-arg
+		// hooks, which would falsify the handlers' $do_exit default.
+		$hook_manager->register_action( 'admin_post_taseo_save_settings', array( $this, 'handle_save' ), 10, 0 );
+		$hook_manager->register_action( 'admin_post_taseo_rescan', array( $this, 'handle_rescan' ), 10, 0 );
+		$hook_manager->register_action( 'admin_post_taseo_sitemap_regenerate', array( $this, 'handle_sitemap_regenerate' ), 10, 0 );
 		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_conflict_notice' ) );
+		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_sitemap_storage_notice' ) );
 	}
 
 	/**
@@ -158,6 +172,7 @@ class SettingsPage {
 			'templates' => $this->render_templates_tab(),
 			'social'    => $this->render_social_tab(),
 			'schema'    => $this->render_schema_tab(),
+			'sitemap'   => $this->render_sitemap_tab(),
 			default     => $this->render_general_tab(),
 		};
 
@@ -402,6 +417,62 @@ class SettingsPage {
 	}
 
 	/**
+	 * Sitemap tab: toggle, chunk size, operational status, regenerate.
+	 *
+	 * @return void
+	 */
+	private function render_sitemap_tab(): void {
+		$status = $this->sitemap_files->get_status_summary();
+
+		echo '<table class="form-table">';
+		printf(
+			'<tr><th scope="row">%s</th><td><label><input type="checkbox" name="taseo_settings[sitemap_enabled]" value="1" %s /> %s</label></td></tr>',
+			esc_html__( 'XML sitemap', 'the-another-seo' ),
+			checked( $this->settings->is_sitemap_enabled(), true, false ),
+			esc_html__( 'Generate XML sitemap files and announce them in robots.txt', 'the-another-seo' )
+		);
+		printf(
+			'<tr><th scope="row"><label for="taseo-sitemap-max-links">%s</label></th><td><input type="number" id="taseo-sitemap-max-links" name="taseo_settings[sitemap_max_links]" value="%d" min="1" max="1000" class="small-text" /> %s</td></tr>',
+			esc_html__( 'Links per file', 'the-another-seo' ),
+			(int) $this->settings->get_sitemap_max_links(),
+			esc_html__( '(1–1000; applies to newly created files)', 'the-another-seo' )
+		);
+		echo '</table>';
+
+		echo '<h2>' . esc_html__( 'Status', 'the-another-seo' ) . '</h2>';
+
+		echo '<table class="widefat striped" style="max-width: 480px;"><thead><tr><th>'
+			. esc_html__( 'Content type', 'the-another-seo' ) . '</th><th>'
+			. esc_html__( 'Files', 'the-another-seo' ) . '</th><th>'
+			. esc_html__( 'Links', 'the-another-seo' ) . '</th></tr></thead><tbody>';
+
+		foreach ( $status['subtypes'] as $subtype => $counts ) {
+			printf(
+				'<tr><td>%s</td><td>%d</td><td>%d</td></tr>',
+				esc_html( (string) $subtype ),
+				(int) $counts['chunks'],
+				(int) $counts['links']
+			);
+		}
+
+		echo '</tbody></table>';
+
+		printf(
+			'<p>%s <strong>%d</strong> — %s %s</p>',
+			esc_html__( 'Files awaiting regeneration:', 'the-another-seo' ),
+			(int) $status['dirty'],
+			esc_html__( 'last file written:', 'the-another-seo' ),
+			esc_html( $status['last_generated'] ?? __( 'never', 'the-another-seo' ) )
+		);
+
+		printf(
+			'<p><a href="%s" class="button">%s</a></p>',
+			esc_url( wp_nonce_url( admin_url( 'admin-post.php?action=taseo_sitemap_regenerate' ), 'taseo_save_settings', 'taseo_settings_nonce' ) ),
+			esc_html__( 'Regenerate all sitemap files now', 'the-another-seo' )
+		);
+	}
+
+	/**
 	 * Admin_post save handler.
 	 *
 	 * @param bool $do_exit Exit after redirect (false in tests).
@@ -444,6 +515,44 @@ class SettingsPage {
 		if ( $do_exit ) {
 			exit;
 		}
+	}
+
+	/**
+	 * Admin_post regenerate handler: mark everything dirty, drain via AS.
+	 *
+	 * @param bool $do_exit Exit after redirect (false in tests).
+	 * @return void
+	 */
+	public function handle_sitemap_regenerate( bool $do_exit = true ): void {
+		if ( ! $this->verify_request() ) {
+			return;
+		}
+
+		$this->sitemap_sweeper->dispatch_full_regeneration();
+
+		// phpcs:ignore WordPressVIPMinimum.Security.ExitAfterRedirect.NoExit -- conditional exit based on testability flag.
+		wp_safe_redirect( admin_url( 'options-general.php?page=taseo&tab=sitemap' ) );
+
+		if ( $do_exit ) {
+			exit;
+		}
+	}
+
+	/**
+	 * Surface the uploads-not-writable environment problem (spec: sitemap
+	 * generation is disabled with a clear admin notice, never a silent fail).
+	 *
+	 * @return void
+	 */
+	public function maybe_print_sitemap_storage_notice(): void {
+		if ( ! $this->settings->is_sitemap_enabled() || $this->sitemap_writer->is_writable() ) {
+			return;
+		}
+
+		printf(
+			'<div class="notice notice-error"><p>%s</p></div>',
+			esc_html__( 'The Another SEO: the uploads directory is not writable, so XML sitemap files cannot be generated. Fix the uploads directory permissions to resume sitemap generation.', 'the-another-seo' )
+		);
 	}
 
 	/**
@@ -552,6 +661,18 @@ class SettingsPage {
 		if ( 'types' === $tab ) {
 			$clean['enabled_post_types'] = $clean['enabled_post_types'] ?? array();
 			$clean['enabled_taxonomies'] = $clean['enabled_taxonomies'] ?? array();
+		}
+
+		if ( isset( $raw['sitemap_max_links'] ) ) {
+			$clean['sitemap_max_links'] = max( 1, min( 1000, absint( $raw['sitemap_max_links'] ) ) );
+		}
+
+		if ( array_key_exists( 'sitemap_enabled', $raw ) ) {
+			$clean['sitemap_enabled'] = ! empty( $raw['sitemap_enabled'] );
+		}
+
+		if ( 'sitemap' === $tab ) {
+			$clean['sitemap_enabled'] = ! empty( $raw['sitemap_enabled'] );
 		}
 
 		return $clean;
