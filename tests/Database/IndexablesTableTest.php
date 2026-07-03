@@ -59,6 +59,7 @@ class IndexablesTableTest extends TestCase {
 			'breadcrumb_title',
 			'schema_disabled',
 			'is_indexable',
+			'sitemap_file_id',
 			'last_modified',
 			'created_at',
 			'updated_at',
@@ -68,6 +69,7 @@ class IndexablesTableTest extends TestCase {
 
 		$this->assertStringContainsString( 'UNIQUE KEY object_lookup (object_type, object_subtype, object_id)', $schema );
 		$this->assertStringContainsString( 'KEY object_lookup_by_id (object_type, object_id)', $schema );
+		$this->assertStringContainsString( 'KEY sitemap_file_id (sitemap_file_id)', $schema );
 	}
 
 	public function test_maybe_upgrade_runs_create_when_version_outdated(): void {
@@ -86,5 +88,15 @@ class IndexablesTableTest extends TestCase {
 		Functions\expect( 'dbDelta' )->never();
 
 		IndexablesTable::maybe_upgrade();
+	}
+
+	public function test_db_version_bumped_for_sitemap_column(): void {
+		$this->assertSame( '1.1.0', IndexablesTable::DB_VERSION );
+	}
+
+	public function test_get_installed_version_defaults_to_zero(): void {
+		Functions\expect( 'get_option' )->once()->with( 'taseo_db_version', '0' )->andReturn( '0' );
+
+		$this->assertSame( '0', IndexablesTable::get_installed_version() );
 	}
 }

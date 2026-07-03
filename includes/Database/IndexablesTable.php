@@ -21,7 +21,7 @@ class IndexablesTable {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '1.0.0';
+	public const DB_VERSION = '1.1.0';
 
 	/**
 	 * Version option name.
@@ -73,13 +73,15 @@ class IndexablesTable {
 			breadcrumb_title TEXT NULL,
 			schema_disabled TINYINT(1) NOT NULL DEFAULT 0,
 			is_indexable TINYINT(1) NOT NULL DEFAULT 1,
+			sitemap_file_id BIGINT UNSIGNED NULL,
 			last_modified DATETIME NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
 			UNIQUE KEY object_lookup (object_type, object_subtype, object_id),
 			KEY object_lookup_by_id (object_type, object_id),
-			KEY is_indexable (is_indexable)
+			KEY is_indexable (is_indexable),
+			KEY sitemap_file_id (sitemap_file_id)
 		) {$charset_collate};";
 	}
 
@@ -105,5 +107,14 @@ class IndexablesTable {
 		if ( version_compare( get_option( self::DB_VERSION_OPTION, '0' ), self::DB_VERSION, '<' ) ) {
 			self::create_table();
 		}
+	}
+
+	/**
+	 * Version currently recorded in the database, '0' when never installed.
+	 *
+	 * @return string Installed schema version.
+	 */
+	public static function get_installed_version(): string {
+		return (string) get_option( self::DB_VERSION_OPTION, '0' );
 	}
 }
