@@ -106,4 +106,27 @@ class SettingsTest extends TestCase {
 
 		( new Settings() )->update( array( 'twitter_enabled' => false ) );
 	}
+
+	public function test_sitemap_enabled_defaults_on(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertTrue( ( new Settings() )->is_sitemap_enabled() );
+	}
+
+	public function test_sitemap_max_links_defaults_to_protocol_cap(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 1000, ( new Settings() )->get_sitemap_max_links() );
+	}
+
+	public function test_sitemap_max_links_is_clamped_to_1_1000(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_max_links' => 5000 ) );
+		$this->assertSame( 1000, ( new Settings() )->get_sitemap_max_links() );
+
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_max_links' => 0 ) );
+		$this->assertSame( 1, ( new Settings() )->get_sitemap_max_links() );
+
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_max_links' => 500 ) );
+		$this->assertSame( 500, ( new Settings() )->get_sitemap_max_links() );
+	}
 }

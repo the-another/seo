@@ -273,4 +273,27 @@ class Settings {
 	public function breadcrumb_include_taxonomy_ancestors(): bool {
 		return (bool) $this->get( 'breadcrumb_include_taxonomy_ancestors', true );
 	}
+
+	/**
+	 * Whether the XML sitemap feature is enabled.
+	 *
+	 * @return bool Enabled.
+	 */
+	public function is_sitemap_enabled(): bool {
+		return (bool) $this->get( 'sitemap_enabled', true );
+	}
+
+	/**
+	 * Links per sitemap chunk file.
+	 *
+	 * 1000 is both the default and the hard ceiling (sitemaps.org allows
+	 * 50k, but 1000 is this plugin's performance envelope per spec).
+	 *
+	 * @return int Cap, clamped to 1–1000.
+	 */
+	public function get_sitemap_max_links(): int {
+		$stored = (int) $this->get( 'sitemap_max_links', 1000 );
+
+		return max( 1, min( 1000, $stored ) );
+	}
 }
