@@ -94,4 +94,42 @@ class PluginTest extends TestCase {
 		$this->assertContains( 'robots_txt', $names );
 		$this->assertContains( 'mod_rewrite_rules', $names );
 	}
+
+	public function test_start_flags_backfill_and_flush_when_upgrading_from_pre_sitemap_schema(): void {
+		Functions\when( 'get_option' )->alias(
+			fn( string $option, $fallback = false ) => 'taseo_db_version' === $option ? '1.0.0' : $fallback
+		);
+
+		$flagged = array();
+		Functions\when( 'update_option' )->alias(
+			function ( string $option, $value = null ) use ( &$flagged ): bool {
+				$flagged[] = $option;
+				return true;
+			}
+		);
+
+		Plugin::get_instance()->start();
+
+		$this->assertContains( 'taseo_needs_backfill', $flagged );
+		$this->assertContains( 'taseo_needs_rewrite_flush', $flagged );
+	}
+
+	public function test_start_does_not_flag_upgrade_backfill_on_fresh_install(): void {
+		Functions\when( 'get_option' )->alias(
+			fn( string $option, $fallback = false ) => 'taseo_db_version' === $option ? '0' : $fallback
+		);
+
+		$flagged = array();
+		Functions\when( 'update_option' )->alias(
+			function ( string $option, $value = null ) use ( &$flagged ): bool {
+				$flagged[] = $option;
+				return true;
+			}
+		);
+
+		Plugin::get_instance()->start();
+
+		$this->assertNotContains( 'taseo_needs_backfill', $flagged );
+		$this->assertNotContains( 'taseo_needs_rewrite_flush', $flagged );
+	}
 }

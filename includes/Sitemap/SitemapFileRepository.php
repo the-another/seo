@@ -163,14 +163,30 @@ class SitemapFileRepository {
 	/**
 	 * Delete a registry row (the physical file is the writer's problem).
 	 *
+	 * Conditioned on link_count = 0: a concurrent assign() can reclaim this
+	 * chunk (bump it back to 1 link) between the caller's zero-link read and
+	 * this delete. Without the guard we would delete a row a live object now
+	 * points at, orphaning it from the sitemap forever. With the guard, that
+	 * race just makes the delete affect zero rows — the claimer's chunk
+	 * survives, and the caller is expected to treat a false return as "leave
+	 * it alone", not as an error.
+	 *
 	 * @param int $chunk_id Chunk row ID.
-	 * @return void
+	 * @return bool True when the row was deleted, false when a concurrent
+	 *              claim reclaimed the chunk first.
 	 */
-	public function delete_chunk( int $chunk_id ): void {
+	public function delete_chunk( int $chunk_id ): bool {
 		global $wpdb;
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-		$wpdb->delete( SitemapFilesTable::get_table_name(), array( 'id' => $chunk_id ) );
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$affected = $wpdb->query(
+			$wpdb->prepare( "DELETE FROM {$table} WHERE id = %d AND link_count = 0", $chunk_id )
+		);
+		// phpcs:enable
+
+		return (int) $affected > 0;
 	}
 
 	/**

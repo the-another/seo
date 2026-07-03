@@ -180,8 +180,22 @@ class SitemapAssignmentTest extends TestCase {
 		$this->wpdb->shouldReceive( 'update' )->once();
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
 		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
-		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 );
+		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( true );
 		$this->writer->shouldReceive( 'delete_file' )->once()->with( $chunk );
+
+		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
+	}
+
+	public function test_reclaimed_chunk_is_not_deleted_or_unlinked(): void {
+		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '0', 'sitemap_file_id' => '7' ) );
+
+		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '7' );
+
+		$this->wpdb->shouldReceive( 'update' )->once();
+		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
+		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
+		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( false );
+		$this->writer->shouldNotReceive( 'delete_file' );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
 	}

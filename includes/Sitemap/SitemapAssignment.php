@@ -186,9 +186,14 @@ class SitemapAssignment {
 			return;
 		}
 
-		// Deletion is a cheap unlink — no need to wait for the sweep.
-		$this->files->delete_chunk( $chunk_id );
-		$this->writer->delete_file( $chunk );
+		// Deletion is a cheap unlink — no need to wait for the sweep. The row
+		// delete is conditioned on link_count = 0, so a concurrent assign()
+		// that reclaimed this chunk between our zero-link read and now makes
+		// delete_chunk() return false; skip the unlink so a live chunk's file
+		// is never removed out from under it.
+		if ( $this->files->delete_chunk( $chunk_id ) ) {
+			$this->writer->delete_file( $chunk );
+		}
 	}
 
 	/**

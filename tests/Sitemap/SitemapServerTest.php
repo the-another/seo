@@ -49,9 +49,10 @@ class SitemapServerTest extends TestCase {
 
 		$this->files->shouldReceive( 'get_all_chunks' )->once()->andReturn(
 			array(
-				array( 'object_subtype' => 'page', 'chunk_number' => '1', 'link_count' => '87', 'last_modified' => null ),
-				array( 'object_subtype' => 'product', 'chunk_number' => '1', 'link_count' => '1000', 'last_modified' => '2026-07-02 10:00:00' ),
-				array( 'object_subtype' => 'product', 'chunk_number' => '2', 'link_count' => '0', 'last_modified' => null ),
+				array( 'object_subtype' => 'page', 'chunk_number' => '1', 'link_count' => '87', 'last_modified' => null, 'generated_at' => '2026-07-03 09:00:00' ),
+				array( 'object_subtype' => 'product', 'chunk_number' => '1', 'link_count' => '1000', 'last_modified' => '2026-07-02 10:00:00', 'generated_at' => '2026-07-03 09:00:00' ),
+				array( 'object_subtype' => 'product', 'chunk_number' => '2', 'link_count' => '0', 'last_modified' => null, 'generated_at' => null ),
+				array( 'object_subtype' => 'product', 'chunk_number' => '3', 'link_count' => '500', 'last_modified' => null, 'generated_at' => null ),
 			)
 		);
 
@@ -61,8 +62,9 @@ class SitemapServerTest extends TestCase {
 		$this->assertStringContainsString( '<loc>https://example.com/page-sitemap-1.xml</loc>', $xml );
 		$this->assertStringContainsString( '<loc>https://example.com/product-sitemap-1.xml</loc>', $xml );
 		$this->assertStringContainsString( '<lastmod>2026-07-02T10:00:00+00:00</lastmod>', $xml );
-		// Empty chunks and uploads URLs never appear.
+		// Empty chunks, unwritten chunks (no generated_at yet), and uploads URLs never appear.
 		$this->assertStringNotContainsString( 'product-sitemap-2.xml', $xml );
+		$this->assertStringNotContainsString( 'product-sitemap-3.xml', $xml );
 		$this->assertStringNotContainsString( 'wp-content/uploads', $xml );
 	}
 
@@ -89,13 +91,13 @@ class SitemapServerTest extends TestCase {
 		$this->server->maybe_serve( false );
 	}
 
-	public function test_maybe_serve_ignores_requests_when_disabled(): void {
+	public function test_maybe_serve_404s_when_disabled(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
 
 		Functions\when( 'get_query_var' )->alias(
 			fn( string $var ): string => 'taseo_sitemap' === $var ? 'index' : ''
 		);
-		Functions\expect( 'status_header' )->never();
+		Functions\expect( 'status_header' )->once()->with( 404 );
 
 		$this->server->maybe_serve( false );
 	}
@@ -155,13 +157,16 @@ class SitemapServerTest extends TestCase {
 	}
 
 	public function test_register_rewrites_adds_both_rules_at_top(): void {
+		$this->assertSame( '^sitemap\.xml$', SitemapServer::PATTERN_INDEX );
+		$this->assertSame( '^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$', SitemapServer::PATTERN_CHUNK );
+
 		Functions\expect( 'add_rewrite_rule' )
 			->once()
-			->with( '^sitemap\.xml$', 'index.php?taseo_sitemap=index', 'top' );
+			->with( SitemapServer::PATTERN_INDEX, 'index.php?taseo_sitemap=index', 'top' );
 		Functions\expect( 'add_rewrite_rule' )
 			->once()
 			->with(
-				'^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$',
+				SitemapServer::PATTERN_CHUNK,
 				'index.php?taseo_sitemap=chunk&taseo_sitemap_subtype=$matches[1]&taseo_sitemap_chunk=$matches[2]',
 				'top'
 			);
@@ -212,5 +217,17 @@ class SitemapServerTest extends TestCase {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
 
 		$this->assertSame( "# WP rules\n", $this->server->prepend_apache_static_rules( "# WP rules\n" ) );
+	}
+
+	public function test_core_sitemaps_disabled_while_feature_enabled(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		$this->assertFalse( $this->server->filter_core_sitemaps( true ) );
+	}
+
+	public function test_core_sitemaps_restored_when_feature_disabled(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
+
+		$this->assertTrue( $this->server->filter_core_sitemaps( true ) );
 	}
 }

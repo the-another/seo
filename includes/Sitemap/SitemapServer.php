@@ -42,6 +42,20 @@ class SitemapServer {
 	public const QUERY_VAR = 'taseo_sitemap';
 
 	/**
+	 * Rewrite pattern for the root index.
+	 *
+	 * @var string
+	 */
+	public const PATTERN_INDEX = '^sitemap\.xml$';
+
+	/**
+	 * Rewrite pattern for root-level chunk URLs.
+	 *
+	 * @var string
+	 */
+	public const PATTERN_CHUNK = '^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$';
+
+	/**
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
@@ -71,6 +85,7 @@ class SitemapServer {
 		$hook_manager->register_action( 'template_redirect', array( $this, 'maybe_serve' ), 0, 0 );
 		$hook_manager->register_filter( 'robots_txt', array( $this, 'append_sitemap_line' ), 10, 2 );
 		$hook_manager->register_filter( 'mod_rewrite_rules', array( $this, 'prepend_apache_static_rules' ) );
+		$hook_manager->register_filter( 'wp_sitemaps_enabled', array( $this, 'filter_core_sitemaps' ) );
 	}
 
 	/**
@@ -79,9 +94,9 @@ class SitemapServer {
 	 * @return void
 	 */
 	public function register_rewrites(): void {
-		add_rewrite_rule( '^sitemap\.xml$', 'index.php?' . self::QUERY_VAR . '=index', 'top' );
+		add_rewrite_rule( self::PATTERN_INDEX, 'index.php?' . self::QUERY_VAR . '=index', 'top' );
 		add_rewrite_rule(
-			'^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$',
+			self::PATTERN_CHUNK,
 			'index.php?' . self::QUERY_VAR . '=chunk&taseo_sitemap_subtype=$matches[1]&taseo_sitemap_chunk=$matches[2]',
 			'top'
 		);
@@ -110,7 +125,18 @@ class SitemapServer {
 	public function maybe_serve( bool $do_exit = true ): void {
 		$kind = (string) get_query_var( self::QUERY_VAR );
 
-		if ( '' === $kind || ! $this->settings->is_sitemap_enabled() ) {
+		if ( '' === $kind ) {
+			return;
+		}
+
+		if ( ! $this->settings->is_sitemap_enabled() ) {
+			// The rewrite still matched, so WP would otherwise fall through
+			// to its normal template (e.g. the homepage) with a 200 — wrong
+			// for a URL crawlers expect to be a sitemap. Report 404 and let
+			// WP continue rendering whatever template it resolves to; only
+			// the status code matters here.
+			status_header( 404 );
+
 			return;
 		}
 
@@ -142,7 +168,10 @@ class SitemapServer {
 		$xml .= '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
 		foreach ( $this->files->get_all_chunks() as $chunk ) {
-			if ( (int) $chunk['link_count'] < 1 ) {
+			if ( (int) $chunk['link_count'] < 1 || empty( $chunk['generated_at'] ) ) {
+				// A chunk can be claimed (link_count > 0) before the sweep has
+				// ever written its file — listing it here would 404 during
+				// the initial backfill window.
 				continue;
 			}
 
@@ -190,6 +219,18 @@ class SitemapServer {
 
 		// Never generated here — only reads what the sweep already built.
 		readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile, WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown -- streaming a plugin-generated local static file is the designed fallback path.
+	}
+
+	/**
+	 * Disable core's /wp-sitemap.xml while this module serves its own tree —
+	 * two competing sitemap indexes confuse crawlers. Core's stays available
+	 * when the feature is toggled off.
+	 *
+	 * @param bool $enabled Core default.
+	 * @return bool Enabled.
+	 */
+	public function filter_core_sitemaps( $enabled ) {
+		return $this->settings->is_sitemap_enabled() ? false : (bool) $enabled;
 	}
 
 	/**

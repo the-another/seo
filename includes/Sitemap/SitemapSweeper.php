@@ -86,10 +86,29 @@ class SitemapSweeper {
 	/**
 	 * Keep the recurring sweep scheduled.
 	 *
+	 * Runs on every 'init', which includes every frontend page view —
+	 * as_has_scheduled_action() is a real SQL query, so the bulk of traffic
+	 * must never reach it. Re-arming (or tearing down) from an admin or cron
+	 * request is sufficient; frontend requests pay nothing.
+	 *
 	 * @return void
 	 */
 	public function ensure_recurring(): void {
-		if ( ! function_exists( 'as_schedule_recurring_action' ) || ! $this->settings->is_sitemap_enabled() ) {
+		if ( ! is_admin() && ! wp_doing_cron() ) {
+			return;
+		}
+
+		if ( ! function_exists( 'as_schedule_recurring_action' ) ) {
+			return;
+		}
+
+		if ( ! $this->settings->is_sitemap_enabled() ) {
+			// The feature was toggled off: stop the recurring action instead
+			// of merely skipping re-arming, or it keeps firing forever.
+			if ( as_has_scheduled_action( self::HOOK, null, self::GROUP ) ) {
+				as_unschedule_all_actions( self::HOOK, array(), self::GROUP );
+			}
+
 			return;
 		}
 

@@ -243,9 +243,12 @@ class Plugin {
 	}
 
 	/**
-	 * Re-dispatch a full backfill when upgrading an existing install to the
-	 * sitemap schema: pre-upgrade rows have no chunk assignment, and only a
-	 * resync (which re-fires taseo_indexable_synced per row) assigns them.
+	 * Re-dispatch a full backfill, and flag a rewrite flush, when upgrading
+	 * an existing install to the sitemap schema: pre-upgrade rows have no
+	 * chunk assignment, and only a resync (which re-fires
+	 * taseo_indexable_synced per row) assigns them. In-place plugin updates
+	 * never re-run Installer::activate(), so the rewrite flush that exposes
+	 * /sitemap.xml must be flagged here too, or upgraders 404 forever.
 	 * Fresh installs report '0' and are handled by Installer::activate().
 	 *
 	 * Must run BEFORE IndexablesTable::maybe_upgrade() stamps the new version.
@@ -257,6 +260,7 @@ class Plugin {
 
 		if ( '0' !== $installed && version_compare( $installed, '1.1.0', '<' ) ) {
 			update_option( Installer::NEEDS_BACKFILL_OPTION, '1' );
+			update_option( Installer::FLUSH_REWRITE_OPTION, '1' );
 		}
 	}
 

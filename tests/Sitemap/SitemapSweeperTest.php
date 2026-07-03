@@ -104,6 +104,7 @@ class SitemapSweeperTest extends TestCase {
 	}
 
 	public function test_ensure_recurring_schedules_exactly_once(): void {
+		Functions\when( 'is_admin' )->justReturn( true );
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
 
 		Functions\expect( 'as_has_scheduled_action' )
@@ -124,6 +125,7 @@ class SitemapSweeperTest extends TestCase {
 	}
 
 	public function test_ensure_recurring_skips_when_already_scheduled(): void {
+		Functions\when( 'is_admin' )->justReturn( true );
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
 
 		Functions\expect( 'as_has_scheduled_action' )->once()->andReturn( true );
@@ -132,12 +134,30 @@ class SitemapSweeperTest extends TestCase {
 		$this->sweeper->ensure_recurring();
 	}
 
-	public function test_ensure_recurring_skips_when_disabled(): void {
+	public function test_ensure_recurring_skips_frontend_requests(): void {
+		Functions\when( 'is_admin' )->justReturn( false );
+		Functions\when( 'wp_doing_cron' )->justReturn( false );
+
+		Functions\expect( 'as_has_scheduled_action' )->never();
+		Functions\expect( 'as_schedule_recurring_action' )->never();
+
+		$this->sweeper->ensure_recurring();
+	}
+
+	public function test_ensure_recurring_unschedules_when_disabled(): void {
+		Functions\when( 'is_admin' )->justReturn( true );
 		// Define the AS function so the function_exists guard passes.
 		Functions\when( 'as_schedule_recurring_action' )->justReturn( null );
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
 
-		Functions\expect( 'as_has_scheduled_action' )->never();
+		Functions\expect( 'as_has_scheduled_action' )
+			->once()
+			->with( SitemapSweeper::HOOK, null, SitemapSweeper::GROUP )
+			->andReturn( true );
+		Functions\expect( 'as_unschedule_all_actions' )
+			->once()
+			->with( SitemapSweeper::HOOK, array(), SitemapSweeper::GROUP );
+		Functions\expect( 'as_schedule_recurring_action' )->never();
 
 		$this->sweeper->ensure_recurring();
 	}

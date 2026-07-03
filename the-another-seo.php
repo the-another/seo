@@ -84,6 +84,25 @@ register_deactivation_hook(
 			as_unschedule_all_actions( Sitemap\SitemapSweeper::HOOK, array(), Sitemap\SitemapSweeper::GROUP );
 		}
 
+		// Order matters: at this point our init-registered rewrite rules and
+		// the mod_rewrite_rules filter (SitemapServer::prepend_apache_static_rules())
+		// are still live on this request, so flushing now would re-bake
+		// everything we're trying to remove. Deregistering our hooks first
+		// stops both from firing again; dropping only our own top rules next
+		// leaves every other plugin's rules/endpoints untouched; only then
+		// does the flush write clean rules and .htaccess.
+		Container::get_instance()->deregister_all_hooks();
+
+		// Drop only this plugin's rules: extra_rules_top survives a
+		// WP_Rewrite::init() reset, and calling init() here would wipe OTHER
+		// plugins' non-top rules/endpoints and persist their absence on flush.
+		if ( isset( $GLOBALS['wp_rewrite'] ) ) {
+			unset(
+				$GLOBALS['wp_rewrite']->extra_rules_top[ Sitemap\SitemapServer::PATTERN_INDEX ],
+				$GLOBALS['wp_rewrite']->extra_rules_top[ Sitemap\SitemapServer::PATTERN_CHUNK ]
+			);
+		}
+
 		flush_rewrite_rules();
 	}
 );

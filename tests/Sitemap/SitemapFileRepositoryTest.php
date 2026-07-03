@@ -150,9 +150,27 @@ class SitemapFileRepositoryTest extends TestCase {
 	}
 
 	public function test_delete_chunk_removes_registry_row(): void {
-		$this->wpdb->shouldReceive( 'delete' )->once()->with( 'wp_taseo_sitemap_files', array( 'id' => 7 ) );
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'DELETE FROM wp_taseo_sitemap_files' )
+						&& str_contains( $sql, 'WHERE id = %d' )
+						&& str_contains( $sql, 'AND link_count = 0' )
+				),
+				7
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 1 );
 
-		$this->files->delete_chunk( 7 );
+		$this->assertTrue( $this->files->delete_chunk( 7 ) );
+	}
+
+	public function test_delete_chunk_loses_race_when_chunk_was_reclaimed(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 0 );
+
+		$this->assertFalse( $this->files->delete_chunk( 7 ) );
 	}
 
 	public function test_mark_dirty_flags_one_chunk(): void {
