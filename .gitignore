@@ -3,3 +3,7 @@ node_modules/
 dist/
 .phpunit.cache/
 .superpowers/
+build/
+test-results/
+playwright-report/
+artifacts/
