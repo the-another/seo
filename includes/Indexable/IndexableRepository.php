@@ -74,6 +74,21 @@ class IndexableRepository {
 		);
 		$wpdb->query( $sql );
 		// phpcs:enable
+
+		/**
+		 * Fires after an indexable row's synced columns are written.
+		 *
+		 * The sitemap module reconciles chunk assignment on this: assign when
+		 * newly indexable, mark the chunk dirty on edits, release the slot
+		 * when the row stops being indexable.
+		 *
+		 * @since 1.0.0
+		 *
+		 * @param string $object_type    'post', 'term', or 'system_page'.
+		 * @param string $object_subtype Post type / taxonomy / system page key.
+		 * @param int    $object_id      Post or term ID; 0 for system pages.
+		 */
+		do_action( 'taseo_indexable_synced', $object_type, $object_subtype, $object_id );
 	}
 
 	/**
@@ -208,6 +223,20 @@ class IndexableRepository {
 	 */
 	public function delete( string $object_type, string $object_subtype, int $object_id ): void {
 		global $wpdb;
+
+		/**
+		 * Fires immediately before an indexable row is deleted.
+		 *
+		 * The sitemap module releases the object's chunk slot on this, while
+		 * the row (and its sitemap_file_id pointer) is still readable.
+		 *
+		 * @since 1.0.0
+		 *
+		 * @param string $object_type    Object type.
+		 * @param string $object_subtype Object subtype.
+		 * @param int    $object_id      Object ID.
+		 */
+		do_action( 'taseo_indexable_deleting', $object_type, $object_subtype, $object_id );
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$wpdb->delete(

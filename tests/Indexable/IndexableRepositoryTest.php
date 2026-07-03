@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TheAnother\Plugin\SEO\Tests\Indexable;
 
 use Brain\Monkey;
+use Brain\Monkey\Actions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -182,6 +183,23 @@ class IndexableRepositoryTest extends TestCase {
 					'object_id'      => 88123,
 				)
 			);
+
+		$this->repository->delete( 'post', 'product', 88123 );
+	}
+
+	public function test_upsert_synced_fields_fires_synced_action(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once();
+
+		Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 88123 );
+
+		$this->repository->upsert_synced_fields( 'post', 'product', 88123, array() );
+	}
+
+	public function test_delete_fires_deleting_action(): void {
+		Actions\expectDone( 'taseo_indexable_deleting' )->once()->with( 'post', 'product', 88123 );
+
+		$this->wpdb->shouldReceive( 'delete' )->once();
 
 		$this->repository->delete( 'post', 'product', 88123 );
 	}
