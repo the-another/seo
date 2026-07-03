@@ -1,14 +1,27 @@
 {
-  "name": "the-another-seo",
-  "version": "0.1.0",
-  "description": "Blocks for The Another SEO.",
-  "license": "GPL-2.0-or-later",
-  "scripts": {
-    "build": "wp-scripts build blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
-    "start": "wp-scripts start blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
-    "lint:js": "wp-scripts lint-js blocks"
-  },
-  "devDependencies": {
-    "@wordpress/scripts": "^30.0.0"
-  }
+	"name": "the-another-seo",
+	"version": "0.1.0",
+	"description": "Performance-first SEO for WordPress at catalog scale.",
+	"author": "The Another",
+	"license": "GPL-2.0-or-later",
+	"homepage": "https://theanother.org/plugin/seo/",
+	"scripts": {
+		"build": "wp-scripts build blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
+		"start": "wp-scripts start blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
+		"lint:js": "wp-scripts lint-js blocks",
+		"plugin-zip": "composer build && npm run build && sh scripts/dist-archive.sh && node scripts/version-zip.js",
+		"plugin-zip:check": "composer build && npm run build && sh scripts/dist-archive.sh && node scripts/version-zip.js --label=test",
+		"version": "node scripts/version-bump.js",
+		"version:patch": "node scripts/version-bump.js patch",
+		"version:minor": "node scripts/version-bump.js minor",
+		"version:major": "node scripts/version-bump.js major",
+		"test:e2e": "npx playwright test --config tests/e2e/functional/playwright.config.ts",
+		"test:e2e:ui": "npx playwright test --config tests/e2e/functional/playwright.config.ts --ui",
+		"check:plugin": "node tests/e2e/check-plugin/run-plugin-check.mjs"
+	},
+	"devDependencies": {
+		"@playwright/test": "^1.59.1",
+		"@wordpress/e2e-test-utils-playwright": "^1.43.0",
+		"@wordpress/scripts": "^30.0.0"
+	}
 }

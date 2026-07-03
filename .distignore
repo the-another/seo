@@ -1,0 +1,45 @@
+# Source control / project metadata
+/.git/
+/.github/
+/.idea/
+/.vscode/
+/.superpowers/
+.DS_Store
+
+# Development dependencies and caches
+/node_modules/
+/.phpunit.cache/
+
+# Tests (tests/Unit PHPUnit + its Dockerfile, tests/e2e suites + their
+# Dockerfile and Playwright config), docs, tooling
+# (readme.txt is the shipped user doc)
+/tests/
+/docs/
+/scripts/
+/Makefile
+/artifacts/
+/test-results/
+/playwright-report/
+
+# Build output (zips must never nest a previous zip). NOTE: /dist/ is NOT
+# ignored — it holds the built block JS the plugin loads at runtime; the
+# plugin-zip pipeline rebuilds it fresh immediately before archiving.
+/build/
+*.zip
+
+# Dev configuration — composer.json ships (family convention), the rest doesn't
+/composer.lock
+/package.json
+/package-lock.json
+/phpunit.xml.dist
+/.phpcs.xml.dist
+/.gitignore
+/.distignore
+
+# Composer's vendor/bin only holds dev binaries
+/vendor/bin/
+
+# NOTE: /vendor/ is intentionally NOT ignored. The release pipeline runs
+# `composer build` (install --no-dev + optimized dump-autoload) immediately
+# before archiving, so the shipped vendor/ holds the autoloader plus the
+# runtime woocommerce/action-scheduler package the main plugin file requires.

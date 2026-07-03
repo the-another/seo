@@ -43,6 +43,10 @@
   "scripts": {
     "phpcs": "phpcs",
     "phpcbf": "phpcbf",
-    "test": "phpunit"
+    "test": "phpunit",
+    "build": [
+      "@composer install -q --no-dev",
+      "@composer dump-autoload -q --no-dev --optimize"
+    ]
   }
 }
