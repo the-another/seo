@@ -66,6 +66,11 @@ class PluginTest extends TestCase {
 			'metabox',
 			'settings_page',
 			'blocks',
+			'sitemap_file_repository',
+			'sitemap_file_writer',
+			'sitemap_assignment',
+			'sitemap_sweeper',
+			'sitemap_server',
 		) as $key ) {
 			$this->assertTrue( $container->has( $key ), "Missing service: {$key}" );
 		}
@@ -81,5 +86,12 @@ class PluginTest extends TestCase {
 		$this->assertContains( 'wp_head', $names );
 		$this->assertContains( 'pre_get_document_title', $names );
 		$this->assertContains( 'init', $names );
+		$this->assertContains( 'taseo_indexable_synced', $names );
+		$this->assertContains( 'taseo_indexable_deleting', $names );
+		$this->assertContains( 'taseo_sitemap_sweep', $names );
+		$this->assertContains( 'taseo_permalinks_rebuilt', $names );
+		$this->assertContains( 'template_redirect', $names );
+		$this->assertContains( 'robots_txt', $names );
+		$this->assertContains( 'mod_rewrite_rules', $names );
 	}
 }

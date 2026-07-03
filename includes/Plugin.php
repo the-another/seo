@@ -13,6 +13,7 @@ use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
+use TheAnother\Plugin\SEO\Database\SitemapFilesTable;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
@@ -22,6 +23,11 @@ use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
+use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
 
 /**
@@ -70,11 +76,15 @@ class Plugin {
 	 * @return void
 	 */
 	public function start(): void {
+		$this->maybe_flag_upgrade_backfill();
+
 		IndexablesTable::maybe_upgrade();
+		SitemapFilesTable::maybe_upgrade();
 
 		$this->register_services();
 		$this->init_services();
 		$this->maybe_dispatch_initial_backfill();
+		$this->maybe_flush_rewrites();
 	}
 
 	/**
@@ -138,7 +148,42 @@ class Plugin {
 		);
 		$c->register(
 			'settings_page',
-			fn( Container $c ) => new SettingsPage( $c->get( 'settings' ), $c->get( 'indexable_backfill' ) )
+			fn( Container $c ) => new SettingsPage(
+				$c->get( 'settings' ),
+				$c->get( 'indexable_backfill' ),
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'sitemap_sweeper' )
+			)
+		);
+		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
+		$c->register(
+			'sitemap_file_writer',
+			fn( Container $c ) => new SitemapFileWriter( $c->get( 'sitemap_file_repository' ) )
+		);
+		$c->register(
+			'sitemap_assignment',
+			fn( Container $c ) => new SitemapAssignment(
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'settings' )
+			)
+		);
+		$c->register(
+			'sitemap_sweeper',
+			fn( Container $c ) => new SitemapSweeper(
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'settings' )
+			)
+		);
+		$c->register(
+			'sitemap_server',
+			fn( Container $c ) => new SitemapServer(
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'settings' )
+			)
 		);
 		$c->register( 'blocks', fn() => new Blocks() );
 	}
@@ -158,6 +203,9 @@ class Plugin {
 		$this->container->get( 'schema_output' )->init( $hook_manager );
 		$this->container->get( 'breadcrumb_renderer' )->init( $hook_manager );
 		$this->container->get( 'blocks' )->init( $hook_manager );
+		$this->container->get( 'sitemap_assignment' )->init( $hook_manager );
+		$this->container->get( 'sitemap_sweeper' )->init( $hook_manager );
+		$this->container->get( 'sitemap_server' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
@@ -191,6 +239,47 @@ class Plugin {
 				delete_option( Installer::NEEDS_BACKFILL_OPTION );
 			},
 			20
+		);
+	}
+
+	/**
+	 * Re-dispatch a full backfill when upgrading an existing install to the
+	 * sitemap schema: pre-upgrade rows have no chunk assignment, and only a
+	 * resync (which re-fires taseo_indexable_synced per row) assigns them.
+	 * Fresh installs report '0' and are handled by Installer::activate().
+	 *
+	 * Must run BEFORE IndexablesTable::maybe_upgrade() stamps the new version.
+	 *
+	 * @return void
+	 */
+	private function maybe_flag_upgrade_backfill(): void {
+		$installed = IndexablesTable::get_installed_version();
+
+		if ( '0' !== $installed && version_compare( $installed, '1.1.0', '<' ) ) {
+			update_option( Installer::NEEDS_BACKFILL_OPTION, '1' );
+		}
+	}
+
+	/**
+	 * One-shot rewrite flush after activation/upgrade, deferred to init
+	 * priority 30 so SitemapServer::register_rewrites() (init 10) has added
+	 * its rules first. Flushing also rewrites .htaccess, which installs the
+	 * static-serving block via the mod_rewrite_rules filter.
+	 *
+	 * @return void
+	 */
+	private function maybe_flush_rewrites(): void {
+		if ( '1' !== get_option( Installer::FLUSH_REWRITE_OPTION, '' ) ) {
+			return;
+		}
+
+		$this->container->get_hook_manager()->register_action(
+			'init',
+			static function (): void {
+				flush_rewrite_rules();
+				delete_option( Installer::FLUSH_REWRITE_OPTION );
+			},
+			30
 		);
 	}
 }

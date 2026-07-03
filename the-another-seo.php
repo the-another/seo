@@ -75,6 +75,19 @@ register_activation_hook(
 	}
 );
 
+register_deactivation_hook(
+	__FILE__,
+	function () {
+		// Stop the recurring sweep; Action Scheduler would otherwise keep
+		// firing it (via any other AS-bundling plugin) with no listener.
+		if ( function_exists( 'as_unschedule_all_actions' ) ) {
+			as_unschedule_all_actions( Sitemap\SitemapSweeper::HOOK, array(), Sitemap\SitemapSweeper::GROUP );
+		}
+
+		flush_rewrite_rules();
+	}
+);
+
 add_action(
 	'plugins_loaded',
 	function () {
