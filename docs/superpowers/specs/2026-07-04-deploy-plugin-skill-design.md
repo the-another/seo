@@ -1,7 +1,15 @@
 # Design: /deploy-plugin skill (ported from aucteeno)
 
+> **SUPERSEDED (2026-07-04):** the CI-dependent parts of this spec (base branch
+> `main`, "no git remote", Step 7 monitoring `e2e.yml`'s two jobs) are stale. The
+> source of truth for the deploy-plugin skill is now
+> `2026-07-04-cicd-pipeline-design.md` (Component G), which adapts it to the new
+> portable CI (`ci.yml`, four jobs), `master` base branch, existing `origin`
+> remote, and the automated `release.yml`. Read that document for the skill's
+> current CI references; the scope, gate, and step structure here still hold.
+
 **Date:** 2026-07-04
-**Status:** Awaiting user review
+**Status:** Superseded by 2026-07-04-cicd-pipeline-design.md
 
 ## Goal
 
