@@ -20,7 +20,11 @@
  * action nor hitting /wp-cron.php directly caused the pending
  * `taseo_sitemap_sweep` action to actually run within 10+ seconds — same
  * SQLite-drop-in/Action-Scheduler-claim-query incompatibility serve-wp.sh's
- * own comments document (its `wp action-scheduler run` note). The only
+ * own comments document (its `wp action-scheduler run` note). Even on MySQL,
+ * chunk files for content saved after boot would not exist yet: ordinary saves
+ * only mark chunks dirty, and the physical write waits for the recurring 300s
+ * sweep tick — forcing dispatch_full_regeneration() (the admin 'Regenerate now'
+ * path) is required for determinism regardless of the DB backend. The only
  * thing that reliably runs it is serve-wp.sh's own workaround: driving a
  * specific action ID through WP-CLI directly (bypasses the claim query
  * entirely). beforeAll below does the same, scoped to the
@@ -151,6 +155,7 @@ test.describe( 'sitemap', () => {
 
 		// The post-type chunk must list the seeded post's pretty permalink.
 		const postChunk = index.includes( 'post-sitemap-' );
+		expect( postChunk ).toBe( true );
 		if ( postChunk ) {
 			const postRes = await request.get( '/post-sitemap-1.xml' );
 			expect( postRes.status() ).toBe( 200 );
