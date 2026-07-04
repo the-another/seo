@@ -23,9 +23,43 @@ aucteeno SKILL.md structure, step for step.
   before anything else (not just the fast unit/lint gate).
 - **No-PR handling:** if no PR exists for the branch, HARD STOP and ask the user to
   create one before re-running. The skill never creates the PR itself.
+- **Supporting docs (user addition):** the flow needs three new repo files — `README.md`
+  (plugin description, no dev guidelines), `CONTRIBUTORS.md` (dev guidelines), and
+  `CHANGELOG.md` (separate Keep-a-Changelog file). See "Supporting docs" below.
 - **Rejected alternatives:** thin skill delegating to a `make deploy` target (changelog
   authoring is interactive and cannot live in make); extended flow with artifact
   publishing (out of scope per user).
+
+## Supporting docs (new files, modeled on the sibling plugin's)
+
+Three files, each modeled on its counterpart in `../the-another-multi-brand-global-styles`
+but written for this plugin's actual feature set and toolchain:
+
+- **`README.md`** — plugin description only, no dev guidelines: what the plugin does
+  (indexable table at catalog scale, templated titles/meta, Open Graph/Twitter Cards,
+  Schema.org JSON-LD, breadcrumbs block, chunked static sitemaps), requirements
+  (WP 6.9+, PHP 8.3+), license, homepage; pointer lines to `readme.txt` (wp.org
+  listing), `CONTRIBUTORS.md` (development), `CHANGELOG.md` (history).
+- **`CONTRIBUTORS.md`** — dev guidelines: maintainers table (theanother, ziontrooper —
+  mirroring readme.txt's `Contributors:` header), contact links, an architecture
+  overview of `includes/` (Container/HookManager/Plugin plus the domain dirs: Admin,
+  Blocks/Breadcrumbs, Database, Indexable, Meta, Schema, Settings, Sitemap, Social),
+  and the full dockerised command reference (every Make target with a one-line
+  description, mirroring the Makefile).
+- **`CHANGELOG.md`** — Keep a Changelog format, with the sibling's "How releases are
+  cut" preamble (notes go under `[Unreleased]`; `make version-*` promotes them into a
+  dated entry and retargets compare links; readme.txt gets a separate stub to replace).
+  Initial content: `[Unreleased]` documenting the test-infra port (dockerised
+  Makefile/images, tests/Unit regrouping, e2e + Plugin Check suites, release pipeline,
+  CI workflow, ABSPATH-guard fix) and a `[0.1.0] - 2026-07-02` "Initial release" entry;
+  compare links against `https://github.com/theanother/the-another-seo` (matching the
+  `repo` constant already in `scripts/version-bump.js` — its CHANGELOG.md block
+  currently self-skips because the file is missing, and activates once this file
+  exists).
+
+**`.distignore` addition:** `/README.md`, `/CONTRIBUTORS.md`, `/CHANGELOG.md` are dev
+docs and must NOT ship in the release zip (readme.txt is the shipped user doc) — same
+convention as the sibling plugin.
 
 ## Skill file
 
@@ -81,22 +115,29 @@ If the skill was invoked with a `[patch|minor|major]` argument, use it. Otherwis
 (aucteeno wording), showing the current version read from `package.json`. Wait for the
 answer; never assume.
 
-## Step 2 — Bump
+## Step 2 — Curate CHANGELOG.md, then bump
 
-`make version-<type>` (dockerised). Updates: `package.json`, `composer.json`,
-`the-another-seo.php` (header + `THE_ANOTHER_SEO_VERSION` constant), `readme.txt`
-(stable tag + `* Version bump` changelog stub), and syncs both lock files.
+Ordering is load-bearing: `make version-<type>` PROMOTES the `[Unreleased]` section of
+`CHANGELOG.md` into the new dated release entry (scripts/version-bump.js), so the
+release notes must be in `[Unreleased]` BEFORE the bump runs.
 
-## Step 3 — Changelog from PR
+1. **Curate `[Unreleased]`:** derive release notes from the PR
+   (`gh pr view --json body -q '.body'`, `--json title -q '.title'`) and
+   `git log main..HEAD --oneline`; ensure `CHANGELOG.md`'s `[Unreleased]` section
+   contains them under Keep-a-Changelog headings (`### Added` / `### Changed` /
+   `### Fixed` / …). If `[Unreleased]` already has accurate notes, leave them.
+2. **Bump:** `make version-<type>` (dockerised). Updates: `package.json`,
+   `composer.json`, `the-another-seo.php` (header + `THE_ANOTHER_SEO_VERSION`
+   constant), `readme.txt` (stable tag + `* Version bump` changelog stub),
+   `CHANGELOG.md` ([Unreleased] → dated entry + fresh empty [Unreleased] + compare
+   links), and syncs both lock files.
 
-Identical to aucteeno, with `main` as the base branch:
+## Step 3 — readme.txt changelog from PR
 
-1. `gh pr view --json body -q '.body'` and `--json title -q '.title'`
-2. `git log main..HEAD --oneline`
-3. Write a WordPress readme.txt changelog entry (`= X.Y.Z - YYYY-MM-DD =`) with
-   category-prefixed bullets (`Fix:`, `Add:`, `Refactor:`, `Docs:`, `Chore:`) sourced
-   from the PR summary and commits
-4. Replace the `* Version bump` placeholder in `readme.txt`
+Identical to aucteeno: replace the `* Version bump` placeholder in `readme.txt` with a
+WordPress-format entry (`= X.Y.Z - YYYY-MM-DD =`) using category-prefixed bullets
+(`Fix:`, `Add:`, `Refactor:`, `Docs:`, `Chore:`) — the same notes just promoted in
+CHANGELOG.md, reformatted for the wp.org listing.
 
 ## Step 4 — Validate lock files
 
@@ -148,8 +189,15 @@ is the only unit/PHPCS gate in this flow. This is why the full local gate was ch
    adapted step content; `/deploy-plugin` appears as an invocable skill.
 2. Every command in the skill is real and correctly spelled for this repo: Make targets
    exist in `Makefile`; the workflow name matches `.github/workflows/e2e.yml`; file
-   names (`the-another-seo.php`, `readme.txt`) and the version-constant name match.
-3. Dry-run verification: Step 0's gate commands run green on the current branch, and
+   names (`the-another-seo.php`, `readme.txt`, `CHANGELOG.md`) and the
+   version-constant name match.
+3. `README.md`, `CONTRIBUTORS.md`, `CHANGELOG.md` exist with the content scoped above;
+   `.distignore` excludes all three; a rebuilt zip does not contain them.
+4. `make version-patch` on a scratch run promotes `[Unreleased]` and prints
+   `✓ Updated CHANGELOG.md` (then the bump is reverted) — proving the previously
+   dormant CHANGELOG block activates.
+5. Dry-run verification: Step 0's gate commands run green on the current branch, and
    pre-flight's remote check stops with the correct message in this remote-less repo.
-4. No behavioral drift from aucteeno beyond the documented adaptations (dockerised
-   commands, `main` base, full gate, remote check, hard-stop-ask on missing PR).
+6. No behavioral drift from aucteeno beyond the documented adaptations (dockerised
+   commands, `main` base, full gate, remote check, hard-stop-ask on missing PR,
+   CHANGELOG.md curation before bump).
