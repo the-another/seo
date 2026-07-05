@@ -46,7 +46,7 @@ dump-autoload: docker-build
 
 # Run PHPCS linter (runs in Docker)
 lint: docker-build
-	$(DOCKER_RUN) composer phpcs
+	$(DOCKER_RUN) sh scripts/tests/lint.sh
 
 # Format code using PHPCBF (WARNING: This MODIFIES source code, runs in Docker)
 format: docker-build
@@ -55,7 +55,7 @@ format: docker-build
 # Run PHPUnit tests (runs in Docker; clears the result cache first so stale
 # ordering can never mask a failure)
 test: docker-build
-	$(DOCKER_RUN) sh -c "rm -rf .phpunit.cache && php ./vendor/bin/phpunit"
+	$(DOCKER_RUN) sh scripts/tests/unit.sh
 
 # Run PHPUnit with coverage (runs in Docker; loads xdebug only for this
 # invocation, see tests/Unit/Dockerfile). Prints a per-file text report and
@@ -70,20 +70,22 @@ coverage: docker-build
 release: install-dev lint test
 	$(DOCKER_RUN) sh -c "npm install --no-audit --no-fund && npm run plugin-zip"
 
-# Run the functional native-PHP + Playwright suite (activation, meta/social
-# tags, schema, breadcrumbs, sitemap) inside Docker. Both this target and
-# check-plugin below call the same shared script — see scripts/run-e2e.sh.
+# Run the functional native-PHP + Playwright suite inside Docker. This
+# target and check-plugin below share their zip-build pre-flight via
+# scripts/tests/lib/build-test-zip.sh (sourced by both suite scripts), so
+# the two suites can never drift from what CI runs.
 test-e2e: docker-build-e2e
-	$(DOCKER_RUN_E2E) sh scripts/run-e2e.sh functional
+	$(DOCKER_RUN_E2E) sh scripts/tests/e2e.sh
 
 # Build a throwaway release zip (labeled -test, never the real version —
 # see scripts/version-zip.js's --label flag) and run WordPress.org's
 # official Plugin Check against it in a fresh WordPress instance installed
 # FROM that zip — catches packaging bugs (missing files, wrong autoloader)
 # a source-directory mount would never surface. Entirely inside Docker via
-# the same shared script as test-e2e.
+# scripts/tests/plugin-check.sh, which shares its zip-build pre-flight with
+# test-e2e.
 check-plugin: docker-build-e2e
-	$(DOCKER_RUN_E2E) sh scripts/run-e2e.sh plugin-check
+	$(DOCKER_RUN_E2E) sh scripts/tests/plugin-check.sh
 
 # Bump version (package.json, composer.json, plugin header, VERSION constant,
 # readme.txt stable tag + changelog stub, lock files) — runs in Docker, no

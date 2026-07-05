@@ -60,7 +60,7 @@ function fail( message ) {
 
 if ( ! existsSync( ZIP_PATH ) ) {
 	console.error(
-		`✗ Missing ${ path.relative( ROOT, ZIP_PATH ) } — run via scripts/run-e2e.sh plugin-check (or make check-plugin), which builds it.`
+		`✗ Missing ${ path.relative( ROOT, ZIP_PATH ) } — run via scripts/tests/plugin-check.sh (or make check-plugin), which builds it.`
 	);
 	process.exit( 1 );
 }

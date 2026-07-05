@@ -16,7 +16,7 @@ REPO_ROOT="$(cd "$(dirname "$0")/../../../.." && pwd)"
 
 ZIP="$REPO_ROOT/build/the-another-seo-test.zip"
 if [ ! -f "$ZIP" ]; then
-	echo "$ZIP missing — run via scripts/run-e2e.sh functional (or make test-e2e), which builds it" >&2
+	echo "$ZIP missing — run via scripts/tests/e2e.sh (or make test-e2e), which builds it" >&2
 	exit 1
 fi
 

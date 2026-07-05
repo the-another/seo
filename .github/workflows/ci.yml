@@ -1,0 +1,94 @@
+name: CI
+
+# PR gate. All four jobs run the same scripts/setup/* + scripts/tests/*
+# scripts the local Docker flow uses — no make, no Docker in CI (see
+# docs/superpowers/specs/2026-07-04-cicd-pipeline-design.md).
+# ubuntu-24.04 pinned (not -latest): PHP 8.3 is that image's native series,
+# and scripts/setup/unit.sh hard-fails on any other PHP.
+
+on:
+  pull_request:
+    branches:
+      - master
+      - main
+      - 'release/**'
+      # Stacked PRs (feature branch based on another feature branch) gate too.
+      - 'feature/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: PHPCS
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up toolchain
+        run: sh scripts/setup/unit.sh
+
+      - name: Run PHPCS
+        run: sh scripts/tests/lint.sh
+
+  unit:
+    name: PHPUnit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up toolchain
+        run: sh scripts/setup/unit.sh
+
+      - name: Run PHPUnit
+        run: sh scripts/tests/unit.sh
+
+  test-e2e:
+    name: Functional E2E
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up e2e environment
+        run: sh scripts/setup/e2e.sh
+
+      - name: Run functional e2e suite
+        run: sh scripts/tests/e2e.sh
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: playwright-report-functional
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  # Runs Plugin Check natively via wp-cli (no browser, no Playwright) —
+  # all checks, including the 5 runtime ones. See the check-plugin suite's
+  # early-init canary in tests/e2e/check-plugin/run-plugin-check.mjs.
+  check-plugin:
+    name: Plugin Check (PCP)
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up e2e environment
+        run: sh scripts/setup/e2e.sh
+
+      - name: Run Plugin Check suite
+        run: sh scripts/tests/plugin-check.sh
+
+      - name: Upload Plugin Check results on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: plugin-check-results
+          path: build/plugin-check-results.txt
+          retention-days: 7
