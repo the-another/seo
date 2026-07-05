@@ -3,8 +3,9 @@ name: Release Plugin
 # On every push to master: re-run the FULL gate (lint, unit, functional
 # e2e, Plugin Check — same scripts as ci.yml), then build the release zip,
 # tag v<version> (from package.json), and publish a GitHub Release with the
-# zip attached. Pushing without a version bump is a no-op release: the
-# existing-tag check skips the release steps with a warning.
+# zip attached. Pushing without a version bump is a no-op publish: the full
+# gate still runs, but the existing-tag check skips the release steps with
+# a warning.
 
 on:
   push:
@@ -14,13 +15,18 @@ on:
 permissions:
   contents: write
 
+# Serialize releases so two rapid master pushes can't race the tag push.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   lint:
     name: PHPCS
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
@@ -33,7 +39,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
@@ -46,7 +52,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh
@@ -56,7 +62,7 @@ jobs:
 
       - name: Upload Playwright report on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: playwright-report-functional
           path: |
@@ -69,7 +75,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh
@@ -79,7 +85,7 @@ jobs:
 
       - name: Upload Plugin Check results on failure
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: plugin-check-results
           path: build/plugin-check-results.txt
@@ -92,7 +98,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Read version from package.json
         id: version
@@ -132,7 +138,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.tag_check.outputs.exists == 'false'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           generate_release_notes: true
