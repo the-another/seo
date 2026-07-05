@@ -105,7 +105,7 @@ console.log('✓ Updated readme.txt');
 const changelogFile = path.join(__dirname, '../CHANGELOG.md');
 if (fs.existsSync(changelogFile) && newVersion !== previousVersion) {
   let changelogContent = fs.readFileSync(changelogFile, 'utf8');
-  const repo = 'https://github.com/theanother/the-another-seo';
+  const repo = 'https://github.com/the-another/seo';
 
   if (/## \[Unreleased\]/.test(changelogContent)) {
     // Rename the current [Unreleased] heading to a dated release and insert

@@ -7,6 +7,11 @@
 /.claude/
 .DS_Store
 
+# Developer docs — readme.txt is the shipped user doc
+/README.md
+/CONTRIBUTORS.md
+/CHANGELOG.md
+
 # Development dependencies and caches
 /node_modules/
 /.phpunit.cache/
