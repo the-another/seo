@@ -8,7 +8,7 @@
 
 Two related additions that share one settings tab and one release:
 
-1. **Site verification** for Google Search Console, Bing Webmaster Tools, Yandex Webmaster, and Yahoo, by both methods a plugin can serve: the **HTML tag** (a `<meta>` in `<head>`) and the **HTML file** (a token-named file at the site root, served virtually — no file written to disk, no FTP). Method C (Google Analytics) is satisfied as a side effect of the analytics work below. DNS TXT verification is the one method out of reach — see [Out of scope](#out-of-scope).
+1. **Site verification** for Google Search Console, Bing Webmaster Tools, Yandex Webmaster, Yahoo, and Meta Business Manager, by both methods a plugin can serve: the **HTML tag** (a `<meta>` in `<head>`) and the **HTML file** (a token-named file at the site root, served virtually — no file written to disk, no FTP). Method C (Google Analytics) is satisfied as a side effect of the tracking work below. DNS TXT verification is the one method out of reach — see [Out of scope](#out-of-scope).
 2. **Tracking snippet output** — a GA4 Measurement ID, a Google Tag Manager Container ID, and a Meta Pixel ID, with a filter surface that lets developers add secondary tracking IDs per page without any additional UI or database schema.
 
 Neither feature touches the indexable table, the sitemap subsystem, or any existing output class. Both are additive: with empty settings the plugin's rendered output is byte-identical to today's.
@@ -23,6 +23,7 @@ Neither feature touches the indexable table, the sitemap subsystem, or any exist
 6. **Two focused output services, not one combined class** — verification and analytics have different print conditions, different hooks, and different filter surfaces.
 7. **HTML-file verification is in scope alongside the meta tags** — the plugin serves `google<token>.html`, `BingSiteAuth.xml`, and `yandex_<token>.html` virtually. This is the route for anyone who would otherwise be sent to their registrar, and it is the method some teams prefer because the token never appears in page source.
 8. **Meta Pixel is in scope**, in its own output class rather than inside the Google one. It is a different vendor with a different snippet, a different consent profile, and a different failure mode; the only thing it shares with GA4 is the settings tab it appears on.
+9. **Meta domain verification is in scope, by meta tag only** — a fifth `verify_*` field emitting `facebook-domain-verification`. Its file method is excluded for a documented reason, below.
 
 ## Architecture
 
@@ -39,15 +40,15 @@ Two new hook-bearing services, registered in `Plugin::register_services()` and i
 
 **Why file serving is a separate class from tag output:** it is a request handler, not a renderer. It terminates the request with `exit`, sets its own status and content-type headers, and never runs on a normal page load. Sharing a class with a `wp_head` printer would put a hard `exit` inside an output method — the kind of thing that makes every test around it awkward.
 
-**Why analytics is not folded into verification:** different lifecycle. Verification is four static `<meta>` tags on one URL with no scripts; analytics is a `<head>` script plus a `<body>` `noscript` iframe on every URL, with its own enable condition and filter surface. Combining them produces one class with two unrelated print paths — the file most likely to sprawl at the next feature.
+**Why analytics is not folded into verification:** different lifecycle. Verification is five static `<meta>` tags on one URL with no scripts; analytics is a `<head>` script plus a `<body>` `noscript` iframe on every URL, with its own enable condition and filter surface. Combining them produces one class with two unrelated print paths — the file most likely to sprawl at the next feature.
 
 **Why GA4 and GTM share a class but Meta Pixel does not:** GA4 and GTM are one vendor and one lineage — the same `dataLayer`, the same `googletagmanager.com` origin, and a genuine interaction between them (a container that already fires a GA4 tag is what the double-count warning is about). They are configured together and reasoned about together. Meta Pixel shares none of that: different origin, different snippet, different consent profile, and no interaction with either Google tag. Putting it in `AnalyticsOutput` would mean one class holding two vendors' snippets and three enable conditions, and it would make "add Matomo next" a fourth branch in the same file instead of a fourth small class.
 
 ## Settings
 
-Ten new keys in the existing `taseo_settings` option array. No new option, no new table, no migration.
+Eleven new keys in the existing `taseo_settings` option array. No new option, no new table, no migration.
 
-**Meta-tag method** — four keys:
+**Meta-tag method** — five keys:
 
 | Key | Meta name emitted | Stored format |
 |---|---|---|
@@ -55,8 +56,13 @@ Ten new keys in the existing `taseo_settings` option array. No new option, no ne
 | `verify_bing` | `msvalidate.01` | `[A-Za-z0-9_-]` only |
 | `verify_yandex` | `yandex-verification` | `[A-Za-z0-9_-]` only |
 | `verify_yahoo` | `y_key` | `[A-Za-z0-9_-]` only |
+| `verify_facebook` | `facebook-domain-verification` | `[A-Za-z0-9_-]` only |
 
-**File method** — three keys. Yahoo has none: it retired its own webmaster tools and its properties are verified through Bing.
+The last one is Meta Business Manager domain verification — claiming the domain so your business account controls how its links appear and who may edit their previews. The engine slug is `facebook`, not `meta`, because the wire format is `facebook-domain-verification` and because a slug called `'meta'` inside a class whose whole job is meta tags reads as a bug.
+
+**It is not the same thing as the existing `facebook_app_id` setting** on the Social tab, which emits `fb:app_id` for Open Graph. Different tag, different purpose, different account. They stay in their separate tabs; anyone tempted to consolidate them later should read this paragraph first.
+
+**File method** — three keys. Yahoo has none: it retired its own webmaster tools and its properties are verified through Bing. Meta has none either, for a different reason — see below.
 
 | Key | Served at | Stored format |
 |---|---|---|
@@ -65,6 +71,8 @@ Ten new keys in the existing `taseo_settings` option array. No new option, no ne
 | `verify_yandex_file` | `/yandex_<token>.html` | `/^yandex_[a-z0-9]+\.html$/` (full filename) |
 
 Google and Yandex name the file after the token, so the field takes the whole filename the service gave you and the token is derived from it — one value to paste, nothing to transcribe. Bing's filename is always `BingSiteAuth.xml`, so its field takes the token that goes inside.
+
+**Why Meta gets no file field.** Every file above is reconstructable: the service publishes the format, so a token is enough to generate the exact bytes. Meta's is not. Business Manager hands you a download with an opaque alphanumeric filename and instructs you not to alter the contents, and the body format is not published — so from a pasted filename alone we cannot generate a body that will verify. Shipping a field that guesses the contents would fail verification while looking like it worked, which is worse than not offering the method. Anyone holding the actual file can serve it through `taseo_verification_files`, which takes a verbatim body precisely for this case.
 
 **Tracking** — three keys:
 
@@ -77,14 +85,14 @@ Google and Yandex name the file after the token, so the field takes the whole fi
 New `Settings` getters, following the existing one-getter-per-key convention with defaults carried in the getter:
 
 ```php
-public function get_verification_code( string $engine ): string;  // 'google'|'bing'|'yandex'|'yahoo', '' default
+public function get_verification_code( string $engine ): string;  // 'google'|'bing'|'yandex'|'yahoo'|'facebook', '' default
 public function get_verification_file( string $engine ): string;  // 'google'|'bing'|'yandex', '' default
 public function get_ga4_id(): string;                             // '' default
 public function get_gtm_id(): string;                             // '' default
 public function get_meta_pixel_id(): string;                      // '' default, string not int — leading digits are significant
 ```
 
-`get_verification_code()` maps an engine slug to its `verify_*` key and returns `''` for an unknown slug. The engine→meta-name mapping lives in `VerificationOutput`, not `Settings`: it is an output concern, and keeping it there means `Settings` stores four opaque strings.
+`get_verification_code()` maps an engine slug to its `verify_*` key and returns `''` for an unknown slug. The engine→meta-name mapping lives in `VerificationOutput`, not `Settings`: it is an output concern, and keeping it there means `Settings` stores five opaque strings.
 
 ### Admin UI
 
@@ -117,7 +125,7 @@ Users paste the whole thing. The sanitizer therefore:
 2. Trims whitespace.
 3. Strips every character outside `[A-Za-z0-9_-]`.
 
-Step 3 is the security guarantee, not merely a tidiness pass: a stored verification code physically cannot contain a quote, angle bracket, or space, so it cannot break out of the `content="…"` attribute no matter what happens downstream. The character class covers all four services — Google's tokens are base64url-ish, Bing's are uppercase hex, Yandex's are hex, Yahoo's are alphanumeric.
+Step 3 is the security guarantee, not merely a tidiness pass: a stored verification code physically cannot contain a quote, angle bracket, or space, so it cannot break out of the `content="…"` attribute no matter what happens downstream. The character class covers all five services — Google's tokens are base64url-ish, Bing's are uppercase hex, Yandex's are hex, Yahoo's are alphanumeric, and Meta's are lowercase alphanumeric.
 
 **Verification filenames.** Trimmed, lower-cased for Google and Yandex (their tokens are lowercase hex), then matched against the per-service regex in the settings table. A value that fails is stored as `''`. The regexes are anchored and allow no dot, slash, or `..` beyond the single trailing extension, so a stored filename cannot describe anything but a root-level token file — worth stating explicitly because this value is compared against an incoming request path.
 
@@ -144,12 +152,12 @@ public function init( HookManager $hook_manager ): void {
 `print_tags()`:
 
 1. Computes `$should_print = is_front_page() && ! is_paged()`, passed through `taseo_verification_should_print`.
-2. Builds a name⇒code map from the four settings getters, dropping empty values.
+2. Builds a name⇒code map from the five settings getters, dropping empty values.
 3. Applies `taseo_verification_tags` to the map.
 4. Re-validates the post-filter map: every meta name through `sanitize_key()`, every code stripped to `[A-Za-z0-9_-]` and dropped if the strip leaves it empty.
 5. Prints one `<meta name="…" content="…" />` per surviving entry, `esc_attr` on both.
 
-With all four fields empty and no filter, the method returns after step 2 having printed nothing. The `get_option()` call behind the getters is already primed by the rest of the plugin on the same request, so the cost is a hash lookup.
+With all five fields empty and no filter, the method returns after step 2 having printed nothing. The `get_option()` call behind the getters is already primed by the rest of the plugin on the same request, so the cost is a hash lookup.
 
 `! is_paged()` matters because `is_front_page()` is also true on `/page/2/`; verification belongs on the property root only.
 
@@ -245,7 +253,7 @@ The programmatic extension API, replacing what would otherwise be per-page UI:
 
 | Filter | Value | Purpose |
 |---|---|---|
-| `taseo_verification_tags` | `array<string,string>` meta name ⇒ code | Add services beyond the four fields (Baidu, Pinterest, Norton) |
+| `taseo_verification_tags` | `array<string,string>` meta name ⇒ code | Add services beyond the five fields (Baidu, Pinterest, Norton) |
 | `taseo_verification_should_print` | `bool` | Widen past the front page, e.g. subdirectory-prefix properties |
 | `taseo_verification_files` | `array<string,array{content_type:string,body:string}>` filename ⇒ response | Serve additional token files (Ahrefs, Facebook domain verification, Pinterest) |
 | `taseo_analytics_ga4_ids` | `array<int,string>` | Secondary tracking properties, per page |
@@ -327,9 +335,9 @@ Verification meta tags and served verification files need no disclosure — they
 ### Unit (PHPUnit + Brain Monkey, joining the existing 193)
 
 **`tests/Unit/Verification/VerificationOutputTest.php`**
-- Prints all four tags on the front page.
+- Prints all five tags on the front page.
 - Prints nothing when not the front page, and nothing on a paged front page.
-- Omits engines with empty codes; prints nothing when all four are empty.
+- Omits engines with empty codes; prints nothing when all five are empty.
 - Escapes output and drops filter-injected values containing quotes or brackets.
 - `taseo_verification_tags` can add an engine; `taseo_verification_should_print` can suppress and widen.
 
@@ -367,7 +375,7 @@ Verification meta tags and served verification files need no disclosure — they
 
 New `tests/e2e/functional/specs/webmaster.spec.ts`, provisioning settings through WP-CLI like the existing specs:
 
-1. Front page contains all four verification `<meta>` tags with the configured values.
+1. Front page contains all five verification `<meta>` tags with the configured values.
 2. A single post contains none of them.
 3. Front page contains a `<script src="…/gtag/js?id=G-…">` and a `gtag('config', 'G-…')` inline script.
 4. Body contains the GTM `noscript` iframe for the configured container.
@@ -378,7 +386,7 @@ New `tests/e2e/functional/specs/webmaster.spec.ts`, provisioning settings throug
 
 ### Scale
 
-Roughly 50 new unit tests and 8 e2e assertions. Four new source files (~360 lines) plus edits to `Settings`, `SettingsPage`, `Plugin`, and `readme.txt`.
+Roughly 52 new unit tests and 8 e2e assertions. Four new source files (~365 lines) plus edits to `Settings`, `SettingsPage`, `Plugin`, and `readme.txt`.
 
 ## Out of scope
 
@@ -386,7 +394,7 @@ Roughly 50 new unit tests and 8 e2e assertions. Four new source files (~360 line
 - **Search Console API integration** (impressions, clicks, indexing status) — a separate project with an OAuth flow, quota handling, and its own admin surface.
 - **Tracking platforms other than GA4, GTM, and Meta Pixel** — Matomo, Plausible, Fathom, TikTok, LinkedIn. Each would be another small output class on the `MetaPixelOutput` pattern; the filter surface does not reach them.
 - **Meta Pixel beyond the base code** — no Conversions API, no advanced matching (hashed email/phone), no automatic or custom events beyond `PageView`. Those need order and customer data, which means WooCommerce integration and a much larger privacy surface.
-- **Meta domain verification** (`facebook-domain-verification` meta tag) — adjacent to the Pixel but a different job; one more field in the verification group whenever it's wanted.
+- **Meta domain verification by file** — the meta-tag method is included; the file method is not, because its body format is not published and cannot be generated from a filename. Reachable via `taseo_verification_files` by anyone holding the downloaded file.
 - **Per-page tracking UI** — explicitly replaced by the filter surface.
 - **Baidu, Pinterest, and other verification services as first-class fields** — reachable through `taseo_verification_tags` and `taseo_verification_files`.
 - **DNS TXT verification** — see below.
