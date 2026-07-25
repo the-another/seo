@@ -74,6 +74,7 @@ class PluginTest extends TestCase {
 			'verification_output',
 			'verification_file_server',
 			'analytics_output',
+			'meta_pixel_output',
 		) as $key ) {
 			$this->assertTrue( $container->has( $key ), "Missing service: {$key}" );
 		}

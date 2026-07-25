@@ -11,6 +11,7 @@ namespace TheAnother\Plugin\SEO;
 use TheAnother\Plugin\SEO\Admin\Metabox;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
+use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
@@ -201,6 +202,10 @@ class Plugin {
 			'analytics_output',
 			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ) )
 		);
+		$c->register(
+			'meta_pixel_output',
+			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ) )
+		);
 	}
 
 	/**
@@ -224,6 +229,7 @@ class Plugin {
 		$this->container->get( 'verification_output' )->init( $hook_manager );
 		$this->container->get( 'verification_file_server' )->init( $hook_manager );
 		$this->container->get( 'analytics_output' )->init( $hook_manager );
+		$this->container->get( 'meta_pixel_output' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
