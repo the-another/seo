@@ -26,12 +26,17 @@ const ROOT = path.resolve( __dirname, '../../../..' );
 const WP_DIR_FILE = path.join( ROOT, 'artifacts/e2e-wp-dir.txt' );
 
 /**
- * Pause after each save so the recorded video plays at a speed a human can
- * follow instead of as a blur. This exists for the video and NOT for
- * stability — every assertion here waits on its own condition. Please don't
- * read it as a masked race and sprinkle more of them around.
+ * Pause after each visible transition — the tab switch, the field being
+ * changed, the save, and the reloaded result — so the recorded video plays
+ * at a speed a human can follow instead of as a blur. Applied at four points
+ * per tab (after navigating to it, after changing its field, after saving,
+ * and after reloading), never just one. This exists for the video and NOT
+ * for stability — every assertion here waits on its own condition,
+ * independently of these pauses. Please don't read them as masked races and
+ * sprinkle more of them around, and don't reach for one to paper over a
+ * flaky assertion elsewhere.
  */
-const VIDEO_PACING_MS = 400;
+const VIDEO_PACING_MS = 500;
 
 const tabUrl = ( slug: string ): string =>
 	`/wp-admin/options-general.php?page=taseo&tab=${ slug }`;
@@ -116,14 +121,17 @@ interface TextTabStep {
 async function tourTextTab( page: Page, step: TextTabStep ): Promise< void > {
 	await page.goto( tabUrl( step.slug ) );
 	await expectTabActive( page, step.slug );
+	await page.waitForTimeout( VIDEO_PACING_MS );
 
 	const field = page.locator( step.selector );
 	await expect( field, `${ step.label } field exists on the ${ step.slug } tab` ).toBeVisible();
 
 	await field.fill( step.value );
+	await page.waitForTimeout( VIDEO_PACING_MS );
 	await save( page, step.slug );
 
 	await page.reload();
+	await page.waitForTimeout( VIDEO_PACING_MS );
 	await expect(
 		page.locator( step.selector ),
 		`${ step.label } persisted after saving the ${ step.slug } tab`
@@ -166,6 +174,7 @@ test.describe( 'admin tour', () => {
 		// selector targets post:post.
 		await page.goto( tabUrl( 'types' ) );
 		await expectTabActive( page, 'types' );
+		await page.waitForTimeout( VIDEO_PACING_MS );
 
 		const pageType = page.locator(
 			'input[name="taseo_settings[enabled_post_types][]"][value="page"]'
@@ -176,9 +185,11 @@ test.describe( 'admin tour', () => {
 		// toBeChecked() assertions bracketing this call independently prove
 		// the uncheck happened.
 		await pageType.uncheck( { force: true } );
+		await page.waitForTimeout( VIDEO_PACING_MS );
 		await save( page, 'types' );
 
 		await page.reload();
+		await page.waitForTimeout( VIDEO_PACING_MS );
 		await expect(
 			page.locator(
 				'input[name="taseo_settings[enabled_post_types][]"][value="page"]'
