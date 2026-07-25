@@ -29,6 +29,7 @@ use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
+use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
 /**
@@ -191,6 +192,10 @@ class Plugin {
 			'verification_output',
 			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ) )
 		);
+		$c->register(
+			'verification_file_server',
+			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ) )
+		);
 	}
 
 	/**
@@ -212,6 +217,7 @@ class Plugin {
 		$this->container->get( 'sitemap_sweeper' )->init( $hook_manager );
 		$this->container->get( 'sitemap_server' )->init( $hook_manager );
 		$this->container->get( 'verification_output' )->init( $hook_manager );
+		$this->container->get( 'verification_file_server' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
