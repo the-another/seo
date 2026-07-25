@@ -93,6 +93,15 @@ while true; do
 	i=$((i + 1))
 done
 
+# Publish WP_DIR for the Playwright process. provision_wp() mints it with
+# mktemp, so nothing outside this shell can discover it, and
+# setup/snapshot.setup.ts needs it to locate the SQLite database.
+# artifacts/ is already gitignored (.gitignore) and excluded from the
+# release zip (.distignore); global-setup.ts writes the admin storage
+# state into the same directory.
+mkdir -p "$REPO_ROOT/artifacts"
+printf '%s\n' "$WP_DIR" > "$REPO_ROOT/artifacts/e2e-wp-dir.txt"
+
 # Multiple built-in-server workers so WordPress's own loopback requests
 # (cron spawn, site health) can't deadlock the single PHP process. The
 # running server's output is spooled to a file rather than Playwright's
