@@ -93,7 +93,19 @@ test.describe( 'webmaster verification and tracking', () => {
 
 		const html = await page.content();
 		expect( html ).toContain( "gtag('config', 'G-E2E12345')" );
-		expect( html ).toContain( 'GTM-E2E1234' );
+
+		// A bare 'GTM-E2E1234' substring check would pass even if the
+		// noscript body fallback (print_gtm_body(), on wp_body_open) were
+		// malformed or missing entirely, because the same ID already appears
+		// in the unrelated head bootstrap script (print_gtm_head()). Pin the
+		// literal noscript/iframe fragment instead — same reasoning and same
+		// remedy as the Meta Pixel test below: a DOM locator can't see it
+		// (browsers parse <noscript> content as inert raw text when
+		// scripting is enabled), so this is the only assertion that
+		// actually exercises print_gtm_body()'s output.
+		expect( html ).toContain(
+			'<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-E2E1234" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>'
+		);
 	} );
 
 	test( 'Meta Pixel base code and noscript fallback', async ( { page } ) => {
