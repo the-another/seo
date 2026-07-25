@@ -182,4 +182,91 @@ class VerificationFileServerTest extends TestCase {
 
 		$this->assertSame( '', $this->serve( '/evil.html' ) );
 	}
+
+	public function test_a_malformed_stored_google_filename_is_never_served(): void {
+		// Options are writable outside SettingsPage::sanitize_settings()
+		// (WP-CLI, a migration, this branch's own e2e harness); the class
+		// must not trust a distant caller for its own safety.
+		$this->files( array( 'google' => '../wp-config.php' ) );
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '/../wp-config.php' ) );
+	}
+
+	public function test_a_malformed_stored_bing_token_is_never_served(): void {
+		$this->files( array( 'bing' => '<script>alert(1)</script>' ) );
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '/BingSiteAuth.xml' ) );
+	}
+
+	public function test_a_malformed_stored_yandex_filename_is_never_served(): void {
+		$this->files( array( 'yandex' => 'yandex_<script>.html' ) );
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '/yandex_<script>.html' ) );
+	}
+
+	public function test_files_filter_key_containing_a_slash_is_not_served(): void {
+		Filters\expectApplied( 'taseo_verification_files' )->once()->andReturn(
+			array(
+				'evil/inject.html' => array(
+					'content_type' => 'text/plain',
+					'body'         => 'evil',
+				),
+			)
+		);
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '/evil/inject.html' ) );
+	}
+
+	public function test_files_filter_key_containing_dot_dot_is_not_served(): void {
+		Filters\expectApplied( 'taseo_verification_files' )->once()->andReturn(
+			array(
+				'../evil.html' => array(
+					'content_type' => 'text/plain',
+					'body'         => 'evil',
+				),
+			)
+		);
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '../evil.html' ) );
+	}
+
+	public function test_files_filter_valid_key_is_still_served(): void {
+		Filters\expectApplied( 'taseo_verification_files' )->once()->andReturn(
+			array(
+				'ahrefs_1234.html' => array(
+					'content_type' => 'text/plain',
+					'body'         => 'ahrefs-site-verification: 1234',
+				),
+			)
+		);
+
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->assertSame( 'ahrefs-site-verification: 1234', $this->serve( '/ahrefs_1234.html' ) );
+	}
+
+	public function test_files_filter_rejects_a_non_string_body(): void {
+		Filters\expectApplied( 'taseo_verification_files' )->once()->andReturn(
+			array(
+				'evil.html' => array(
+					'content_type' => 'text/plain',
+					'body'         => array( 'not' => 'a string' ),
+				),
+			)
+		);
+
+		Functions\expect( 'status_header' )->never();
+
+		$this->assertSame( '', $this->serve( '/evil.html' ) );
+	}
 }

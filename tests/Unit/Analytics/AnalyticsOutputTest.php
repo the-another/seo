@@ -142,6 +142,21 @@ class AnalyticsOutputTest extends TestCase {
 		);
 	}
 
+	public function test_gtag_config_filter_returning_an_unencodable_value_falls_back_to_no_parameters(): void {
+		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( 'G-ABCD1234' );
+		Filters\expectApplied( 'taseo_analytics_gtag_config' )->once()->andReturn(
+			array( 'G-ABCD1234' => array( 'bad' => NAN ) )
+		);
+
+		$this->output->enqueue_gtag();
+
+		$js = $this->inline['taseo-gtag'];
+
+		$this->assertStringContainsString( "gtag('config', 'G-ABCD1234');\n", $js );
+		$this->assertStringNotContainsString( ', )', $js );
+		$this->assertDoesNotMatchRegularExpression( '/,\s*\)/', $js, 'No dangling comma before a closing paren.' );
+	}
+
 	public function test_prints_the_gtm_head_loader_and_body_noscript(): void {
 		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( 'GTM-XYZ789' );
 

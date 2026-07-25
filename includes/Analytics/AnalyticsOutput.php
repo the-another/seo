@@ -90,11 +90,18 @@ class AnalyticsOutput {
 			. "gtag('js', new Date());\n";
 
 		foreach ( $ids as $id ) {
-			$params = isset( $config[ $id ] ) && is_array( $config[ $id ] ) ? $config[ $id ] : array();
+			$params  = isset( $config[ $id ] ) && is_array( $config[ $id ] ) ? $config[ $id ] : array();
+			$encoded = array() === $params ? false : wp_json_encode( $params );
 
-			$inline .= array() === $params
-				? "gtag('config', '" . $id . "');\n"
-				: "gtag('config', '" . $id . "', " . wp_json_encode( $params ) . ");\n";
+			// wp_json_encode() returns false for a non-UTF-8 string, INF/NAN,
+			// or a resource — any of which a filter can hand us. Falling
+			// back to the no-parameters form keeps this one line valid
+			// JavaScript instead of a dangling comma that would throw a
+			// SyntaxError and kill the whole inline block, including every
+			// other property's config line and the dataLayer bootstrap.
+			$inline .= is_string( $encoded )
+				? "gtag('config', '" . $id . "', " . $encoded . ");\n"
+				: "gtag('config', '" . $id . "');\n";
 		}
 
 		wp_add_inline_script( 'taseo-gtag', $inline, 'after' );

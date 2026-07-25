@@ -21,8 +21,9 @@ use TheAnother\Plugin\SEO\Verification\VerificationOutput;
  * Class SettingsPage
  *
  * Tabbed options screen. Tabs: General, Post Types & Taxonomies, Titles &
- * Templates, Social Networks, Schema & Breadcrumbs, Sitemap. General carries
- * the backfill progress indicator and the Rescan everything action.
+ * Templates, Social Networks, Schema & Breadcrumbs, Sitemap, Webmaster Tools.
+ * General carries the backfill progress indicator and the Rescan everything
+ * action.
  */
 class SettingsPage {
 

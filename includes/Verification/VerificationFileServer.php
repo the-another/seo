@@ -42,6 +42,38 @@ class VerificationFileServer {
 	private const ALLOWED_CONTENT_TYPES = array( 'text/plain', 'text/html', 'application/xml' );
 
 	/**
+	 * Per-service validation patterns for stored verification-file values.
+	 *
+	 * Re-applied here at output time so this class never trusts a distant
+	 * caller for its own safety: SettingsPage::sanitize_settings() anchors
+	 * these same patterns on save, but options are writable outside that
+	 * sanitizer (WP-CLI, a migration, this branch's own e2e harness), and a
+	 * stored value here becomes both the response body and the $files array
+	 * key that an incoming request path is matched against. Must be kept in
+	 * agreement with SettingsPage::VERIFICATION_FILE_PATTERNS.
+	 *
+	 * @var array<string, string>
+	 */
+	private const FILE_VALUE_PATTERNS = array(
+		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
+		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
+		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	);
+
+	/**
+	 * General safe-filename shape for filter-supplied file keys.
+	 *
+	 * Deliberately looser than FILE_VALUE_PATTERNS above: the
+	 * taseo_verification_files filter is the escape hatch for services with
+	 * no dedicated field (Ahrefs, Pinterest, Meta's own file), so it only
+	 * guards against path traversal and extension smuggling, not per-vendor
+	 * filename shape.
+	 *
+	 * @var string
+	 */
+	private const FILTER_KEY_PATTERN = '/^[A-Za-z0-9_-]+\.(html|xml|txt)$/';
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Settings $settings Settings.
@@ -90,13 +122,28 @@ class VerificationFileServer {
 		 */
 		$files = apply_filters( 'taseo_verification_files', $files );
 
-		if ( ! is_array( $files ) || ! isset( $files[ $path ] ) || ! is_array( $files[ $path ] ) ) {
+		if ( ! is_array( $files ) ) {
+			return;
+		}
+
+		// The design spec promises filtered keys are run through the same
+		// filename regex shape as everything else this method serves; only
+		// the content-type allow-list below was actually wired up. This
+		// method runs on every frontend request, so an unvalidated filter
+		// key could shadow any real URL on the site.
+		foreach ( array_keys( $files ) as $key ) {
+			if ( ! is_string( $key ) || 1 !== preg_match( self::FILTER_KEY_PATTERN, $key ) ) {
+				unset( $files[ $key ] );
+			}
+		}
+
+		if ( ! isset( $files[ $path ] ) || ! is_array( $files[ $path ] ) ) {
 			return;
 		}
 
 		$file = $files[ $path ];
 
-		if ( ! isset( $file['content_type'], $file['body'] ) ) {
+		if ( ! isset( $file['content_type'], $file['body'] ) || ! is_string( $file['body'] ) ) {
 			return;
 		}
 
@@ -169,7 +216,7 @@ class VerificationFileServer {
 
 		$google = $this->settings->get_verification_file( 'google' );
 
-		if ( '' !== $google ) {
+		if ( '' !== $google && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_google_file'], $google ) ) {
 			$files[ $google ] = array(
 				'content_type' => 'text/html',
 				'body'         => 'google-site-verification: ' . $google,
@@ -178,7 +225,7 @@ class VerificationFileServer {
 
 		$bing = $this->settings->get_verification_file( 'bing' );
 
-		if ( '' !== $bing ) {
+		if ( '' !== $bing && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_bing_file'], $bing ) ) {
 			$files[ self::BING_FILENAME ] = array(
 				'content_type' => 'application/xml',
 				'body'         => "<?xml version=\"1.0\"?>\n<users>\n  <user>" . $bing . "</user>\n</users>",
@@ -187,7 +234,7 @@ class VerificationFileServer {
 
 		$yandex = $this->settings->get_verification_file( 'yandex' );
 
-		if ( '' !== $yandex ) {
+		if ( '' !== $yandex && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_yandex_file'], $yandex ) ) {
 			$token = substr( $yandex, strlen( 'yandex_' ), -strlen( '.html' ) );
 
 			$files[ $yandex ] = array(
