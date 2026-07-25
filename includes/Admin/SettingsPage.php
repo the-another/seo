@@ -14,6 +14,8 @@ use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
+use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
+use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
 /**
  * Class SettingsPage
@@ -32,6 +34,44 @@ class SettingsPage {
 	private const SCHEMA_TYPE_CHOICES = array( 'None', 'WebPage', 'Article', 'Product' );
 
 	/**
+	 * Verification meta-tag settings keys.
+	 *
+	 * @var array<int, string>
+	 */
+	private const VERIFICATION_CODE_KEYS = array(
+		'verify_google',
+		'verify_bing',
+		'verify_yandex',
+		'verify_yahoo',
+		'verify_facebook',
+	);
+
+	/**
+	 * Verification file settings keys => validation pattern.
+	 *
+	 * Anchored, and allowing no slash or dot beyond the single extension:
+	 * these values are compared against an incoming request path.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_FILE_PATTERNS = array(
+		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
+		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
+		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	);
+
+	/**
+	 * Tracking ID settings keys => validation pattern.
+	 *
+	 * @var array<string, string>
+	 */
+	private const TRACKING_ID_PATTERNS = array(
+		'analytics_ga4_id' => '/^G-[A-Z0-9]{4,}$/',
+		'analytics_gtm_id' => '/^GTM-[A-Z0-9]{4,}$/',
+		'meta_pixel_id'    => '/^[0-9]{10,20}$/',
+	);
+
+	/**
 	 * Tab slugs => labels (labels translated at render time).
 	 *
 	 * @var array<string, string>
@@ -43,6 +83,7 @@ class SettingsPage {
 		'social'    => 'Social Networks',
 		'schema'    => 'Schema & Breadcrumbs',
 		'sitemap'   => 'Sitemap',
+		'webmaster' => 'Webmaster Tools',
 	);
 
 	/**
@@ -173,6 +214,7 @@ class SettingsPage {
 			'social'    => $this->render_social_tab(),
 			'schema'    => $this->render_schema_tab(),
 			'sitemap'   => $this->render_sitemap_tab(),
+			'webmaster' => $this->render_webmaster_tab(),
 			default     => $this->render_general_tab(),
 		};
 
@@ -473,6 +515,87 @@ class SettingsPage {
 	}
 
 	/**
+	 * Webmaster Tools tab: site verification and tracking snippets.
+	 *
+	 * @return void
+	 */
+	private function render_webmaster_tab(): void {
+		$services = array(
+			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), 'verify_google', 'verify_google_file', __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ) ),
+			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), 'verify_bing', 'verify_bing_file', __( 'Token from BingSiteAuth.xml', 'the-another-seo' ) ),
+			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), 'verify_yandex', 'verify_yandex_file', __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ) ),
+			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), 'verify_yahoo', '', '' ),
+			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), 'verify_facebook', '', '' ),
+		);
+
+		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only.', 'the-another-seo' ) . '</p>';
+		echo '<table class="form-table">';
+
+		foreach ( $services as $engine => $service ) {
+			list( $label, $code_key, $file_key, $file_hint ) = $service;
+
+			printf(
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" class="regular-text" placeholder="%4$s" />',
+				esc_html( $label ),
+				esc_attr( $code_key ),
+				esc_attr( $this->settings->get_verification_code( $engine ) ),
+				esc_attr__( 'Verification code', 'the-another-seo' )
+			);
+
+			if ( '' !== $file_key ) {
+				$file_value = $this->settings->get_verification_file( $engine );
+
+				printf(
+					'<br /><input type="text" name="taseo_settings[%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
+					esc_attr( $file_key ),
+					esc_attr( $file_value ),
+					esc_attr( $file_hint )
+				);
+
+				if ( '' !== $file_value ) {
+					$filename = 'bing' === $engine ? VerificationFileServer::BING_FILENAME : $file_value;
+
+					printf(
+						' <a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
+						esc_url( home_url( '/' . $filename ) )
+					);
+				}
+			}
+
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+
+		echo '<h2>' . esc_html__( 'Tracking', 'the-another-seo' ) . '</h2>';
+		echo '<table class="form-table">';
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_ga4_id]" value="%s" placeholder="G-XXXXXXXXXX" /></td></tr>',
+			esc_html__( 'GA4 Measurement ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_ga4_id() )
+		);
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_gtm_id]" value="%s" placeholder="GTM-XXXXXXX" /></td></tr>',
+			esc_html__( 'Tag Manager Container ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_gtm_id() )
+		);
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[meta_pixel_id]" value="%s" placeholder="123456789012345" /></td></tr>',
+			esc_html__( 'Meta Pixel ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_meta_pixel_id() )
+		);
+		echo '</table>';
+
+		if ( '' !== $this->settings->get_ga4_id() && '' !== $this->settings->get_gtm_id() ) {
+			printf(
+				'<div class="notice notice-warning inline"><p>%s</p></div>',
+				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
+			);
+		}
+	}
+
+	/**
 	 * Admin_post save handler.
 	 *
 	 * @param bool $do_exit Exit after redirect (false in tests).
@@ -488,8 +611,14 @@ class SettingsPage {
 
 		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
 
+		$redirect = admin_url( 'options-general.php?page=taseo&updated=1' );
+
+		if ( array_key_exists( $tab, self::TABS ) ) {
+			$redirect = add_query_arg( 'tab', $tab, $redirect );
+		}
+
 		// phpcs:ignore WordPressVIPMinimum.Security.ExitAfterRedirect.NoExit -- conditional exit based on testability flag.
-		wp_safe_redirect( admin_url( 'options-general.php?page=taseo&updated=1' ) );
+		wp_safe_redirect( $redirect );
 
 		if ( $do_exit ) {
 			exit;
@@ -646,6 +775,34 @@ class SettingsPage {
 				$clean['schema_types'][ sanitize_key( (string) $subtype ) ] =
 					in_array( $type, self::SCHEMA_TYPE_CHOICES, true ) ? $type : 'WebPage';
 			}
+		}
+
+		foreach ( self::VERIFICATION_CODE_KEYS as $code_key ) {
+			if ( isset( $raw[ $code_key ] ) ) {
+				$clean[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
+			}
+		}
+
+		foreach ( self::VERIFICATION_FILE_PATTERNS as $file_key => $pattern ) {
+			if ( ! isset( $raw[ $file_key ] ) ) {
+				continue;
+			}
+
+			$value = trim( (string) $raw[ $file_key ] );
+			$value = 'verify_bing_file' === $file_key ? $value : strtolower( $value );
+
+			$clean[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+		}
+
+		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
+			if ( ! isset( $raw[ $id_key ] ) ) {
+				continue;
+			}
+
+			$value = trim( (string) $raw[ $id_key ] );
+			$value = 'meta_pixel_id' === $id_key ? $value : strtoupper( $value );
+
+			$clean[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
 		}
 
 		if ( 'social' === $tab ) {

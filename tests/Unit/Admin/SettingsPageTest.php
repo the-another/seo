@@ -38,6 +38,9 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'sanitize_text_field' )->returnArg();
 		Functions\when( 'esc_url_raw' )->returnArg();
 		Functions\when( 'absint' )->alias( fn( $v ) => abs( (int) $v ) );
+		Functions\when( 'add_query_arg' )->alias(
+			static fn( string $key, string $value, string $url ): string => $url . '&' . $key . '=' . $value
+		);
 
 		$this->sitemap_files   = Mockery::mock( SitemapFileRepository::class );
 		$this->sitemap_writer  = Mockery::mock( SitemapFileWriter::class );
@@ -312,5 +315,128 @@ class SettingsPageTest extends TestCase {
 		$this->page->maybe_print_sitemap_storage_notice();
 
 		$this->assertSame( '', ob_get_clean() );
+	}
+
+	public function test_sanitizes_verification_codes_from_pasted_meta_tags(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google'   => '<meta name="google-site-verification" content="AbC123_-xyz" />',
+				'verify_bing'     => '  BINGTOKEN  ',
+				'verify_yandex'   => 'yan"dex<token>',
+				'verify_yahoo'    => 'yahootoken',
+				'verify_facebook' => 'metatoken',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( 'AbC123_-xyz', $clean['verify_google'] );
+		$this->assertSame( 'BINGTOKEN', $clean['verify_bing'] );
+		$this->assertSame( 'yandextoken', $clean['verify_yandex'] );
+		$this->assertSame( 'yahootoken', $clean['verify_yahoo'] );
+		$this->assertSame( 'metatoken', $clean['verify_facebook'] );
+	}
+
+	public function test_accepts_valid_verification_filenames(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google_file' => 'google1a2b3c.html',
+				'verify_bing_file'   => 'BINGTOKEN123',
+				'verify_yandex_file' => 'yandex_9f8e7d.html',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( 'google1a2b3c.html', $clean['verify_google_file'] );
+		$this->assertSame( 'BINGTOKEN123', $clean['verify_bing_file'] );
+		$this->assertSame( 'yandex_9f8e7d.html', $clean['verify_yandex_file'] );
+	}
+
+	public function test_rejects_verification_filenames_containing_paths(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google_file' => '../wp-config.php',
+				'verify_yandex_file' => 'yandex_x.html/../../etc/passwd',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( '', $clean['verify_google_file'] );
+		$this->assertSame( '', $clean['verify_yandex_file'] );
+	}
+
+	public function test_rejects_a_verification_filename_with_the_wrong_prefix(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google_file' => 'notgoogle123.html' ),
+			'webmaster'
+		);
+
+		$this->assertSame( '', $clean['verify_google_file'] );
+	}
+
+	public function test_normalizes_and_validates_tracking_ids(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'analytics_ga4_id' => ' g-abcd1234 ',
+				'analytics_gtm_id' => 'gtm-xyz789',
+				'meta_pixel_id'    => ' 0123456789012 ',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( 'G-ABCD1234', $clean['analytics_ga4_id'] );
+		$this->assertSame( 'GTM-XYZ789', $clean['analytics_gtm_id'] );
+		$this->assertSame( '0123456789012', $clean['meta_pixel_id'] );
+	}
+
+	public function test_rejects_malformed_tracking_ids(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'analytics_ga4_id' => 'UA-12345-1',
+				'analytics_gtm_id' => 'GTM',
+				'meta_pixel_id'    => '12345',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( '', $clean['analytics_ga4_id'] );
+		$this->assertSame( '', $clean['analytics_gtm_id'] );
+		$this->assertSame( '', $clean['meta_pixel_id'] );
+	}
+
+	public function test_clearing_a_verification_field_clears_the_stored_key(): void {
+		$clean = $this->page->sanitize_settings( array( 'verify_google' => '' ), 'webmaster' );
+
+		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	public function test_save_redirect_preserves_the_active_tab(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'webmaster';
+		$_POST['taseo_settings']       = array( 'verify_google' => 'googletoken' );
+
+		$redirected = '';
+
+		Functions\when( 'wp_verify_nonce' )->justReturn( true );
+		Functions\when( 'current_user_can' )->justReturn( true );
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\when( 'sanitize_key' )->returnArg();
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'admin_url' )->alias( static fn( string $path ) => 'https://example.com/wp-admin/' . $path );
+		Functions\when( 'add_query_arg' )->alias(
+			static fn( string $key, string $value, string $url ) => $url . '&' . $key . '=' . $value
+		);
+		Functions\when( 'wp_safe_redirect' )->alias(
+			function ( string $location ) use ( &$redirected ): void {
+				$redirected = $location;
+			}
+		);
+
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->page->handle_save( false );
+
+		$this->assertStringContainsString( 'tab=webmaster', $redirected );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
 	}
 }
