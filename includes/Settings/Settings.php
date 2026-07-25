@@ -35,6 +35,31 @@ class Settings {
 	);
 
 	/**
+	 * Engine slug => settings key for verification meta-tag codes.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_KEYS = array(
+		'google'   => 'verify_google',
+		'bing'     => 'verify_bing',
+		'yandex'   => 'verify_yandex',
+		'yahoo'    => 'verify_yahoo',
+		'facebook' => 'verify_facebook',
+	);
+
+	/**
+	 * Engine slug => settings key for verification files. Yahoo retired its
+	 * own webmaster tools; Meta does not publish its file body format.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_FILE_KEYS = array(
+		'google' => 'verify_google_file',
+		'bing'   => 'verify_bing_file',
+		'yandex' => 'verify_yandex_file',
+	);
+
+	/**
 	 * Get one settings key.
 	 *
 	 * @param string $key      Key.
@@ -295,5 +320,58 @@ class Settings {
 		$stored = (int) $this->get( 'sitemap_max_links', 1000 );
 
 		return max( 1, min( 1000, $stored ) );
+	}
+
+	/**
+	 * Verification meta-tag code for one service.
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Code, '' when unset or unknown.
+	 */
+	public function get_verification_code( string $engine ): string {
+		$key = self::VERIFICATION_KEYS[ $engine ] ?? '';
+
+		return '' === $key ? '' : (string) $this->get( $key, '' );
+	}
+
+	/**
+	 * Verification file value for one service. Google and Yandex store the
+	 * full filename; Bing stores only the token (its filename is fixed).
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Value, '' when unset or unknown.
+	 */
+	public function get_verification_file( string $engine ): string {
+		$key = self::VERIFICATION_FILE_KEYS[ $engine ] ?? '';
+
+		return '' === $key ? '' : (string) $this->get( $key, '' );
+	}
+
+	/**
+	 * GA4 measurement ID.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_ga4_id(): string {
+		return (string) $this->get( 'analytics_ga4_id', '' );
+	}
+
+	/**
+	 * Google Tag Manager container ID.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_gtm_id(): string {
+		return (string) $this->get( 'analytics_gtm_id', '' );
+	}
+
+	/**
+	 * Meta Pixel ID. Returned as a string, never cast to int: a leading
+	 * zero is significant and casting would silently change the pixel.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_meta_pixel_id(): string {
+		return (string) $this->get( 'meta_pixel_id', '' );
 	}
 }

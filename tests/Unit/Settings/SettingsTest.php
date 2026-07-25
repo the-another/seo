@@ -129,4 +129,90 @@ class SettingsTest extends TestCase {
 		Functions\when( 'get_option' )->justReturn( array( 'sitemap_max_links' => 500 ) );
 		$this->assertSame( 500, ( new Settings() )->get_sitemap_max_links() );
 	}
+
+	public function test_verification_code_returns_stored_value_per_engine(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'   => 'googletoken',
+				'verify_bing'     => 'bingtoken',
+				'verify_yandex'   => 'yandextoken',
+				'verify_yahoo'    => 'yahootoken',
+				'verify_facebook' => 'metatoken',
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'googletoken', $settings->get_verification_code( 'google' ) );
+		$this->assertSame( 'bingtoken', $settings->get_verification_code( 'bing' ) );
+		$this->assertSame( 'yandextoken', $settings->get_verification_code( 'yandex' ) );
+		$this->assertSame( 'yahootoken', $settings->get_verification_code( 'yahoo' ) );
+		$this->assertSame( 'metatoken', $settings->get_verification_code( 'facebook' ) );
+	}
+
+	public function test_verification_code_defaults_to_empty_string(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( '', ( new Settings() )->get_verification_code( 'google' ) );
+	}
+
+	public function test_verification_code_returns_empty_string_for_unknown_engine(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_google' => 'googletoken' ) );
+
+		$this->assertSame( '', ( new Settings() )->get_verification_code( 'duckduckgo' ) );
+	}
+
+	public function test_verification_file_returns_stored_value_per_engine(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google_file' => 'google1a2b3c.html',
+				'verify_bing_file'   => 'BINGTOKEN123',
+				'verify_yandex_file' => 'yandex_9f8e7d.html',
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'google1a2b3c.html', $settings->get_verification_file( 'google' ) );
+		$this->assertSame( 'BINGTOKEN123', $settings->get_verification_file( 'bing' ) );
+		$this->assertSame( 'yandex_9f8e7d.html', $settings->get_verification_file( 'yandex' ) );
+	}
+
+	public function test_verification_file_returns_empty_string_for_engine_without_file_method(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_facebook' => 'metatoken' ) );
+
+		$this->assertSame( '', ( new Settings() )->get_verification_file( 'facebook' ) );
+	}
+
+	public function test_tracking_ids_return_stored_values(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'analytics_ga4_id' => 'G-ABCD1234',
+				'analytics_gtm_id' => 'GTM-XYZ789',
+				'meta_pixel_id'    => '0123456789012345',
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'G-ABCD1234', $settings->get_ga4_id() );
+		$this->assertSame( 'GTM-XYZ789', $settings->get_gtm_id() );
+		$this->assertSame( '0123456789012345', $settings->get_meta_pixel_id() );
+	}
+
+	public function test_tracking_ids_default_to_empty_string(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$settings = new Settings();
+
+		$this->assertSame( '', $settings->get_ga4_id() );
+		$this->assertSame( '', $settings->get_gtm_id() );
+		$this->assertSame( '', $settings->get_meta_pixel_id() );
+	}
+
+	public function test_meta_pixel_id_preserves_leading_zero(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'meta_pixel_id' => '0987654321098' ) );
+
+		$this->assertSame( '0987654321098', ( new Settings() )->get_meta_pixel_id() );
+	}
 }
