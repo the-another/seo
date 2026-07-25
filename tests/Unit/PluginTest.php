@@ -71,6 +71,7 @@ class PluginTest extends TestCase {
 			'sitemap_assignment',
 			'sitemap_sweeper',
 			'sitemap_server',
+			'verification_output',
 		) as $key ) {
 			$this->assertTrue( $container->has( $key ), "Missing service: {$key}" );
 		}
