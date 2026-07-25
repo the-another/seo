@@ -52,7 +52,7 @@ wp rewrite flush --path="$WP_DIR" --allow-root
 # with `Cannot create key "..." on data type boolean` when it tries to patch
 # a key into that. Seed an empty array first so the inserts below have an
 # array to patch into.
-wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root
+wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root || true
 wp option patch insert taseo_settings verify_google 'googlee2etoken' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_bing 'BINGE2ETOKEN' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_yandex 'yandexe2etoken' --path="$WP_DIR" --allow-root
