@@ -439,4 +439,217 @@ class SettingsPageTest extends TestCase {
 
 		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
 	}
+
+	/**
+	 * Stub the WP escaping/i18n/nonce/button functions render_page() and its
+	 * tab renderers call. None carry assertions of their own; they exist so
+	 * the full render_page() dispatch doesn't fatal on undefined functions.
+	 *
+	 * @return void
+	 */
+	private function stub_render_functions(): void {
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'esc_html__' )->returnArg();
+		Functions\when( 'esc_attr__' )->returnArg();
+		// esc_html() is a real function (tests/Unit/bootstrap.php), defined
+		// directly in the bootstrap script rather than through a Patchwork-
+		// wrapped include, so Brain\Monkey cannot redefine it — stubbing it
+		// throws Patchwork\Exceptions\DefinedTooEarly. Its real
+		// implementation (htmlspecialchars) is a no-op on the plain
+		// alphanumeric strings and URLs these tests use, so no stub is
+		// needed here.
+		Functions\when( 'esc_attr' )->returnArg();
+		Functions\when( 'esc_url' )->returnArg();
+		Functions\when( 'admin_url' )->alias( static fn( string $path = '' ): string => 'https://example.com/wp-admin/' . $path );
+		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => 'https://example.com' . $path );
+		Functions\when( 'wp_nonce_field' )->justReturn( null );
+		Functions\when( 'submit_button' )->justReturn( null );
+	}
+
+	/**
+	 * Wire up Settings getter expectations for the webmaster tab, defaulting
+	 * every verification code/file and tracking ID to '' unless overridden.
+	 *
+	 * @param array<string, string> $codes Verification codes keyed by engine.
+	 * @param array<string, string> $files Verification files keyed by engine.
+	 * @param string                $ga4   GA4 measurement ID.
+	 * @param string                $gtm   GTM container ID.
+	 * @param string                $pixel Meta Pixel ID.
+	 * @return void
+	 */
+	private function stub_webmaster_settings(
+		array $codes = array(),
+		array $files = array(),
+		string $ga4 = '',
+		string $gtm = '',
+		string $pixel = ''
+	): void {
+		$codes = array_merge(
+			array(
+				'google'   => '',
+				'bing'     => '',
+				'yandex'   => '',
+				'yahoo'    => '',
+				'facebook' => '',
+			),
+			$codes
+		);
+
+		$files = array_merge(
+			array(
+				'google' => '',
+				'bing'   => '',
+				'yandex' => '',
+			),
+			$files
+		);
+
+		foreach ( $codes as $engine => $value ) {
+			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine )->andReturn( $value );
+		}
+
+		foreach ( $files as $engine => $value ) {
+			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine )->andReturn( $value );
+		}
+
+		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( $ga4 );
+		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( $gtm );
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->andReturn( $pixel );
+	}
+
+	/**
+	 * Render the full tabbed page with the webmaster tab active and return
+	 * the output. render_webmaster_tab() is private, so this drives it the
+	 * way the real admin screen does: through render_page()'s tab dispatch.
+	 *
+	 * @return string Rendered HTML.
+	 */
+	private function render_webmaster_html(): string {
+		$this->stub_render_functions();
+
+		$_GET['tab'] = 'webmaster';
+
+		ob_start();
+		$this->page->render_page();
+		$html = (string) ob_get_clean();
+
+		unset( $_GET['tab'] );
+
+		return $html;
+	}
+
+	public function test_webmaster_tab_renders_an_input_for_every_verification_and_tracking_key(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		foreach ( array( 'verify_google', 'verify_bing', 'verify_yandex', 'verify_yahoo', 'verify_facebook' ) as $key ) {
+			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
+		}
+
+		foreach ( array( 'verify_google_file', 'verify_bing_file', 'verify_yandex_file' ) as $key ) {
+			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
+		}
+
+		foreach ( array( 'analytics_ga4_id', 'analytics_gtm_id', 'meta_pixel_id' ) as $key ) {
+			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
+		}
+	}
+
+	public function test_webmaster_tab_shows_stored_values_as_input_values(): void {
+		$this->stub_webmaster_settings(
+			array(
+				'google'   => 'googletoken',
+				'bing'     => 'bingtoken',
+				'yandex'   => 'yandextoken',
+				'yahoo'    => 'yahootoken',
+				'facebook' => 'facebooktoken',
+			),
+			array(
+				'google' => 'google1a2b3c.html',
+				'bing'   => 'bingfiletoken',
+				'yandex' => 'yandex_9f8e7d.html',
+			),
+			'G-ABCD1234',
+			'GTM-ABCD123',
+			'123456789012345'
+		);
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'name="taseo_settings[verify_google]" value="googletoken"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_bing]" value="bingtoken"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex]" value="yandextoken"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_yahoo]" value="yahootoken"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_facebook]" value="facebooktoken"', $html );
+
+		$this->assertStringContainsString( 'name="taseo_settings[verify_google_file]" value="google1a2b3c.html"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_bing_file]" value="bingfiletoken"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex_file]" value="yandex_9f8e7d.html"', $html );
+
+		$this->assertStringContainsString( 'name="taseo_settings[analytics_ga4_id]" value="G-ABCD1234"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[analytics_gtm_id]" value="GTM-ABCD123"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[meta_pixel_id]" value="123456789012345"', $html );
+	}
+
+	public function test_webmaster_tab_links_a_configured_verification_file(): void {
+		$this->stub_webmaster_settings( array(), array( 'google' => 'google1a2b3c.html' ) );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString(
+			'<a href="https://example.com/google1a2b3c.html" target="_blank" rel="noreferrer noopener">https://example.com/google1a2b3c.html</a>',
+			$html
+		);
+	}
+
+	public function test_webmaster_tab_omits_the_file_link_when_no_file_is_configured(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringNotContainsString( 'target="_blank"', $html );
+	}
+
+	public function test_webmaster_tab_bing_file_link_uses_the_fixed_filename_not_the_stored_token(): void {
+		$this->stub_webmaster_settings( array(), array( 'bing' => 'BINGTOKEN123' ) );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'https://example.com/BingSiteAuth.xml', $html );
+		$this->assertStringNotContainsString( 'https://example.com/BINGTOKEN123', $html );
+	}
+
+	public function test_webmaster_tab_warns_when_both_ga4_and_gtm_are_set(): void {
+		$this->stub_webmaster_settings( array(), array(), 'G-ABCD1234', 'GTM-ABCD123' );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_does_not_warn_when_only_ga4_is_set(): void {
+		$this->stub_webmaster_settings( array(), array(), 'G-ABCD1234', '' );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_does_not_warn_when_only_gtm_is_set(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-ABCD123' );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_does_not_warn_when_neither_ga4_nor_gtm_is_set(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
 }
