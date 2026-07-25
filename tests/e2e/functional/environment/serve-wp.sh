@@ -41,6 +41,29 @@ wp plugin install "$ZIP" --activate --path="$WP_DIR" --allow-root
 wp rewrite structure '/%postname%/' --path="$WP_DIR" --allow-root
 wp rewrite flush --path="$WP_DIR" --allow-root
 
+# Seed verification and tracking settings so the webmaster spec has
+# deterministic values to assert against. `option patch insert` writes one
+# key inside the serialized taseo_settings array without clobbering the rest.
+#
+# taseo_settings does not exist yet at this point — the plugin only creates
+# it lazily when the settings page is saved (Settings::update()). `wp option
+# patch insert` on a genuinely missing option fetches WordPress's own
+# get_option() default of boolean `false` as the "current value" and fails
+# with `Cannot create key "..." on data type boolean` when it tries to patch
+# a key into that. Seed an empty array first so the inserts below have an
+# array to patch into.
+wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google 'googlee2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing 'BINGE2ETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_yandex 'yandexe2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_yahoo 'yahooe2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_facebook 'metae2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google_file 'googlee2efile.html' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing_file 'BINGFILETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
+
 # Drain the Action Scheduler queue: the initial indexable backfill runs as a
 # chain of async taseo_backfill_batch actions (each batch re-enqueues the
 # next). Draining it here makes indexable rows and static sitemap chunk
