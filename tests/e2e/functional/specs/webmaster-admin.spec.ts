@@ -25,19 +25,28 @@ const WEBMASTER_TAB_URL = '/wp-admin/options-general.php?page=taseo&tab=webmaste
  * Click the settings form's "Save Changes" button and wait for the redirect
  * back to this tab.
  *
- * force: true is load-bearing, not a shortcut: clicking WordPress core's own
- * #submit button a second time on the same page/session reliably wedges
+ * force: true is load-bearing, not a shortcut. The wedge is ORDER-dependent,
+ * not element-dependent: the first click-family action (click(), check(),
+ * uncheck()) in a session succeeds, and every subsequent one reliably wedges
  * Playwright's actionability wait ("waiting for element to be visible,
  * enabled and stable") forever — reproduced in isolation with a bare
- * Playwright script driving this exact WP admin button twice in a row, with
- * no plugin JS involved at all (this plugin enqueues no admin_enqueue_scripts
+ * Playwright script driving WP core's #submit button twice in a row, with no
+ * plugin JS involved at all (this plugin enqueues no admin_enqueue_scripts
  * assets) and the PHP side round-tripping the POST in under 50ms both times
- * (confirmed with curl). Moving the mouse away first does not help, and no
- * dialog is involved; it looks like a Chromium/Playwright hover-transition
- * false negative on this specific WP core button markup. force: true still
- * dispatches a real, trusted click — it skips the actionability wait, not
- * the click itself — and the assertions after every call here independently
- * confirm the save actually happened.
+ * (confirmed with curl). It is not specific to #submit or to WP core's
+ * markup: specs/zz-admin-tour.spec.ts hits the identical wedge on a
+ * checkbox's uncheck() — a different element entirely — once it is the
+ * second click-family action in that test. Moving the mouse away first does
+ * not help, and no dialog is involved; it looks like a Chromium/Playwright
+ * hover-transition false negative that only triggers once a session already
+ * has one such action behind it. force: true still dispatches a real,
+ * trusted click — it skips the actionability wait, not the click itself —
+ * and the assertions after every call here independently confirm the save
+ * actually happened.
+ *
+ * Adding a third click-family interaction to one of these sessions will hit
+ * this same wedge; give it force: true and its own independent assertions
+ * too, rather than being surprised by it.
  *
  * @param page Playwright page, already on the webmaster tab with the form
  *             filled in.
