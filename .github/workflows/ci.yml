@@ -59,13 +59,12 @@ jobs:
       - name: Run functional e2e suite
         run: sh scripts/tests/e2e.sh
 
-      - name: Upload Playwright report and video
-        if: always()
+      - name: Upload e2e video and traces
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: playwright-report-functional
           path: |
-            playwright-report/
             test-results/
           retention-days: 7
 
