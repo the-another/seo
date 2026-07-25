@@ -13,6 +13,10 @@ leaves out.
 - **Schema.org JSON-LD** — structured data output for search engines.
 - **Breadcrumbs block** — a native block for theme templates.
 - **Chunked static sitemaps** — XML sitemaps split into bounded chunks.
+- **Site verification** — meta tags for Google, Bing, Yandex, Yahoo, and Meta,
+  plus virtually-served verification files for Google, Bing, and Yandex.
+- **Tracking snippets** — GA4, Google Tag Manager, and Meta Pixel, with filters
+  for per-page secondary properties and consent gating.
 
 ## Requirements
 

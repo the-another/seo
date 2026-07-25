@@ -19,6 +19,8 @@ The Another SEO is built for WordPress installs with very large content catalogs
 * **Schema.org JSON-LD** — a connected graph (WebSite, WebPage, Article, Product, BreadcrumbList) emitted as a single `application/ld+json` block.
 * **Breadcrumbs** — a `the-another/seo-breadcrumbs` block plus a PHP template tag, backed by Schema.org BreadcrumbList markup.
 * **Sitemaps at catalog scale** — chunked XML sitemap files written to disk and served statically, with a live root index at `/sitemap.xml`; core's `/wp-sitemap.xml` is disabled while the plugin serves its own tree.
+* **Site verification** — Google Search Console, Bing, Yandex, Yahoo, and Meta domain verification by meta tag, plus virtually-served verification files for Google, Bing, and Yandex (no FTP, nothing written to disk).
+* **Tracking snippets** — GA4, Google Tag Manager, and Meta Pixel, with filters for per-page secondary properties and consent gating.
 
 The initial index backfill runs in background batches via Action Scheduler, so activation stays instant even on sites with millions of objects.
 
@@ -27,6 +29,24 @@ The initial index backfill runs in background batches via Action Scheduler, so a
 1. Upload the plugin files to the `/wp-content/plugins/the-another-seo` directory, or install the plugin through the WordPress plugins screen directly.
 2. Activate the plugin through the 'Plugins' screen in WordPress.
 3. Review templates and enabled post types under Settings → The Another SEO. The initial background index builds automatically after activation.
+
+== External services ==
+
+This plugin can load third-party scripts, but only when you configure them. With no IDs entered, the plugin contacts no external service.
+
+**Google Analytics (GA4) and Google Tag Manager**
+
+Loaded only when you enter a GA4 Measurement ID or a Tag Manager Container ID on the Webmaster Tools settings tab. These scripts are served from `googletagmanager.com` (`/gtag/js`, `/gtm.js`, `/ns.html`) and send your visitors' IP address, user agent, and the URL being viewed to Google, which uses them for analytics measurement.
+
+Terms of service: https://policies.google.com/terms — Privacy policy: https://policies.google.com/privacy
+
+**Meta Pixel**
+
+Loaded only when you enter a Meta Pixel ID on the Webmaster Tools settings tab. The script is served from `connect.facebook.net` and sends your visitors' IP address, user agent, the URL being viewed, and any Meta cookies already present in the browser to Meta, which uses them for advertising measurement and ad targeting. A tracking image is also requested from `facebook.com/tr`.
+
+Terms of service: https://www.facebook.com/legal/terms/businesstools — Privacy policy: https://www.facebook.com/privacy/policy/
+
+Site verification meta tags and verification files contact no external service; a search engine fetches them from your site.
 
 == Frequently Asked Questions ==
 
