@@ -162,9 +162,10 @@ breaking what it protects and confirming a red run:
 
 Both are checked and reverted; neither ships.
 
-The existing suites must be unaffected: `make test-e2e` currently reports 24 passing
-across seven spec files, and must report 25 across eight with every pre-existing test
-still green.
+The existing suites must be unaffected: `make test-e2e` currently reports 24 passing.
+That total counts the `setup` project's provisioning test alongside the seven spec
+files, so this feature adds two: the snapshot setup step and the tour itself. The
+suite must end at 26 passing with every pre-existing test still green.
 
 ## Out of scope
 
