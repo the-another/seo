@@ -1,4 +1,4 @@
-# The Another SEO — Webmaster Verification & Analytics — Design
+# The Another SEO — Webmaster Verification & Tracking — Design
 
 **Plugin slug:** `the-another-seo`
 **Date:** 2026-07-25
@@ -9,7 +9,7 @@
 Two related additions that share one settings tab and one release:
 
 1. **Site verification** for Google Search Console, Bing Webmaster Tools, Yandex Webmaster, and Yahoo, by both methods a plugin can serve: the **HTML tag** (a `<meta>` in `<head>`) and the **HTML file** (a token-named file at the site root, served virtually — no file written to disk, no FTP). Method C (Google Analytics) is satisfied as a side effect of the analytics work below. DNS TXT verification is the one method out of reach — see [Out of scope](#out-of-scope).
-2. **Analytics snippet output** — a GA4 Measurement ID and a Google Tag Manager Container ID, emitted through the WordPress script API, with a filter surface that lets developers add secondary tracking properties per page without any additional UI or database schema.
+2. **Tracking snippet output** — a GA4 Measurement ID, a Google Tag Manager Container ID, and a Meta Pixel ID, with a filter surface that lets developers add secondary tracking IDs per page without any additional UI or database schema.
 
 Neither feature touches the indexable table, the sitemap subsystem, or any existing output class. Both are additive: with empty settings the plugin's rendered output is byte-identical to today's.
 
@@ -22,6 +22,7 @@ Neither feature touches the indexable table, the sitemap subsystem, or any exist
 5. **Verification tags print on the front page only** — search engines read the tag at the property root, so printing ~200 bytes on every URL of a catalog-scale site buys nothing. A filter widens this for subdirectory-prefix properties.
 6. **Two focused output services, not one combined class** — verification and analytics have different print conditions, different hooks, and different filter surfaces.
 7. **HTML-file verification is in scope alongside the meta tags** — the plugin serves `google<token>.html`, `BingSiteAuth.xml`, and `yandex_<token>.html` virtually. This is the route for anyone who would otherwise be sent to their registrar, and it is the method some teams prefer because the token never appears in page source.
+8. **Meta Pixel is in scope**, in its own output class rather than inside the Google one. It is a different vendor with a different snippet, a different consent profile, and a different failure mode; the only thing it shares with GA4 is the settings tab it appears on.
 
 ## Architecture
 
@@ -32,16 +33,19 @@ Two new hook-bearing services, registered in `Plugin::register_services()` and i
 | `Verification/VerificationOutput` | `wp_head` (priority 1) | front page only | ~70 lines |
 | `Verification/VerificationFileServer` | `template_redirect` (priority 0) | request path matches a configured filename | ~90 lines |
 | `Analytics/AnalyticsOutput` | `wp_enqueue_scripts`, `wp_head`, `wp_body_open` | frontend, any URL | ~120 lines |
+| `Analytics/MetaPixelOutput` | `wp_head`, `wp_body_open` | frontend, any URL | ~80 lines |
 
 **Why verification is not folded into `MetaOutput`:** `MetaOutput::print_head_tags()` returns early when `CurrentContext::resolve()` yields `null`, and a blog-index front page has no indexable row. Verification tags must print regardless of context resolution, so sharing that method would mean either duplicating the guard or weakening it.
 
 **Why file serving is a separate class from tag output:** it is a request handler, not a renderer. It terminates the request with `exit`, sets its own status and content-type headers, and never runs on a normal page load. Sharing a class with a `wp_head` printer would put a hard `exit` inside an output method — the kind of thing that makes every test around it awkward.
 
-**Why analytics is not folded into verification:** different lifecycle. Verification is four static `<meta>` tags on one URL with no scripts; analytics is a `<head>` script plus a `<body>` `noscript` iframe on every URL, with its own enable condition and six-filter surface. Combining them produces one class with two unrelated print paths — the file most likely to sprawl at the next feature.
+**Why analytics is not folded into verification:** different lifecycle. Verification is four static `<meta>` tags on one URL with no scripts; analytics is a `<head>` script plus a `<body>` `noscript` iframe on every URL, with its own enable condition and filter surface. Combining them produces one class with two unrelated print paths — the file most likely to sprawl at the next feature.
+
+**Why GA4 and GTM share a class but Meta Pixel does not:** GA4 and GTM are one vendor and one lineage — the same `dataLayer`, the same `googletagmanager.com` origin, and a genuine interaction between them (a container that already fires a GA4 tag is what the double-count warning is about). They are configured together and reasoned about together. Meta Pixel shares none of that: different origin, different snippet, different consent profile, and no interaction with either Google tag. Putting it in `AnalyticsOutput` would mean one class holding two vendors' snippets and three enable conditions, and it would make "add Matomo next" a fourth branch in the same file instead of a fourth small class.
 
 ## Settings
 
-Nine new keys in the existing `taseo_settings` option array. No new option, no new table, no migration.
+Ten new keys in the existing `taseo_settings` option array. No new option, no new table, no migration.
 
 **Meta-tag method** — four keys:
 
@@ -62,12 +66,13 @@ Nine new keys in the existing `taseo_settings` option array. No new option, no n
 
 Google and Yandex name the file after the token, so the field takes the whole filename the service gave you and the token is derived from it — one value to paste, nothing to transcribe. Bing's filename is always `BingSiteAuth.xml`, so its field takes the token that goes inside.
 
-**Analytics** — two keys:
+**Tracking** — three keys:
 
 | Key | Stored format |
 |---|---|
 | `analytics_ga4_id` | `/^G-[A-Z0-9]{4,}$/`, upper-cased |
 | `analytics_gtm_id` | `/^GTM-[A-Z0-9]{4,}$/`, upper-cased |
+| `meta_pixel_id` | `/^[0-9]{10,20}$/` — Meta Pixel IDs are bare numeric strings |
 
 New `Settings` getters, following the existing one-getter-per-key convention with defaults carried in the getter:
 
@@ -76,6 +81,7 @@ public function get_verification_code( string $engine ): string;  // 'google'|'b
 public function get_verification_file( string $engine ): string;  // 'google'|'bing'|'yandex', '' default
 public function get_ga4_id(): string;                             // '' default
 public function get_gtm_id(): string;                             // '' default
+public function get_meta_pixel_id(): string;                      // '' default, string not int — leading digits are significant
 ```
 
 `get_verification_code()` maps an engine slug to its `verify_*` key and returns `''` for an unknown slug. The engine→meta-name mapping lives in `VerificationOutput`, not `Settings`: it is an output concern, and keeping it there means `Settings` stores four opaque strings.
@@ -85,11 +91,11 @@ public function get_gtm_id(): string;                             // '' default
 A seventh tab, `webmaster` ⇒ **Webmaster Tools**, added to `SettingsPage::TABS` and its `match` in `render_page()`, rendered by a new `render_webmaster_tab()` following the existing `printf`-into-`form-table` pattern. Two `<h2>` groups:
 
 - **Site verification** — for each service, its meta-tag field and (where supported) its file field, side by side with a one-line description. Either method verifies on its own; a service with both filled emits both, which is harmless.
-- **Analytics** — GA4 Measurement ID and GTM Container ID inputs, with `G-XXXXXXXXXX` / `GTM-XXXXXXX` placeholders.
+- **Tracking** — GA4 Measurement ID, GTM Container ID, and Meta Pixel ID inputs, with `G-XXXXXXXXXX` / `GTM-XXXXXXX` / `123456789012345` placeholders.
 
 Each configured verification file renders its live URL next to the field as a clickable link — `https://example.com/google1a2b3c4d.html`. The service is about to fetch exactly that URL, so letting the admin click it first turns "verification failed, why?" into a two-second check.
 
-When both analytics IDs are set, the tab renders an inline `notice notice-warning` inside the Analytics group:
+When both Google IDs are set, the tab renders an inline `notice notice-warning` inside the Tracking group:
 
 > Both a GA4 Measurement ID and a GTM Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.
 
@@ -97,7 +103,7 @@ This is inline rather than a global `admin_notices` banner. The two existing glo
 
 ### Sanitization
 
-Handled in `SettingsPage::sanitize_settings()`, which is already public and unit-tested. The nine new keys do **not** join the existing shared text-key loop — that loop applies `sanitize_text_field()`, which would happily store a pasted `<meta>` tag, a malformed ID, or a filename containing a path. They get three dedicated `isset()`-guarded loops instead — verification codes, verification filenames, analytics IDs — each described below.
+Handled in `SettingsPage::sanitize_settings()`, which is already public and unit-tested. The nine new keys do **not** join the existing shared text-key loop — that loop applies `sanitize_text_field()`, which would happily store a pasted `<meta>` tag, a malformed ID, or a filename containing a path. They get three dedicated `isset()`-guarded loops instead — verification codes, verification filenames, tracking IDs — each described below.
 
 **Verification codes — paste tolerance.** Search Console, Bing, and Yandex all hand the user a complete tag:
 
@@ -117,7 +123,7 @@ Step 3 is the security guarantee, not merely a tidiness pass: a stored verificat
 
 Bing's token is stored bare and its filename is a constant in the code, never user input.
 
-**Analytics IDs.** Trimmed, upper-cased, matched against their regex. A value that fails is stored as `''` rather than kept, so a typo can never reach the enqueue path and emit a script tag pointing at a nonexistent property.
+**Tracking IDs.** Trimmed, upper-cased for the two Google IDs, matched against their regex. The Meta Pixel ID is trimmed and matched against `/^[0-9]{10,20}$/`, and stored as a string — casting to `int` would strip a leading zero and silently produce a different pixel. A value that fails is stored as `''` rather than kept, so a typo can never reach the output path and emit a snippet pointing at a nonexistent property.
 
 **Tab ownership.** The `webmaster` tab owns only text keys — no checkboxes or checkbox-lists — so it needs no entry in the tab-scoped force-set block at the end of `sanitize_settings()`. That block exists because an unchecked checkbox submits nothing and would otherwise be merge-preserved forever; a cleared text input still submits `''`, so the `isset()` guard sees it and clears the key.
 
@@ -188,7 +194,7 @@ public function init( HookManager $hook_manager ): void {
 }
 ```
 
-All three callbacks share a guard: `! is_admin() && ! is_customize_preview()`, passed through `taseo_analytics_should_print`, then an emptiness check on the relevant ID list.
+All three callbacks share a guard: `! is_admin() && ! is_customize_preview()`, passed through `taseo_tracking_should_print` then `taseo_analytics_should_print`, then an emptiness check on the relevant ID list.
 
 **GA4 — `enqueue_gtag()`**
 
@@ -211,7 +217,29 @@ Body: `<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=…" h
 
 Themes predating WordPress 5.2 never fire `wp_body_open`. Those sites lose the no-JS fallback iframe while the head loader still works. This is accepted rather than worked around: the plugin already requires WordPress 6.9, so the only affected case is a theme that hardcodes `<body>` without the hook, and injecting into `the_content` or output-buffering the whole page to compensate would be far more invasive than the fallback is worth.
 
-## Filter surface
+### `Analytics/MetaPixelOutput`
+
+```php
+public function init( HookManager $hook_manager ): void {
+    $hook_manager->register_action( 'wp_head', array( $this, 'print_head' ), 2 );
+    $hook_manager->register_action( 'wp_body_open', array( $this, 'print_body' ) );
+}
+```
+
+**Head.** Meta's official base code, emitted per pixel ID through `wp_print_inline_script_tag()` — the same treatment GTM gets, and for the same reason: it is a vendor bootstrap snippet that defines its own `fbq` stub and then loads `connect.facebook.net/en_US/fbevents.js` itself. It is deliberately *not* split into `wp_enqueue_script( 'fbevents.js' )` plus an inline `fbq('init')`, even though that would be more WordPress-idiomatic. The stub must exist before `fbevents.js` executes so the queued `init`/`track` calls survive, and hand-splitting a vendor snippet to satisfy an idiom is how tracking silently half-works.
+
+With multiple IDs, the loader block is emitted once and each ID gets its own `fbq('init', '…')`, followed by a single `fbq('track', 'PageView')` — matching Meta's documented multi-pixel pattern, where `track` fires against every initialised pixel.
+
+**Body.** The `<noscript>` fallback on `wp_body_open`:
+
+```html
+<noscript><img height="1" width="1" style="display:none" alt=""
+  src="https://www.facebook.com/tr?id=<ID>&ev=PageView&noscript=1" /></noscript>
+```
+
+Meta's copy-paste snippet puts this inside `<head>`. We put it in the body instead: an `<img>` inside `<head>` forces the HTML parser out of head when scripting is disabled, which is exactly when this element is used. Moving it to `wp_body_open` is functionally identical — the browser requests the same URL — and produces valid markup. One `<img>` per pixel ID.
+
+**Consent.** Meta Pixel gets its own `taseo_meta_pixel_should_print` filter in addition to the shared `taseo_tracking_should_print`. This is not symmetry for its own sake: an advertising pixel and a first-party analytics tag routinely sit in different consent categories, and a site that has consent for analytics but not marketing needs to suppress one without the other. A single shared gate would force that site to choose between no analytics and an unconsented ad pixel.
 
 The programmatic extension API, replacing what would otherwise be per-page UI:
 
@@ -223,7 +251,12 @@ The programmatic extension API, replacing what would otherwise be per-page UI:
 | `taseo_analytics_ga4_ids` | `array<int,string>` | Secondary tracking properties, per page |
 | `taseo_analytics_gtm_ids` | `array<int,string>` | Secondary containers, per page |
 | `taseo_analytics_gtag_config` | `array<string,array<string,mixed>>` keyed by measurement ID | Per-property gtag parameters |
-| `taseo_analytics_should_print` | `bool` | Suppress entirely — consent gating, staging, logged-in exclusion |
+| `taseo_meta_pixel_ids` | `array<int,string>` | Secondary pixels, per page |
+| `taseo_tracking_should_print` | `bool` | Kill switch for **all** tracking — staging, logged-in exclusion |
+| `taseo_analytics_should_print` | `bool` | Google output only — analytics-category consent |
+| `taseo_meta_pixel_should_print` | `bool` | Meta Pixel only — marketing-category consent |
+
+The three gates are a deliberate hierarchy rather than three ways to say the same thing. `taseo_tracking_should_print` is checked first by every vendor and answers "should this request emit tracking at all" — the staging-site and logged-in-editor question. The two per-vendor gates answer the consent question, which splits along exactly the line consent frameworks split on: analytics versus marketing.
 
 **Secondary tracking**, the case that motivated this design:
 
@@ -251,7 +284,7 @@ Config values are JSON-encoded with `wp_json_encode()` into the `gtag('config', 
 
 **Everything returned from a filter is re-validated before output.** Filtered GA4 and GTM IDs go through the same regexes as stored ones and are dropped outright on failure; filtered verification codes go through the same character-class strip and are dropped only if the strip empties them; filtered meta names go through `sanitize_key()`. Failures are silent — a broken filter degrades that one entry, never the whole tag set. A filter is third-party code, and treating its return value as trusted would hand every other plugin on the site a script-injection path into `<head>` — the exact opposite of what a filter is for. ID lists are also de-duplicated, so a filter that appends the primary ID cannot double-count.
 
-**Consent is deliberately a filter, not a feature.** `taseo_analytics_should_print` is the hook a cookie-consent plugin uses to gate output. Shipping our own consent UI would mean owning banner design, regional rule sets, and consent storage — a separate product, already solved by plugins the affected sites run.
+**Consent is deliberately a filter, not a feature.** The three gates above are the hooks a cookie-consent plugin uses. Shipping our own consent UI would mean owning banner design, regional rule sets, and consent storage — a separate product, already solved by plugins the affected sites run. What this design owes those plugins is a gate at the right granularity, which is why the split is analytics/marketing rather than one switch.
 
 ## Error handling & edge cases
 
@@ -261,7 +294,8 @@ Config values are JSON-encoded with `wp_json_encode()` into the `gtag('config', 
 | Filter returns malformed IDs or codes | Dropped by re-validation; valid siblings still emit |
 | Filter appends an already-present ID | De-duplicated |
 | Both GA4 and GTM set | Both emit; inline warning in the tab |
-| Theme lacks `wp_body_open` | Head loader works; `noscript` fallback absent |
+| Meta Pixel ID with a leading zero | Preserved — stored and emitted as a string |
+| Theme lacks `wp_body_open` | Head loaders work; `noscript` iframe and pixel `<img>` fallbacks absent |
 | Paged front page (`/page/2/`) | No verification tags |
 | Admin, customizer preview, REST, feeds | No analytics output |
 | User pastes a full `<meta>` tag | `content` attribute extracted |
@@ -278,14 +312,15 @@ Pages carrying `noindex` still emit analytics — analytics measures traffic, no
 
 Contacting a third-party service requires disclosure in `readme.txt` under the .org guidelines, and Plugin Check flags its absence. Because `scripts/tests/plugin-check.sh` is one of the four CI jobs, a missing disclosure fails the build — this is a hard requirement, not a nicety.
 
-`readme.txt` gains an **External services** section stating:
+`readme.txt` gains an **External services** section with one entry per service:
 
-- The plugin loads Google Analytics (`googletagmanager.com/gtag/js`) and/or Google Tag Manager (`googletagmanager.com/gtm.js`, `googletagmanager.com/ns.html`).
-- These load **only** when the site owner enters a Measurement ID or Container ID; the plugin contacts nothing by default.
-- What is transmitted: the visitor's IP address, user agent, and the URL being viewed, sent to Google by the loaded script.
-- Links to Google's terms of service and privacy policy.
+**Google Analytics / Google Tag Manager** — `googletagmanager.com/gtag/js`, `googletagmanager.com/gtm.js`, `googletagmanager.com/ns.html`. Loaded only when the site owner enters a Measurement ID or Container ID. Transmits the visitor's IP address, user agent, and the URL being viewed. Links to Google's terms and privacy policy.
 
-Verification meta tags need no disclosure — they are inert markup that contacts no one.
+**Meta Pixel** — `connect.facebook.net/en_US/fbevents.js` and `facebook.com/tr`. Loaded only when the site owner enters a Pixel ID. Transmits the visitor's IP address, user agent, the URL being viewed, and any Meta cookies already in the browser, and is used for advertising measurement and targeting. Links to Meta's business tools terms and privacy policy.
+
+The Meta entry carries more weight than the Google one, and not only because reviewers read these: an advertising pixel is the disclosure a privacy-conscious site owner most needs to see before switching it on. It states the advertising purpose explicitly rather than describing the pixel as analytics.
+
+Verification meta tags and served verification files need no disclosure — they contact no one; a search engine fetches them.
 
 ## Testing
 
@@ -314,7 +349,15 @@ Verification meta tags need no disclosure — they are inert markup that contact
 - `taseo_analytics_ga4_ids` additions appear; invalid additions are dropped; duplicates collapse.
 - `taseo_analytics_gtag_config` parameters land in the right `config` call.
 - GTM head loader and `wp_body_open` `noscript` both emit; neither emits when the container ID is empty.
-- Nothing emits in admin or when `taseo_analytics_should_print` returns false.
+- Nothing emits in admin, when `taseo_analytics_should_print` returns false, or when `taseo_tracking_should_print` returns false.
+
+**`tests/Unit/Analytics/MetaPixelOutputTest.php`**
+- Head snippet contains the loader block once and one `fbq('init', …)` per ID, followed by a single `fbq('track', 'PageView')`.
+- `wp_body_open` emits one `<noscript><img>` per ID with the correct `tr?id=…` URL.
+- A leading-zero pixel ID survives round-trip unchanged.
+- `taseo_meta_pixel_ids` additions appear; non-numeric filter values dropped; duplicates collapsed.
+- Nothing emits when the ID is empty, in admin, when `taseo_meta_pixel_should_print` returns false, or when `taseo_tracking_should_print` returns false.
+- `taseo_meta_pixel_should_print` returning false leaves Google output untouched, and vice versa — the test that proves the consent split actually splits.
 
 **`tests/Unit/Settings/SettingsTest.php`** — the new getters, empty-string defaults, unknown engine slug returns `''` for both `get_verification_code()` and `get_verification_file()`.
 
@@ -331,16 +374,19 @@ New `tests/e2e/functional/specs/webmaster.spec.ts`, provisioning settings throug
 5. `GET /google<token>.html` returns 200 with the exact expected body and no surrounding markup — the assertion that catches theme or plugin output leaking into the response, which is the failure mode Google's docs warn about and the one unit tests cannot see.
 6. `GET /BingSiteAuth.xml` returns 200 with the exact XML body.
 7. `GET /google-wrong-token.html` returns 404.
+8. Front page contains the `fbq('init', '…')` call and the `facebook.com/tr?id=…` `<noscript>` image.
 
 ### Scale
 
-Roughly 40 new unit tests and 7 e2e assertions. Three new source files (~280 lines) plus edits to `Settings`, `SettingsPage`, `Plugin`, and `readme.txt`.
+Roughly 50 new unit tests and 8 e2e assertions. Four new source files (~360 lines) plus edits to `Settings`, `SettingsPage`, `Plugin`, and `readme.txt`.
 
 ## Out of scope
 
-- **Consent management UI** — `taseo_analytics_should_print` is the integration point.
+- **Consent management UI** — `taseo_tracking_should_print`, `taseo_analytics_should_print`, and `taseo_meta_pixel_should_print` are the integration points.
 - **Search Console API integration** (impressions, clicks, indexing status) — a separate project with an OAuth flow, quota handling, and its own admin surface.
-- **Analytics platforms other than GA4 and GTM** — Matomo, Plausible, Fathom, Meta Pixel. The filter surface does not cover these; they would need their own fields and output paths.
+- **Tracking platforms other than GA4, GTM, and Meta Pixel** — Matomo, Plausible, Fathom, TikTok, LinkedIn. Each would be another small output class on the `MetaPixelOutput` pattern; the filter surface does not reach them.
+- **Meta Pixel beyond the base code** — no Conversions API, no advanced matching (hashed email/phone), no automatic or custom events beyond `PageView`. Those need order and customer data, which means WooCommerce integration and a much larger privacy surface.
+- **Meta domain verification** (`facebook-domain-verification` meta tag) — adjacent to the Pixel but a different job; one more field in the verification group whenever it's wanted.
 - **Per-page tracking UI** — explicitly replaced by the filter surface.
 - **Baidu, Pinterest, and other verification services as first-class fields** — reachable through `taseo_verification_tags` and `taseo_verification_files`.
 - **DNS TXT verification** — see below.
