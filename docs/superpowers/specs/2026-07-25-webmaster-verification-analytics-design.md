@@ -154,7 +154,9 @@ public function init( HookManager $hook_manager ): void {
 1. Computes `$should_print = is_front_page() && ! is_paged()`, passed through `taseo_verification_should_print`.
 2. Builds a name⇒code map from the five settings getters, dropping empty values.
 3. Applies `taseo_verification_tags` to the map.
-4. Re-validates the post-filter map: every meta name through `sanitize_key()`, every code stripped to `[A-Za-z0-9_-]` and dropped if the strip leaves it empty.
+4. Re-validates the post-filter map: every meta name stripped to `[A-Za-z0-9_.:-]`, every code stripped to `[A-Za-z0-9_-]`, and the pair dropped if either strip leaves it empty.
+
+The meta-name class must keep `.` and `:` — `sanitize_key()` would be the obvious choice and is wrong here, because it strips both and would silently rewrite Bing's own `msvalidate.01` to `msvalidate01`. Pinterest's `p:domain_verify` needs the colon for the same reason.
 5. Prints one `<meta name="…" content="…" />` per surviving entry, `esc_attr` on both.
 
 With all five fields empty and no filter, the method returns after step 2 having printed nothing. The `get_option()` call behind the getters is already primed by the rest of the plugin on the same request, so the cost is a hash lookup.
@@ -290,7 +292,7 @@ Config values are JSON-encoded with `wp_json_encode()` into the `gtag('config', 
 
 `taseo_verification_files` is the escape hatch for every service we don't have a field for. Its keys are run through the same filename regex shape and its content types through a small allow-list (`text/plain`, `text/html`, `application/xml`); a body is emitted verbatim, because byte-exactness is the whole point of the method and any transformation would break it. That makes this filter the one place in the design where a plugin can put arbitrary bytes at a URL on the site — deliberately, since that is precisely what "serve this verification file" means, and it requires the same code-level access as `add_action` itself.
 
-**Everything returned from a filter is re-validated before output.** Filtered GA4 and GTM IDs go through the same regexes as stored ones and are dropped outright on failure; filtered verification codes go through the same character-class strip and are dropped only if the strip empties them; filtered meta names go through `sanitize_key()`. Failures are silent — a broken filter degrades that one entry, never the whole tag set. A filter is third-party code, and treating its return value as trusted would hand every other plugin on the site a script-injection path into `<head>` — the exact opposite of what a filter is for. ID lists are also de-duplicated, so a filter that appends the primary ID cannot double-count.
+**Everything returned from a filter is re-validated before output.** Filtered GA4 and GTM IDs go through the same regexes as stored ones and are dropped outright on failure; filtered verification codes go through the same character-class strip and are dropped only if the strip empties them; filtered meta names are stripped to `[A-Za-z0-9_.:-]`. Failures are silent — a broken filter degrades that one entry, never the whole tag set. A filter is third-party code, and treating its return value as trusted would hand every other plugin on the site a script-injection path into `<head>` — the exact opposite of what a filter is for. ID lists are also de-duplicated, so a filter that appends the primary ID cannot double-count.
 
 **Consent is deliberately a filter, not a feature.** The three gates above are the hooks a cookie-consent plugin uses. Shipping our own consent UI would mean owning banner design, regional rule sets, and consent storage — a separate product, already solved by plugins the affected sites run. What this design owes those plugins is a gate at the right granularity, which is why the split is analytics/marketing rather than one switch.
 
