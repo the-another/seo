@@ -36,6 +36,13 @@ if ( ! defined( 'THE_ANOTHER_SEO_PLUGIN_URL' ) ) {
 	define( 'THE_ANOTHER_SEO_PLUGIN_URL', 'https://example.com/wp-content/plugins/the-another-seo/' );
 }
 
+// The real plugin directory: code that reads a built asset file off disk
+// (SettingsPage::enqueue_assets) needs a path that actually exists, and a
+// fake one would make its "not built yet" guard untestable.
+if ( ! defined( 'THE_ANOTHER_SEO_PLUGIN_DIR' ) ) {
+	define( 'THE_ANOTHER_SEO_PLUGIN_DIR', dirname( __DIR__, 2 ) . '/' );
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
 		public $errors     = array();

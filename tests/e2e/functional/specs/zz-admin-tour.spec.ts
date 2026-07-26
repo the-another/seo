@@ -62,6 +62,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+import { fillTemplate, templateSurface } from '../support/helpers';
 
 const ROOT = path.resolve( __dirname, '../../../..' );
 const WP_DIR_FILE = path.join( ROOT, 'artifacts/e2e-wp-dir.txt' );
@@ -258,10 +259,14 @@ function restoreDatabaseSnapshot(): void {
 async function save( page: Page, slug: string ): Promise< void > {
 	const redirectUrl = await page.evaluate( async () => {
 		const selector = 'form[action*="admin-post.php"]';
-		const form = document.querySelector( selector ) as HTMLFormElement | null;
+		const form = document.querySelector(
+			selector
+		) as HTMLFormElement | null;
 
 		if ( ! form ) {
-			throw new Error( `save(): no element matched selector "${ selector }"` );
+			throw new Error(
+				`save(): no element matched selector "${ selector }"`
+			);
 		}
 
 		const action = form.getAttribute( 'action' ) as string;
@@ -304,6 +309,15 @@ interface TextTabStep {
 	label: string;
 	selector: string;
 	value: string;
+	/**
+	 * The field's `name`, when it is a Titles & Templates field.
+	 *
+	 * Those inputs are hidden behind a chip editing surface, so the tour types
+	 * into the surface instead — the input is still the thing that submits and
+	 * still the thing whose value is read back afterwards, which is why the
+	 * selector and the persistence assertion below are unchanged.
+	 */
+	templateInput?: string;
 }
 
 /**
@@ -320,9 +334,21 @@ async function tourTextTab( page: Page, step: TextTabStep ): Promise< void > {
 	await page.waitForTimeout( TOUR_PACING_MS );
 
 	const field = page.locator( step.selector );
-	await expect( field, `${ step.label } field exists on the ${ step.slug } tab` ).toBeVisible();
+	const visible = step.templateInput
+		? templateSurface( page, step.templateInput )
+		: field;
 
-	await field.fill( step.value );
+	await expect(
+		visible,
+		`${ step.label } field exists on the ${ step.slug } tab`
+	).toBeVisible();
+
+	if ( step.templateInput ) {
+		await fillTemplate( page, step.templateInput, step.value );
+	} else {
+		await field.fill( step.value );
+	}
+
 	await page.waitForTimeout( TOUR_PACING_MS );
 	await save( page, step.slug );
 
@@ -435,9 +461,25 @@ test.describe( 'admin tour', () => {
 			ordinal: 3,
 			slug: 'templates',
 			label: 'Post title template',
-			selector: 'input[name="taseo_settings[title_templates][post:post]"]',
+			selector:
+				'input[name="taseo_settings[title_templates][post:post]"]',
+			templateInput: 'taseo_settings[title_templates][post:post]',
 			value: '%%title%% %%sep%% Tour',
 		} );
+
+		// The templates tab is the one tab whose editing surface is not the
+		// input itself: after the reload above, the saved template must be
+		// back on screen as chips carrying the variables' human labels, which
+		// is what the tour's own screenshot records.
+		await expect(
+			templateSurface(
+				page,
+				'taseo_settings[title_templates][post:post]'
+			).locator( '[data-taseo-token]' )
+		).toHaveText( [
+			'Title of the post, term, or site',
+			'Title separator',
+		] );
 
 		await tourTextTab( page, {
 			ordinal: 4,

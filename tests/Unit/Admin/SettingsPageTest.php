@@ -787,25 +787,129 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%primary_category%%"', $html );
 	}
 
+	/**
+	 * The path enqueue_assets() reads its dependencies and version from.
+	 *
+	 * @return string Absolute path.
+	 */
+	private function settings_asset_file(): string {
+		return THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/settings/index.asset.php';
+	}
+
+	/**
+	 * Put a known asset file where the enqueue expects a built one.
+	 *
+	 * dist/ is build output and is not in the source tree, so neither its
+	 * presence nor its absence can be assumed: these tests own the file for
+	 * their duration and put the directory back exactly as they found it.
+	 *
+	 * @return callable Restores the previous state.
+	 */
+	private function with_built_asset_file(): callable {
+		$file     = $this->settings_asset_file();
+		$existing = file_exists( $file ) ? (string) file_get_contents( $file ) : null;
+		$made_dir = ! is_dir( dirname( $file ) );
+
+		if ( $made_dir ) {
+			mkdir( dirname( $file ), 0777, true );
+		}
+
+		file_put_contents(
+			$file,
+			"<?php return array('dependencies' => array('wp-element', 'wp-rich-text'), 'version' => 'testassetversion');"
+		);
+
+		return function () use ( $file, $existing, $made_dir ): void {
+			if ( null === $existing ) {
+				unlink( $file );
+
+				if ( $made_dir ) {
+					rmdir( dirname( $file ) );
+				}
+
+				return;
+			}
+
+			file_put_contents( $file, $existing );
+		};
+	}
+
 	public function test_assets_enqueue_only_on_this_settings_page(): void {
 		$enqueued = array();
+		$styles   = array();
+		$restore  = $this->with_built_asset_file();
 
 		Functions\when( '__' )->returnArg();
 		Functions\when( 'add_options_page' )->justReturn( 'settings_page_taseo' );
 		Functions\when( 'wp_enqueue_script' )->alias(
-			function ( string $handle, string $src = '', array $deps = array() ) use ( &$enqueued ): void {
-				$enqueued[ $handle ] = $deps;
+			function ( string $handle, string $src = '', array $deps = array(), $ver = false ) use ( &$enqueued ): void {
+				$enqueued[ $handle ] = array(
+					'src'     => $src,
+					'deps'    => $deps,
+					'version' => $ver,
+				);
+			}
+		);
+		Functions\when( 'wp_enqueue_style' )->alias(
+			function ( string $handle ) use ( &$styles ): void {
+				$styles[] = $handle;
 			}
 		);
 
-		$this->page->register_menu();
+		try {
+			$this->page->register_menu();
 
-		$this->page->enqueue_assets( 'edit.php' );
-		$this->assertSame( array(), $enqueued, 'must not enqueue on unrelated admin screens' );
+			$this->page->enqueue_assets( 'edit.php' );
+			$this->assertSame( array(), $enqueued, 'must not enqueue on unrelated admin screens' );
 
-		$this->page->enqueue_assets( 'settings_page_taseo' );
-		$this->assertArrayHasKey( 'taseo-settings', $enqueued );
-		$this->assertContains( 'jquery-ui-autocomplete', $enqueued['taseo-settings'] );
+			$this->page->enqueue_assets( 'settings_page_taseo' );
+			$this->assertArrayHasKey( 'taseo-settings', $enqueued );
+
+			// The built bundle, not a hand-maintained source file, and its
+			// dependencies and version come from the generated asset file
+			// rather than from a list here that could drift from the build.
+			$this->assertStringEndsWith( 'dist/settings/index.js', $enqueued['taseo-settings']['src'] );
+			$this->assertSame( array( 'wp-element', 'wp-rich-text' ), $enqueued['taseo-settings']['deps'] );
+			$this->assertSame( 'testassetversion', $enqueued['taseo-settings']['version'] );
+
+			// Core's own stylesheet, so the autocomplete popover is readable
+			// without this plugin shipping any CSS.
+			$this->assertSame( array( 'wp-components' ), $styles );
+		} finally {
+			$restore();
+		}
+	}
+
+	public function test_assets_are_skipped_when_the_bundle_is_not_built(): void {
+		$file    = $this->settings_asset_file();
+		$backup  = file_exists( $file ) ? (string) file_get_contents( $file ) : null;
+		$enqueued = array();
+
+		if ( null !== $backup ) {
+			unlink( $file );
+		}
+
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'add_options_page' )->justReturn( 'settings_page_taseo' );
+		Functions\when( 'wp_enqueue_script' )->alias(
+			function ( string $handle ) use ( &$enqueued ): void {
+				$enqueued[] = $handle;
+			}
+		);
+		Functions\when( 'wp_enqueue_style' )->justReturn( null );
+
+		try {
+			$this->page->register_menu();
+			$this->page->enqueue_assets( 'settings_page_taseo' );
+
+			// A source checkout that has never been built must render a
+			// perfectly usable tab with plain inputs, not fatal on `require`.
+			$this->assertSame( array(), $enqueued );
+		} finally {
+			if ( null !== $backup ) {
+				file_put_contents( $file, $backup );
+			}
+		}
 	}
 
 	public function test_a_template_using_available_variables_saves(): void {

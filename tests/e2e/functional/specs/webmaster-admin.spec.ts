@@ -18,8 +18,17 @@
 
 import type { Page } from '@playwright/test';
 import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+import {
+	fillTemplate,
+	fillTemplateWithoutClosing,
+	templateSurface,
+} from '../support/helpers';
 
-const WEBMASTER_TAB_URL = '/wp-admin/options-general.php?page=taseo&tab=webmaster';
+const WEBMASTER_TAB_URL =
+	'/wp-admin/options-general.php?page=taseo&tab=webmaster';
+const TEMPLATES_TAB_URL =
+	'/wp-admin/options-general.php?page=taseo&tab=templates';
+const POST_TITLE_INPUT = 'taseo_settings[title_templates][post:post]';
 
 /**
  * Click the settings form's "Save Changes" button and wait for the redirect
@@ -187,16 +196,19 @@ test.describe( 'webmaster admin settings', () => {
 	test( 'a template using an unavailable variable is rejected, siblings save', async ( {
 		page,
 	} ) => {
-		await page.goto(
-			'/wp-admin/options-general.php?page=taseo&tab=templates'
-		);
+		await page.goto( TEMPLATES_TAB_URL );
 
 		const productTitle = page.locator(
-			'input[name="taseo_settings[title_templates][post:post]"]'
+			`input[name="${ POST_TITLE_INPUT }"]`
 		);
 		const original = await productTitle.inputValue();
 
-		await productTitle.fill( '%%title%% %%discount%%' );
+		// The input is hidden behind its chip surface now, so the value is
+		// typed there; it still submits, and is still what these assertions
+		// read back.
+		await fillTemplate( page, POST_TITLE_INPUT, '%%title%% %%discount%%' );
+		await expect( productTitle ).toHaveValue( '%%title%% %%discount%%' );
+
 		await page.locator( '#submit' ).click( { force: true } );
 
 		// Both assertions run on the page the save redirected to. The error
@@ -214,23 +226,164 @@ test.describe( 'webmaster admin settings', () => {
 	} );
 
 	test( 'clicking a variable pill inserts its token', async ( { page } ) => {
-		await page.goto(
-			'/wp-admin/options-general.php?page=taseo&tab=templates'
-		);
+		await page.goto( TEMPLATES_TAB_URL );
 
-		const input = page.locator(
-			'input[name="taseo_settings[title_templates][post:post]"]'
-		);
-		await input.fill( '' );
-		await input.focus();
+		const input = page.locator( `input[name="${ POST_TITLE_INPUT }"]` );
+
+		await fillTemplate( page, POST_TITLE_INPUT, '' );
 
 		await page
 			.locator(
-				'tr:has(input[name="taseo_settings[title_templates][post:post]"]) [data-taseo-template-var="%%title%%"]'
+				`tr:has(input[name="${ POST_TITLE_INPUT }"]) [data-taseo-template-var="%%title%%"]`
 			)
 			.click( { force: true } );
 
 		await expect( input ).toHaveValue( '%%title%%' );
+
+		// And the inserted variable is a chip carrying its human label, not
+		// raw %%title%% text the administrator has to decode.
+		await expect(
+			templateSurface( page, POST_TITLE_INPUT ).locator(
+				'[data-taseo-token="%%title%%"]'
+			)
+		).toHaveText( 'Title of the post, term, or site' );
+	} );
+
+	test( 'a stored template renders as chips showing human labels', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		const surface = templateSurface( page, POST_TITLE_INPUT );
+
+		// The seeded default is "%%title%% %%sep%% %%sitename%%": three
+		// variables, each rendered as one atomic chip labelled the way its
+		// pill labels it, and no raw %%token%% text left on screen.
+		await expect( surface ).toBeVisible();
+		await expect(
+			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+		).toBeHidden();
+
+		const chips = surface.locator( '[data-taseo-token]' );
+		await expect( chips ).toHaveCount( 3 );
+		await expect( chips ).toHaveText( [
+			'Title of the post, term, or site',
+			'Title separator',
+			'Site title',
+		] );
+		await expect( surface ).not.toContainText( '%%' );
+
+		// Every chip is uneditable, which is what makes it behave as one unit
+		// rather than as characters the caret can walk into.
+		for ( const token of [ '%%title%%', '%%sep%%', '%%sitename%%' ] ) {
+			await expect(
+				surface.locator( `[data-taseo-token="${ token }"]` )
+			).toHaveAttribute( 'contenteditable', 'false' );
+		}
+	} );
+
+	test( 'a variable the row does not offer is marked invalid', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		// %%discount%% exists on no row in this environment, and the
+		// validator refuses to store it, so this is the one way to see one:
+		// type it. It still becomes a chip — an unresolvable variable is not
+		// invisible — and that chip carries core's .form-invalid class and
+		// falls back to its own slug, having no label to show.
+		await fillTemplate( page, POST_TITLE_INPUT, '%%discount%%' );
+
+		const unknown = templateSurface( page, POST_TITLE_INPUT ).locator(
+			'[data-taseo-token="%%discount%%"]'
+		);
+
+		await expect( unknown ).toHaveClass( /form-invalid/ );
+		await expect( unknown ).toHaveText( 'discount' );
+	} );
+
+	test( 'the value submitted after editing through the surface is the token text', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		const input = page.locator( `input[name="${ POST_TITLE_INPUT }"]` );
+		const original = await input.inputValue();
+
+		// Type a template, save it, and read it back from storage after a
+		// reload: what the surface writes into the hidden input has to be the
+		// canonical %%token%% text, byte for byte, case included.
+		await fillTemplate( page, POST_TITLE_INPUT, '%%TITLE%% via surface' );
+		await page.locator( '#submit' ).click( { force: true } );
+		await expect( page ).toHaveURL( /tab=templates/ );
+
+		await page.reload();
+		await expect( input ).toHaveValue( '%%TITLE%% via surface' );
+
+		// A chip keeps the raw casing it was stored with, so re-saving an
+		// untouched field cannot quietly rewrite what an administrator typed.
+		await expect(
+			templateSurface( page, POST_TITLE_INPUT ).locator(
+				'[data-taseo-token="%%TITLE%%"]'
+			)
+		).toHaveText( 'Title of the post, term, or site' );
+
+		await fillTemplate( page, POST_TITLE_INPUT, original );
+		await page.locator( '#submit' ).click( { force: true } );
+		await expect(
+			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+		).toHaveValue( original );
+	} );
+
+	test( 'with the surface script blocked the plain input still saves', async ( {
+		page,
+	} ) => {
+		// The whole degradation story in one assertion: the built bundle
+		// never arrives, so nothing hides the server-rendered input, and the
+		// tab is still a working form.
+		// A RegExp, not a glob: the enqueue carries a ?ver= query string that
+		// a '**/dist/settings/index.js' pattern would never match.
+		await page.route( /dist\/settings\/index\.js/, ( route ) =>
+			route.abort()
+		);
+
+		await page.goto( TEMPLATES_TAB_URL );
+
+		const input = page.locator(
+			'input[name="taseo_settings[title_templates][system_page:search]"]'
+		);
+		const original = await input.inputValue();
+
+		await expect( input ).toBeVisible();
+		await expect( input ).toBeEditable();
+		await expect(
+			templateSurface(
+				page,
+				'taseo_settings[title_templates][system_page:search]'
+			)
+		).toHaveCount( 0 );
+
+		await input.fill( '%%sitename%% degraded' );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await expect( page ).toHaveURL( /tab=templates/ );
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[title_templates][system_page:search]"]'
+			)
+		).toHaveValue( '%%sitename%% degraded' );
+
+		await page
+			.locator(
+				'input[name="taseo_settings[title_templates][system_page:search]"]'
+			)
+			.fill( original );
+		await page.locator( '#submit' ).click( { force: true } );
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[title_templates][system_page:search]"]'
+			)
+		).toHaveValue( original );
 	} );
 
 	test( 'the %%pri autocomplete is context-aware, not one global list', async ( {
@@ -254,48 +407,37 @@ test.describe( 'webmaster admin settings', () => {
 		// gates the variable on is_object_in_taxonomy()) and offers nothing
 		// for the same fragment; a system-page row, which never gets
 		// excerpt/date/primary_category at all, offers nothing either.
-		await page.goto(
-			'/wp-admin/options-general.php?page=taseo&tab=templates'
-		);
+		await page.goto( TEMPLATES_TAB_URL );
 
 		/**
-		 * Type "%%pri" into one row's title template input and read back
-		 * whatever the jQuery UI autocomplete menu settled on.
+		 * Type "%%pri" into one row's surface and read back whatever the
+		 * variable autocomplete settled on.
 		 *
 		 * @param inputName The template input's `name` attribute.
 		 */
 		async function suggestionsFor(
 			inputName: string
 		): Promise< string[] > {
-			const input = page.locator( `input[name="${ inputName }"]` );
+			await fillTemplateWithoutClosing( page, inputName, '%%pri' );
 
-			await input.fill( '' );
-			await input.click();
-			await input.pressSequentially( '%%pri', { delay: 20 } );
-
-			// jQuery UI Autocomplete debounces its search (default delay:
-			// 300ms) before calling our source() function and showing the
-			// menu; give it room to settle. A menu with no matches simply
-			// never becomes visible, so a fixed wait (rather than waiting
-			// for visibility) is what lets this same helper prove both the
-			// "offers a suggestion" and "offers nothing" cases.
-			await page.waitForTimeout( 500 );
+			// The completer resolves its options asynchronously and the list
+			// renders in a popover; a list with no matches simply never
+			// appears, so a fixed wait (rather than waiting for visibility)
+			// is what lets this same helper prove both the "offers a
+			// suggestion" and "offers nothing" cases.
+			await page.waitForTimeout( 700 );
 
 			return page
-				.locator( '.ui-autocomplete:visible li' )
+				.locator( '.components-autocomplete__popover [role="option"]' )
 				.allTextContents();
 		}
 
 		expect(
-			await suggestionsFor(
-				'taseo_settings[title_templates][post:post]'
-			)
+			await suggestionsFor( 'taseo_settings[title_templates][post:post]' )
 		).toEqual( [ '%%primary_category%%' ] );
 
 		expect(
-			await suggestionsFor(
-				'taseo_settings[title_templates][post:page]'
-			)
+			await suggestionsFor( 'taseo_settings[title_templates][post:page]' )
 		).toEqual( [] );
 
 		expect(
@@ -303,5 +445,37 @@ test.describe( 'webmaster admin settings', () => {
 				'taseo_settings[title_templates][system_page:404]'
 			)
 		).toEqual( [] );
+	} );
+
+	test( 'selecting an autocomplete suggestion inserts a chip', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		await fillTemplateWithoutClosing( page, POST_TITLE_INPUT, '%%pri' );
+
+		const option = page.locator(
+			'.components-autocomplete__popover [role="option"]'
+		);
+		await expect( option ).toHaveText( [ '%%primary_category%%' ] );
+
+		await page.keyboard.press( 'Enter' );
+
+		// The typed fragment is replaced by one atomic chip carrying the
+		// variable's human label, and the input behind it holds the token.
+		const chip = templateSurface( page, POST_TITLE_INPUT ).locator(
+			'[data-taseo-token="%%primary_category%%"]'
+		);
+		await expect( chip ).toHaveText( 'First assigned category' );
+		await expect(
+			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+		).toHaveValue( '%%primary_category%%' );
+
+		// And the caret survived the insertion: typing continues after the
+		// chip rather than being swallowed by it.
+		await page.keyboard.type( ' tail', { delay: 20 } );
+		await expect(
+			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+		).toHaveValue( '%%primary_category%% tail' );
 	} );
 } );

@@ -15,7 +15,9 @@ describe( 'parseTemplate', () => {
 	} );
 
 	it( 'keeps literal text between adjacent tokens', () => {
-		expect( parseTemplate( '%%title%% %%sep%% %%sitename%%' ) ).toHaveLength( 5 );
+		expect(
+			parseTemplate( '%%title%% %%sep%% %%sitename%%' )
+		).toHaveLength( 5 );
 	} );
 
 	it( 'handles adjacent tokens with nothing between them', () => {
@@ -60,7 +62,12 @@ describe( 'round trip', () => {
 		'Just a static title',
 		'',
 		'  leading and trailing  ',
-	] )( 'serializeSegments( parseTemplate( %j ) ) returns the input unchanged', ( template ) => {
-		expect( serializeSegments( parseTemplate( template ) ) ).toBe( template );
-	} );
+	] )(
+		'serializeSegments( parseTemplate( %j ) ) returns the input unchanged',
+		( template ) => {
+			expect( serializeSegments( parseTemplate( template ) ) ).toBe(
+				template
+			);
+		}
+	);
 } );

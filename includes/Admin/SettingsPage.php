@@ -174,10 +174,16 @@ class SettingsPage {
 	/**
 	 * Enqueue this page's script, and only on this page.
 	 *
-	 * Depends on core's bundled jquery-ui-autocomplete — the same component
-	 * wp-admin/js/user-suggest.js and the link modal use — so nothing
-	 * reaches the page that WordPress does not already ship, and core's
-	 * existing .ui-autocomplete styles apply without a stylesheet of ours.
+	 * Dependencies and version come from the generated asset file rather than
+	 * a hand-written list, which is how core tracks what a built bundle
+	 * actually imports — the surface pulls in wp-rich-text, wp-components and
+	 * wp-element, all of them already shipped by WordPress. The file_exists()
+	 * guard matters: a source checkout that has not been built would otherwise
+	 * fatal on `require`, and this runs in wp-admin. dist/ is deliberately not
+	 * excluded by .distignore, so the built file ships in the release zip.
+	 *
+	 * The stylesheet is core's own wp-components, which the autocomplete
+	 * popover needs to be readable. Nothing of ours is enqueued.
 	 *
 	 * @param string $hook_suffix Current admin page's hook suffix.
 	 * @return void
@@ -187,13 +193,22 @@ class SettingsPage {
 			return;
 		}
 
+		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/settings/index.asset.php';
+
+		if ( ! file_exists( $asset_file ) ) {
+			return;
+		}
+
+		$asset = require $asset_file;
+
 		wp_enqueue_script(
 			'taseo-settings',
-			THE_ANOTHER_SEO_PLUGIN_URL . 'assets/js/settings.js',
-			array( 'jquery-ui-autocomplete' ),
-			THE_ANOTHER_SEO_VERSION,
+			THE_ANOTHER_SEO_PLUGIN_URL . 'dist/settings/index.js',
+			$asset['dependencies'],
+			$asset['version'],
 			true
 		);
+		wp_enqueue_style( 'wp-components' );
 	}
 
 	/**
