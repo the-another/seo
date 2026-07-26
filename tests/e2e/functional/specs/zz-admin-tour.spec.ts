@@ -92,6 +92,14 @@ const TOUR_PACING_MS = 500;
  * redirect lands), not the POST target — no form resubmission, no state
  * change, just the same rendered result `page` is already showing.
  *
+ * capturePage.close() runs in a finally, so the throwaway tab never leaks
+ * regardless of how goto()/screenshot() finish — but a failed capture still
+ * propagates rather than being swallowed. Deliberate: this function's whole
+ * job is producing the tour's evidence, and a silently missing screenshot
+ * is the kind of gap nobody notices until the one time they need it. Better
+ * for a bad capture to fail the test loudly than to let the tour "complete"
+ * with a hole in its record.
+ *
  * @param page    Playwright page the tour is running on. Not screenshotted
  *                directly (see above) — only its current URL is read.
  * @param ordinal Tour position (1-based); zero-padded into the filename so
@@ -107,12 +115,15 @@ async function captureTourStep(
 	const name = `${ String( ordinal ).padStart( 2, '0' ) }-${ slug }.png`;
 
 	const capturePage = await page.context().newPage();
-	await capturePage.goto( page.url() );
-	await capturePage.screenshot( {
-		path: path.join( TOUR_DIR, name ),
-		fullPage: true,
-	} );
-	await capturePage.close();
+	try {
+		await capturePage.goto( page.url() );
+		await capturePage.screenshot( {
+			path: path.join( TOUR_DIR, name ),
+			fullPage: true,
+		} );
+	} finally {
+		await capturePage.close();
+	}
 }
 
 const tabUrl = ( slug: string ): string =>
@@ -285,9 +296,15 @@ test.describe( 'admin tour', () => {
 		// Post Types & Taxonomies is the one checkbox tab, so it does not go
 		// through tourTextTab. Disable "page" and never "post": the
 		// templates tab below renders one row per ENABLED post type, and its
-		// selector targets post:post.
-		await page.goto( tabUrl( 'types' ) );
-		await expectTabActive( page, 'types' );
+		// selector targets post:post. ordinal lives here, next to slug, for
+		// the same reason every tourTextTab() step carries its own ordinal
+		// field rather than a hardcoded counter: a bare literal at the
+		// captureTourStep() call site would be a magic number nothing
+		// checks against tour order.
+		const typesStep = { ordinal: 2, slug: 'types' };
+
+		await page.goto( tabUrl( typesStep.slug ) );
+		await expectTabActive( page, typesStep.slug );
 		await page.waitForTimeout( TOUR_PACING_MS );
 
 		const pageType = page.locator(
@@ -300,7 +317,7 @@ test.describe( 'admin tour', () => {
 		// the uncheck happened.
 		await pageType.uncheck( { force: true } );
 		await page.waitForTimeout( TOUR_PACING_MS );
-		await save( page, 'types' );
+		await save( page, typesStep.slug );
 
 		await page.reload();
 		await page.waitForTimeout( TOUR_PACING_MS );
@@ -311,7 +328,7 @@ test.describe( 'admin tour', () => {
 			'pages stayed disabled after saving the types tab'
 		).not.toBeChecked();
 
-		await captureTourStep( page, 2, 'types' );
+		await captureTourStep( page, typesStep.ordinal, typesStep.slug );
 
 		await tourTextTab( page, {
 			ordinal: 3,
