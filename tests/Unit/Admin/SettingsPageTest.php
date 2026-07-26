@@ -743,4 +743,25 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%date%%"', $html );
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%primary_category%%"', $html );
 	}
+
+	public function test_assets_enqueue_only_on_this_settings_page(): void {
+		$enqueued = array();
+
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'add_options_page' )->justReturn( 'settings_page_taseo' );
+		Functions\when( 'wp_enqueue_script' )->alias(
+			function ( string $handle, string $src = '', array $deps = array() ) use ( &$enqueued ): void {
+				$enqueued[ $handle ] = $deps;
+			}
+		);
+
+		$this->page->register_menu();
+
+		$this->page->enqueue_assets( 'edit.php' );
+		$this->assertSame( array(), $enqueued, 'must not enqueue on unrelated admin screens' );
+
+		$this->page->enqueue_assets( 'settings_page_taseo' );
+		$this->assertArrayHasKey( 'taseo-settings', $enqueued );
+		$this->assertContains( 'jquery-ui-autocomplete', $enqueued['taseo-settings'] );
+	}
 }

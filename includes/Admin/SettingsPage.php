@@ -89,6 +89,13 @@ class SettingsPage {
 	);
 
 	/**
+	 * Hook suffix of this settings page, for gating asset enqueue.
+	 *
+	 * @var string
+	 */
+	private string $hook_suffix = '';
+
+	/**
 	 * Constructor.
 	 *
 	 * @param Settings              $settings           Settings.
@@ -123,6 +130,7 @@ class SettingsPage {
 		$hook_manager->register_action( 'admin_post_taseo_sitemap_regenerate', array( $this, 'handle_sitemap_regenerate' ), 10, 0 );
 		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_conflict_notice' ) );
 		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_sitemap_storage_notice' ) );
+		$hook_manager->register_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
 	/**
@@ -131,12 +139,37 @@ class SettingsPage {
 	 * @return void
 	 */
 	public function register_menu(): void {
-		add_options_page(
+		$this->hook_suffix = (string) add_options_page(
 			__( 'SEO — The Another', 'the-another-seo' ),
 			__( 'SEO — The Another', 'the-another-seo' ),
 			'manage_options',
 			'taseo',
 			array( $this, 'render_page' )
+		);
+	}
+
+	/**
+	 * Enqueue this page's script, and only on this page.
+	 *
+	 * Depends on core's bundled jquery-ui-autocomplete — the same component
+	 * wp-admin/js/user-suggest.js and the link modal use — so nothing
+	 * reaches the page that WordPress does not already ship, and core's
+	 * existing .ui-autocomplete styles apply without a stylesheet of ours.
+	 *
+	 * @param string $hook_suffix Current admin page's hook suffix.
+	 * @return void
+	 */
+	public function enqueue_assets( string $hook_suffix ): void {
+		if ( '' === $this->hook_suffix || $hook_suffix !== $this->hook_suffix ) {
+			return;
+		}
+
+		wp_enqueue_script(
+			'taseo-settings',
+			THE_ANOTHER_SEO_PLUGIN_URL . 'assets/js/settings.js',
+			array( 'jquery-ui-autocomplete' ),
+			THE_ANOTHER_SEO_VERSION,
+			true
 		);
 	}
 

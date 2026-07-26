@@ -32,6 +32,10 @@ if ( ! defined( 'THE_ANOTHER_SEO_VERSION' ) ) {
 	define( 'THE_ANOTHER_SEO_VERSION', '0.1.0' );
 }
 
+if ( ! defined( 'THE_ANOTHER_SEO_PLUGIN_URL' ) ) {
+	define( 'THE_ANOTHER_SEO_PLUGIN_URL', 'https://example.com/wp-content/plugins/the-another-seo/' );
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
 		public $errors     = array();
