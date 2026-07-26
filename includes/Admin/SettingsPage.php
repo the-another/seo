@@ -505,15 +505,17 @@ class SettingsPage {
 		);
 		echo '<table class="form-table">';
 
-		// System pages.
 		foreach ( array( 'home', 'search', '404' ) as $system ) {
 			$label   = $this->template_row_label( 'system_page', $system );
 			$row_key = 'system_page:' . $system;
 
 			printf(
 				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
-					<label for="taseo-title-%3$s">%4$s</label><br />
-					<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input />',
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input />
+					</fieldset>',
 				esc_html( $label ),
 				esc_attr( $row_key ),
 				esc_attr( 'system-page-' . $system ),
@@ -1001,6 +1003,16 @@ class SettingsPage {
 
 				if ( array() !== $invalid ) {
 					$row_label = $this->template_row_label( $type, $subtype );
+
+					if ( '' === $row_label ) {
+						// A posted row key with no colon (not something a form
+						// control can produce, but the key is attacker-
+						// controlled) resolves to an empty label. Every other
+						// call site here passes form-controlled type/subtype
+						// pairs; this is the one whose input is not, so fall
+						// back to the raw key rather than print a blank name.
+						$row_label = $row_key;
+					}
 
 					add_settings_error(
 						'taseo_messages',

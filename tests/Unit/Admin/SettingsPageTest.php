@@ -728,9 +728,10 @@ class SettingsPageTest extends TestCase {
 		$_GET['tab'] = 'templates';
 		$html        = $this->render_page();
 
-		$this->assertStringContainsString( 'title', strtolower( $html ) );
-		$this->assertStringContainsString( 'meta description', strtolower( $html ) );
-		$this->assertStringContainsString( 'class="description"', $html );
+		// A phrase distinctive to the intro paragraph itself, not merely
+		// shared with other markup on the page (field labels, variable
+		// pills, etc.) — this must fail if the intro is deleted.
+		$this->assertStringContainsString( 'Leave a field empty to use the default', $html );
 	}
 
 	public function test_templates_tab_splits_into_three_titled_sections(): void {
@@ -967,12 +968,42 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( '<code>post:product</code>', $html );
 	}
 
+	public function test_taxonomy_rows_show_human_labels_with_the_slug_beneath(): void {
+		$_GET['tab'] = 'templates';
+
+		Functions\when( 'get_taxonomy' )->alias(
+			static fn( string $tax ): object => (object) array( 'labels' => (object) array( 'name' => 'Categories' ) )
+		);
+
+		$html = $this->render_page( array(), array( 'category' ) );
+
+		$this->assertStringContainsString( 'Categories', $html );
+		$this->assertStringContainsString( '<code>term:category</code>', $html );
+	}
+
 	public function test_system_page_rows_show_their_own_names_not_slugs(): void {
 		$_GET['tab'] = 'templates';
 		$html = $this->render_page();
 
 		$this->assertStringContainsString( 'Not found (404)', $html );
 		$this->assertStringContainsString( '<code>system_page:404</code>', $html );
+	}
+
+	/**
+	 * The post and term loops each wrap their row in a <fieldset> whose
+	 * screen-reader legend names the row, since the row has more than one
+	 * input under a single <th>. The system-page loop has only one input
+	 * per row but must carry the same fieldset/legend, or the row's entire
+	 * accessible name collapses to the shared "Title template" label with
+	 * nothing telling a screen-reader user which system page it belongs to.
+	 */
+	public function test_system_page_rows_carry_a_legend_naming_the_row(): void {
+		$_GET['tab'] = 'templates';
+		$html        = $this->render_page();
+
+		$this->assertStringContainsString( '<legend class="screen-reader-text"><span>Home page</span></legend>', $html );
+		$this->assertStringContainsString( '<legend class="screen-reader-text"><span>Search results</span></legend>', $html );
+		$this->assertStringContainsString( '<legend class="screen-reader-text"><span>Not found (404)</span></legend>', $html );
 	}
 
 	public function test_each_template_input_has_a_label_bound_by_id(): void {
