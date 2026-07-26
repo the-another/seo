@@ -6,13 +6,13 @@
 
 ## Overview
 
-Three changes to the Titles & Templates tab, all following from one root problem: **the plugin has two disagreeing sources of truth about which template variables exist.**
+Four changes to the Titles & Templates tab, all following from one root problem: **the plugin has two disagreeing sources of truth about which template variables exist.**
 
 `Meta/CurrentContext` builds the actual variable values, and what it produces depends on context — `title`, `sitename`, `tagline`, `sep` and `page` everywhere; `excerpt` on posts and terms; `date` and `primary_category` on posts; `price` and `sku` only on WooCommerce products. Meanwhile `Admin/SettingsPage::render_templates_tab()` prints a single hardcoded line advertising all ten as if they were universal, and `Meta/TemplateResolver` silently deletes any token it cannot resolve.
 
 So an admin can put `%%price%%` in a page title template today. The UI invites it, nothing objects, and it renders as nothing.
 
-This spec introduces a registry as the single source of truth, surfaces it per row as clickable variable pills built from core components, and rejects templates containing variables that will not resolve.
+This spec introduces a registry as the single source of truth, surfaces it per row as clickable variable pills and a `%%`-triggered autocomplete built from core components, and rejects templates containing variables that will not resolve.
 
 ## Decisions made during brainstorming
 
@@ -83,11 +83,27 @@ Clicking a pill inserts its token into the row's **most recently focused input**
 
 Insertion respects the existing selection: it replaces the selected text when there is a selection, and the cursor lands immediately after the inserted token so a second click appends rather than overwrites.
 
-**This is the plugin's first admin asset.** It currently registers no `admin_enqueue_scripts` callback at all. The script is vanilla JavaScript with no dependencies, enqueued only on this settings page (gated on the hook suffix returned by `add_options_page()`), versioned on `THE_ANOTHER_SEO_VERSION`, loaded in the footer. It attaches one delegated listener rather than one per button.
+**This is the plugin's first admin asset.** It currently registers no `admin_enqueue_scripts` callback at all. The script depends only on core's bundled `jquery-ui-autocomplete` (see Component 4), enqueued only on this settings page (gated on the hook suffix returned by `add_options_page()`), versioned on `THE_ANOTHER_SEO_VERSION`, loaded in the footer. It attaches one delegated listener rather than one per button.
 
 With JavaScript disabled the buttons still render and still read as an accurate list of the variables available for that row, so the informational value survives; only the click-to-insert convenience is lost. That is the reason for choosing buttons over a bespoke element.
 
-## Component 4 — validation on save
+## Component 4 — autocomplete
+
+Typing `%%` in any template input opens a suggestion list of the variables available for that row, filtered as you continue typing. Selecting one completes the token.
+
+**Mechanism: jQuery UI Autocomplete**, which WordPress bundles and core itself uses — `wp-admin/js/user-suggest.js` for user fields and the link-insertion modal both run on it. Enqueued as the core-registered `jquery-ui-autocomplete` handle, so no library is added to the page that WordPress does not already ship. Core also styles `.ui-autocomplete` and `.ui-menu-item` in `wp-admin/css/common.css`, so the dropdown inherits admin styling and this still introduces no stylesheet.
+
+**Completing a fragment inside a larger value** is the non-obvious part: a template is not a single value but literal text with tokens in it, so the autocomplete must operate on the fragment at the caret rather than the whole field. Core solves the same problem in `user-suggest.js`, which completes the last entry of a comma-separated list. The same shape applies here, with `%%` as the delimiter:
+
+- On each keystroke, look at the text before the caret. If it contains an unclosed `%%`, the characters after it are the search term; otherwise there is nothing to suggest and the list stays closed.
+- The suggestion list is that row's variables filtered by the term, so `%%pri` on a product row offers `%%price%%` and `%%primary_category%%`, and the same input on a page row offers only `%%primary_category%%`.
+- Selecting replaces the partial token — from the opening `%%` to the caret — with the complete `%%variable%%`, leaving the caret after it. Text after the caret is preserved.
+
+**The source is the row's own pills, read from the DOM** — the `data-taseo-template-var` attributes rendered in Component 3 — not a separate JSON payload. There is deliberately no `wp_localize_script` copy of the registry: a second serialisation of the same list is one more thing that can drift from what the pills show, and eliminating exactly that class of drift is why this spec exists. The pills are already the rendered truth for a row; the autocomplete reads them.
+
+This shares the single admin script with the pills, gaining `jquery-ui-autocomplete` as its one dependency.
+
+## Component 5 — validation on save
 
 `SettingsPage::sanitize_settings()` gains a validation pass over `title_templates` and `description_templates`.
 
@@ -117,7 +133,9 @@ A template with no variables at all is valid — plain static text is a legitima
 | Filter returns a non-array or bad slugs | Ignored; the built-in set stands |
 | WooCommerce inactive | `price`/`sku` absent from pills and rejected if typed |
 | Post type disabled after templates were saved | Its row disappears from the tab; the stored value is untouched and simply unused |
-| JavaScript disabled | Pills render as an accurate variable list; click-to-insert unavailable |
+| JavaScript disabled | Pills render as an accurate variable list; click-to-insert and autocomplete unavailable |
+| Autocomplete opened, then the `%%` deleted | The fragment no longer matches, so the list closes; nothing is inserted |
+| Row has no pills (a filter emptied it) | Autocomplete has no source and stays closed; every variable typed there is rejected on save |
 
 ## Testing
 
@@ -127,14 +145,13 @@ A template with no variables at all is valid — plain static text is a legitima
 - **The drift test** — every key `CurrentContext` can produce exists in the registry, and every registry key is producible, with the conditional branches exercised.
 - `SettingsPageTest` additions — a valid template saves; an unknown variable rejects only its own row and leaves siblings saved; the stored value survives a rejection; an error is recorded naming the row and variable; a context-wrong variable (`%%price%%` on `post:page`) is rejected; a variable-free template is accepted; pills render per row with only that row's variables; a system-page row's pills carry only the base set; a failed field carries `.form-invalid`.
 
-**E2E** — extend the existing admin coverage: type `%%discount%%` into the product title template alongside a valid edit in another row, save, and assert the error notice appears, the product field kept its previous value and is marked invalid, and the sibling row saved. Then click a pill and assert the token lands in the input.
+**E2E** — extend the existing admin coverage: type `%%discount%%` into the product title template alongside a valid edit in another row, save, and assert the error notice appears, the product field kept its previous value and is marked invalid, and the sibling row saved. Then click a pill and assert the token lands in the input, and type `%%pri` in the product row and assert the suggestion list offers `%%price%%` and `%%primary_category%%` while the same fragment on a page row offers only `%%primary_category%%` — the assertion that proves the autocomplete is context-aware rather than showing one global list.
 
 The admin tour writes `%%title%% %%sep%% Tour` to the `post:post` row; both variables are available there, so validation leaves the tour green.
 
 ## Out of scope
 
-- **Live client-side validation as you type.** Validation happens on save. Adding an inline "unknown variable" warning while typing means duplicating the registry into JavaScript, and a second source of truth is what this spec exists to eliminate.
-- **Autocomplete or a token-picker dropdown.** The pills are the affordance.
+- **Live client-side validation as you type.** Validation happens on save, and the server stays authoritative. Note that the original reason for excluding this — that it would mean duplicating the registry into JavaScript — no longer holds now that Component 4 puts each row's variable list in the DOM. It is excluded for a narrower reason: a client-side validator would be a second implementation of the *rule*, and two implementations of one rule drift even when they read the same data. The pills and autocomplete already make an invalid variable hard to type by accident; the save-time check remains the thing that decides.
 - **Migrating existing invalid templates.** Stored templates are not retro-validated on upgrade; a stored bad variable continues to resolve to nothing until someone edits and saves that row, at which point it is rejected.
 - **Applying the registry to the per-post metabox overrides.** Those are literal strings, not templates, and expand no variables today.
 - **Variables beyond the current set.** Adding new ones is what the filter is for.
