@@ -736,6 +736,7 @@ class SettingsPageTest extends TestCase {
 
 	public function test_post_type_rows_offer_excerpt_date_and_primary_category(): void {
 		$_GET['tab'] = 'templates';
+		Functions\when( 'get_post_type_object' )->justReturn( null );
 
 		$html = $this->render_page( array( 'post' ) );
 
@@ -747,6 +748,7 @@ class SettingsPageTest extends TestCase {
 
 	public function test_term_rows_offer_excerpt_but_not_date_or_primary_category(): void {
 		$_GET['tab'] = 'templates';
+		Functions\when( 'get_taxonomy' )->justReturn( null );
 
 		$html = $this->render_page( array(), array( 'category' ) );
 
@@ -893,5 +895,53 @@ class SettingsPageTest extends TestCase {
 
 	public function test_template_row_label_falls_back_to_the_slug_for_an_unrecognised_system_page_key(): void {
 		$this->assertSame( 'archive', $this->invoke_row_label( 'system_page', 'archive' ) );
+	}
+
+	public function test_template_rows_show_human_labels_with_the_slug_beneath(): void {
+		$_GET['tab'] = 'templates';
+
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Products' ) )
+		);
+
+		$html = $this->render_page( array( 'product' ) );
+
+		$this->assertStringContainsString( 'Products', $html );
+		$this->assertStringContainsString( '<code>post:product</code>', $html );
+	}
+
+	public function test_system_page_rows_show_their_own_names_not_slugs(): void {
+		$_GET['tab'] = 'templates';
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'Not found (404)', $html );
+		$this->assertStringContainsString( '<code>system_page:404</code>', $html );
+	}
+
+	public function test_each_template_input_has_a_label_bound_by_id(): void {
+		$_GET['tab'] = 'templates';
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Posts' ) )
+		);
+
+		$html = $this->render_page( array( 'post' ) );
+
+		$this->assertStringContainsString( 'for="taseo-title-post-post"', $html );
+		$this->assertStringContainsString( 'id="taseo-title-post-post"', $html );
+		$this->assertStringContainsString( 'for="taseo-desc-post-post"', $html );
+		$this->assertStringContainsString( 'id="taseo-desc-post-post"', $html );
+	}
+
+	public function test_template_input_names_are_unchanged(): void {
+		$_GET['tab'] = 'templates';
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Posts' ) )
+		);
+
+		$html = $this->render_page( array( 'post' ) );
+
+		$this->assertStringContainsString( 'name="taseo_settings[title_templates][post:post]"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[description_templates][post:post]"', $html );
+		$this->assertStringContainsString( 'data-taseo-template-input', $html );
 	}
 }

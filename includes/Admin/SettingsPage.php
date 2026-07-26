@@ -428,34 +428,54 @@ class SettingsPage {
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
+			$label   = $this->template_row_label( 'post', $type );
+			$row_key = 'post:' . $type;
+
 			printf(
-				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="%7$s" placeholder="%4$s" data-taseo-template-input />
-					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="%8$s" placeholder="%6$s" data-taseo-template-input />',
-				esc_html( $type ),
-				esc_attr( $type ),
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'post-' . $type ),
+				esc_html__( 'Title template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_title_template( 'post', $type ) ),
-				esc_attr__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_description_template( 'post', $type ) ),
-				esc_attr__( 'Description template', 'the-another-seo' ),
-				esc_attr( $this->template_input_class( 'title_templates', 'post:' . $type ) ),
-				esc_attr( $this->template_input_class( 'description_templates', 'post:' . $type ) )
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
 			);
 			$this->render_variable_pills( 'post', $type );
 			echo '</td></tr>';
 		}
 
 		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
+			$label   = $this->template_row_label( 'term', $tax );
+			$row_key = 'term:' . $tax;
+
 			printf(
-				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="%5$s" data-taseo-template-input />
-					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="%6$s" data-taseo-template-input />',
-				esc_html( $tax ),
-				esc_attr( $tax ),
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'term-' . $tax ),
+				esc_html__( 'Title template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_title_template( 'term', $tax ) ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_description_template( 'term', $tax ) ),
-				esc_attr( $this->template_input_class( 'title_templates', 'term:' . $tax ) ),
-				esc_attr( $this->template_input_class( 'description_templates', 'term:' . $tax ) )
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
 			);
 			$this->render_variable_pills( 'term', $tax );
 			echo '</td></tr>';
@@ -463,12 +483,19 @@ class SettingsPage {
 
 		// System pages.
 		foreach ( array( 'home', 'search', '404' ) as $system ) {
+			$label   = $this->template_row_label( 'system_page', $system );
+			$row_key = 'system_page:' . $system;
+
 			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="%4$s" data-taseo-template-input />',
-				esc_html( $system ),
-				esc_attr( $system ),
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<label for="taseo-title-%3$s">%4$s</label><br />
+					<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input />',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'system-page-' . $system ),
+				esc_html__( 'Title template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_title_template( 'system_page', $system ) ),
-				esc_attr( $this->template_input_class( 'title_templates', 'system_page:' . $system ) )
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) )
 			);
 			$this->render_variable_pills( 'system_page', $system );
 			echo '</td></tr>';
