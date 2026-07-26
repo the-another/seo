@@ -830,4 +830,60 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertSame( 'Just a static title', $clean['title_templates']['post:page'] );
 	}
+
+	/**
+	 * Call SettingsPage's private template_row_label().
+	 *
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Object subtype.
+	 * @return string Label.
+	 */
+	private function invoke_row_label( string $object_type, string $object_subtype ): string {
+		$method = new \ReflectionMethod( SettingsPage::class, 'template_row_label' );
+		$method->setAccessible( true );
+
+		return (string) $method->invoke( $this->page, $object_type, $object_subtype );
+	}
+
+	public function test_template_row_label_uses_the_registered_post_type_name(): void {
+		Functions\when( 'get_post_type_object' )->alias(
+			static function ( string $type ): ?object {
+				return 'product' === $type
+					? (object) array( 'labels' => (object) array( 'name' => 'Products' ) )
+					: null;
+			}
+		);
+
+		$this->assertSame( 'Products', $this->invoke_row_label( 'post', 'product' ) );
+	}
+
+	public function test_template_row_label_uses_the_registered_taxonomy_name(): void {
+		Functions\when( 'get_taxonomy' )->alias(
+			static function ( string $tax ): ?object {
+				return 'post_tag' === $tax
+					? (object) array( 'labels' => (object) array( 'name' => 'Tags' ) )
+					: null;
+			}
+		);
+
+		$this->assertSame( 'Tags', $this->invoke_row_label( 'term', 'post_tag' ) );
+	}
+
+	public function test_template_row_label_names_the_system_pages(): void {
+		$this->assertSame( 'Home page', $this->invoke_row_label( 'system_page', 'home' ) );
+		$this->assertSame( 'Search results', $this->invoke_row_label( 'system_page', 'search' ) );
+		$this->assertSame( 'Not found (404)', $this->invoke_row_label( 'system_page', '404' ) );
+	}
+
+	public function test_template_row_label_falls_back_to_the_slug_for_a_deregistered_type(): void {
+		Functions\when( 'get_post_type_object' )->justReturn( null );
+
+		$this->assertSame( 'gone_type', $this->invoke_row_label( 'post', 'gone_type' ) );
+	}
+
+	public function test_template_row_label_falls_back_to_the_slug_for_a_deregistered_taxonomy(): void {
+		Functions\when( 'get_taxonomy' )->justReturn( null );
+
+		$this->assertSame( 'gone_tax', $this->invoke_row_label( 'term', 'gone_tax' ) );
+	}
 }

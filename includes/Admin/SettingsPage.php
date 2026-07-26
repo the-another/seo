@@ -506,6 +506,47 @@ class SettingsPage {
 	}
 
 	/**
+	 * Human-readable name for one template row.
+	 *
+	 * Post types and taxonomies carry registered labels; render_types_tab()
+	 * already reads the same properties. System pages are ours to name.
+	 *
+	 * Falls back to the subtype slug when nothing is registered under it: a
+	 * post type whose plugin has been deactivated leaves its stored
+	 * templates behind, and that row must stay identifiable and editable
+	 * rather than rendering an empty heading.
+	 *
+	 * The row heading and the validation error both call this, so the
+	 * screen and its error messages cannot describe the same row
+	 * differently.
+	 *
+	 * @param string $object_type    'post', 'term', or 'system_page'.
+	 * @param string $object_subtype Post type, taxonomy, or system page key.
+	 * @return string Human-readable label.
+	 */
+	private function template_row_label( string $object_type, string $object_subtype ): string {
+		if ( 'post' === $object_type ) {
+			$object = get_post_type_object( $object_subtype );
+
+			return isset( $object->labels->name ) ? (string) $object->labels->name : $object_subtype;
+		}
+
+		if ( 'term' === $object_type ) {
+			$taxonomy = get_taxonomy( $object_subtype );
+
+			return isset( $taxonomy->labels->name ) ? (string) $taxonomy->labels->name : $object_subtype;
+		}
+
+		$system_labels = array(
+			'home'   => __( 'Home page', 'the-another-seo' ),
+			'search' => __( 'Search results', 'the-another-seo' ),
+			'404'    => __( 'Not found (404)', 'the-another-seo' ),
+		);
+
+		return $system_labels[ $object_subtype ] ?? $object_subtype;
+	}
+
+	/**
 	 * Social Networks tab.
 	 *
 	 * @return void
