@@ -1,40 +1,54 @@
 /**
  * A guided tour of every settings tab: change a field, save, prove it stuck.
  *
- * This file earns its keep twice. As a test it covers the per-tab save path
- * end to end — each tab's own fields surviving its own save, and the
- * redirect landing back on the tab you saved from rather than bouncing to
- * General. As an artifact it produces a numbered full-page screenshot per
- * tab (artifacts/tour/01-general.png through 07-webmaster.png) plus a full
- * Playwright trace (test.use( { trace: 'on' } ) below, for this spec only)
- * — which is why this is deliberately one long test instead of seven short
- * ones: a single trace covering the whole tour is more useful than seven
- * fragments would be.
+ * This file earns its keep three times over. As a test it covers the
+ * per-tab save path end to end — each tab's own fields surviving its own
+ * save, and the redirect landing back on the tab you saved from rather than
+ * bouncing to General. As an artifact it produces a numbered full-page
+ * screenshot per tab (artifacts/tour/01-general.png through
+ * 07-webmaster.png), a full Playwright trace (test.use( { trace: 'on' } )
+ * below, for this spec only), and a video of the whole tour — which is why
+ * this is deliberately one long test instead of seven short ones: a single
+ * trace and a single video covering the whole tour are more useful than
+ * seven fragments would be.
  *
- * The video artifact is deliberately off for this spec
- * (test.use( { video: 'off' } ) below). Playwright's CDP screencast — what
- * the video is built from — stops updating after a page's first
- * form-submit navigation in a session: record the tour and every frame from
- * the General tab's save onward keeps showing the General tab, separator
- * already set to |, even though the test has by then moved through the
- * other six tabs. No amount of re-pacing fixes this — it is not a timing
- * problem. This is the same root cause as the force: true actionability
- * wedge documented on saveWebmasterSettings() in
- * specs/webmaster-admin.spec.ts — Playwright loses its per-renderer
- * attachments after that first POST-driven navigation. Test correctness is
- * unaffected (navigation and DOM evaluation still work, which is why every
- * assertion below passes); only the screencast-derived video is unusable,
- * so the per-tab screenshots and the trace are the tour's real visual
- * record.
+ * Both the video and the screenshots depend on save() below never letting
+ * the recorded page perform a native <form> submission. A native form-submit
+ * navigation (POST -> 302 -> GET) permanently stops Chromium's headless
+ * compositor from producing new frames on that page, for the rest of that
+ * page's life — a genuine Chromium rendering-pipeline defect, reproduced
+ * with zero Playwright/CDP input at all (see .superpowers/video-diagnosis.md
+ * for the full empirical writeup: calling
+ * HTMLFormElement.prototype.submit.call( form ) directly, with no click and
+ * no CDP input whatsoever, froze the page exactly like a real click does).
+ * It is not caused by clicking, and it is not Playwright "losing its
+ * per-renderer attachments" after a click-family action — an earlier theory
+ * this file's comments used to carry, directly disproven while diagnosing
+ * this: no click, and no CDP input of any kind, was involved in reproducing
+ * it. Other suspects were tested directly against this same freeze and each
+ * ruled out in turn: PHP_CLI_SERVER_WORKERS set to 1, 2, and 6; both old
+ * (chromium-headless-shell) and new Chromium headless modes; the
+ * --disable-gpu and --disable-dev-shm-usage launch flags; and a hung network
+ * request — a full CDP Network-domain trace showed every real HTTP request
+ * completing normally, with the sole permanently-"in-flight" request being
+ * an unrelated background blob: URL load present even on pages that never
+ * wedge. None of those explained or fixed it. A GET navigation through the
+ * identical redirect chain does not freeze the page. So save() submits the
+ * form's real fields via fetch() instead of a native submit, and only ever
+ * navigates the recorded page with
+ * page.goto() — a GET — to show the result. Genuine click-driven saving (a
+ * real click on "Save Changes") remains covered by saveWebmasterSettings()
+ * in specs/webmaster-admin.spec.ts, which this file does not touch or
+ * weaken.
  *
  * It resets the shared WordPress install before touring it and restores the
  * same snapshot again afterwards, so it leaves the site exactly as it found
  * it — the tour permanently changes verify_google and a post title template
  * that other specs assert byte-exact. The restore runs in afterAll rather
  * than inline at the end of the test body: afterAll runs once the per-test
- * context has already closed, so the recorded trace (finalized on context
- * close) still captures the full tour; restoring any earlier would truncate
- * it.
+ * context has already closed, so the recorded trace and video (both
+ * finalized on context close) still capture the full tour; restoring any
+ * earlier would truncate them.
  *
  * The zz- prefix is still load-bearing: playwright.config.ts pins
  * workers: 1 and fullyParallel: false, so path order is execution order, and
@@ -56,10 +70,10 @@ const TOUR_DIR = path.join( ROOT, 'artifacts/tour' );
 /**
  * Pause after each visible transition — the tab switch, the field being
  * changed, the save, and the reloaded result — so the tour's actual visual
- * record (the per-tab screenshots and the trace timeline, see the file
- * header) reads as a legible sequence of steps instead of a blur. Applied at
- * four points per tab (after navigating to it, after changing its field,
- * after saving, and after reloading), never just one. This exists for
+ * record (the video, the per-tab screenshots, and the trace timeline; see
+ * the file header) reads as a legible sequence of steps instead of a blur.
+ * Applied at four points per tab (after navigating to it, after changing its
+ * field, after saving, and after reloading), never just one. This exists for
  * legibility and NOT for stability — every assertion here waits on its own
  * condition, independently of these pauses. Please don't read them as masked
  * races and sprinkle more of them around, and don't reach for one to paper
@@ -68,40 +82,64 @@ const TOUR_DIR = path.join( ROOT, 'artifacts/tour' );
 const TOUR_PACING_MS = 500;
 
 /**
+ * Scroll to the bottom and back to the top when the page's content overflows
+ * the recorded viewport, so the video still shows a tab's full content even
+ * if some future tab grows taller than the fixed 1280x1250 recording size
+ * set below (see the file header and test.use() below; today, no tab does —
+ * .superpowers/video-diagnosis.md measured the tallest, Webmaster Tools, at
+ * 1226px). This is purely for the video recording, not for stability: every
+ * assertion in this file is independent of scroll position. Skipped entirely
+ * when the page already fits, so short tabs don't sit through a pointless
+ * scroll.
+ *
+ * @param page Playwright page being recorded.
+ * @return Promise< void >
+ */
+async function scrollForRecording( page: Page ): Promise< void > {
+	const viewportHeight = page.viewportSize()?.height ?? 0;
+
+	const overflows = await page.evaluate(
+		( height ) => document.documentElement.scrollHeight > height,
+		viewportHeight
+	);
+
+	if ( ! overflows ) {
+		return;
+	}
+
+	await page.evaluate( () =>
+		window.scrollTo( {
+			top: document.documentElement.scrollHeight,
+			behavior: 'smooth',
+		} )
+	);
+	await page.waitForTimeout( TOUR_PACING_MS );
+
+	await page.evaluate( () =>
+		window.scrollTo( { top: 0, behavior: 'smooth' } )
+	);
+	await page.waitForTimeout( TOUR_PACING_MS );
+}
+
+/**
  * Screenshot the tab's current state for the tour's visual record.
  *
- * Captured from a throwaway new tab in the same browser context, freshly
- * navigated to `page`'s current URL — not from `page` itself. This is not
- * a stylistic choice: `page`'s own CDP Page-domain session wedges after the
- * first force: true click-family action in its session (see save() and the
- * file header for the underlying cause), and that wedge turns out to reach
- * further than the screencast. Confirmed directly while diagnosing this —
- * both page.screenshot() on `page` and a raw Page.captureScreenshot sent
- * over a brand-new CDP session attached to `page` hang indefinitely once
- * the wedge has happened, even though DOM evaluation and locator actions on
- * `page` keep working fine (which is why the test's own assertions never
- * lie). A screenshot taken from an entirely different page/target — never
- * subjected to that click — succeeds immediately every time; verified
- * across all seven tabs. This is still the "on-demand CDP capture, which
- * is unaffected" fix, just aimed at a target that is actually unaffected.
+ * Screenshotted directly from the recorded page. Earlier revisions of this
+ * file captured from a disposable new tab instead, to dodge the Chromium
+ * compositor freeze described in the file header — but that freeze is
+ * triggered specifically by a native <form> submission navigation, and
+ * save() below never performs one anymore, so the recorded page never
+ * wedges and there is nothing left to dodge.
  *
- * Navigating the fresh tab straight to page.url() is a plain, side-effect
- * -free GET: tourTextTab() already reloaded `page` before calling this, so
- * its URL is the clean tab= URL (WordPress strips the transient
- * ?updated=1 via a client-side history.replaceState right after the
- * redirect lands), not the POST target — no form resubmission, no state
- * change, just the same rendered result `page` is already showing.
+ * Applies scrollForRecording() first for the video's benefit (see there),
+ * then takes the actual screenshot; a failed capture still propagates
+ * rather than being swallowed. Deliberate: this function's whole job is
+ * producing the tour's evidence, and a silently missing screenshot is the
+ * kind of gap nobody notices until the one time they need it. Better for a
+ * bad capture to fail the test loudly than to let the tour "complete" with
+ * a hole in its record.
  *
- * capturePage.close() runs in a finally, so the throwaway tab never leaks
- * regardless of how goto()/screenshot() finish — but a failed capture still
- * propagates rather than being swallowed. Deliberate: this function's whole
- * job is producing the tour's evidence, and a silently missing screenshot
- * is the kind of gap nobody notices until the one time they need it. Better
- * for a bad capture to fail the test loudly than to let the tour "complete"
- * with a hole in its record.
- *
- * @param page    Playwright page the tour is running on. Not screenshotted
- *                directly (see above) — only its current URL is read.
+ * @param page    Playwright page the tour is running on.
  * @param ordinal Tour position (1-based); zero-padded into the filename so
  *                the images sort in tour order.
  * @param slug    Tab slug; identifies the tab in the filename.
@@ -114,16 +152,12 @@ async function captureTourStep(
 ): Promise< void > {
 	const name = `${ String( ordinal ).padStart( 2, '0' ) }-${ slug }.png`;
 
-	const capturePage = await page.context().newPage();
-	try {
-		await capturePage.goto( page.url() );
-		await capturePage.screenshot( {
-			path: path.join( TOUR_DIR, name ),
-			fullPage: true,
-		} );
-	} finally {
-		await capturePage.close();
-	}
+	await scrollForRecording( page );
+
+	await page.screenshot( {
+		path: path.join( TOUR_DIR, name ),
+		fullPage: true,
+	} );
 }
 
 const tabUrl = ( slug: string ): string =>
@@ -172,23 +206,81 @@ function restoreDatabaseSnapshot(): void {
 }
 
 /**
- * Submit the settings form and confirm the redirect kept us on this tab.
+ * Submit the settings form without a native <form> submission, then GET the
+ * redirect result.
  *
- * force: true is load-bearing, not a shortcut — see the long explanation on
- * saveWebmasterSettings() in specs/webmaster-admin.spec.ts. In short: the
- * wedge is order-dependent, not specific to this button — the second
- * click-family action anywhere in the session reliably wedges Playwright's
- * actionability wait, with no plugin JS involved. The click is still real
- * and trusted; it skips the wait, not the click. Every call here is
- * followed by assertions that independently prove the save happened.
+ * The freeze documented in the file header is triggered specifically by a
+ * native form-submission navigation (POST -> 302 -> GET) on the recorded
+ * page — proven with zero Playwright/CDP input at all by calling
+ * HTMLFormElement.prototype.submit.call( form ) directly and watching it
+ * freeze identically to a real click (see .superpowers/video-diagnosis.md).
+ * A GET navigation through the identical redirect chain does not freeze it.
+ * So instead of clicking #submit, this serializes the real <form> with
+ * FormData and POSTs it via fetch() from inside the page — same nonce, same
+ * hidden action/tab fields, same values, so the server handles it exactly as
+ * it would a real submit — then only ever navigates the recorded page with
+ * page.goto(), a GET, to the final redirected URL.
+ *
+ * form.getAttribute( 'action' ) is deliberate, not form.action: the form has
+ * a hidden field literally named "action" (WordPress's admin-post.php
+ * convention, value taseo_save_settings), and a named form control shadows
+ * the .action IDL property of the form itself — form.action would evaluate
+ * to that <input> element, not the submit URL, and fetch() would then throw
+ * trying to use it as one. getAttribute() reads the raw HTML attribute and
+ * is unaffected by named-control shadowing.
+ *
+ * The selector is deliberately not a bare 'form': a WordPress admin page can
+ * carry other <form> elements (the admin bar's command-palette UI among
+ * them — visible in this very tour's screenshots), and querySelector( 'form'
+ * ) would silently grab whichever one happens to come first in the DOM,
+ * POSTing the wrong form with no obvious error if one ever renders ahead of
+ * ours. 'form[action*="admin-post.php"]' anchors on the one fact this file
+ * already depends on: SettingsPage::render_page() points this form at
+ * admin-post.php (see the fetch() target above, and the redirect it
+ * produces), so that is what identifies it.
+ *
+ * The redirect-preserving-tab assertion below is a real regression guard,
+ * not incidental — it is what proves the bug fixed on this branch (the
+ * redirect silently falling through to the General tab) stays fixed; see
+ * saveWebmasterSettings() in specs/webmaster-admin.spec.ts, which guards the
+ * same thing for a genuine click. Asserting it against the fetch response's
+ * own final URL, before ever navigating the recorded page, keeps that guard
+ * intact under this mechanism.
+ *
+ * Genuine click-driven saving (a real click on "Save Changes") remains
+ * covered by saveWebmasterSettings() in specs/webmaster-admin.spec.ts, which
+ * this function does not replace or weaken.
  *
  * @param page Playwright page, on the tab, with the field already filled.
  * @param slug Tab slug the redirect must land back on.
  * @return Promise< void >
  */
 async function save( page: Page, slug: string ): Promise< void > {
-	await page.locator( '#submit' ).click( { force: true } );
-	await expect( page ).toHaveURL( new RegExp( `tab=${ slug }` ) );
+	const redirectUrl = await page.evaluate( async () => {
+		const selector = 'form[action*="admin-post.php"]';
+		const form = document.querySelector( selector ) as HTMLFormElement | null;
+
+		if ( ! form ) {
+			throw new Error( `save(): no element matched selector "${ selector }"` );
+		}
+
+		const action = form.getAttribute( 'action' ) as string;
+		const response = await fetch( action, {
+			method: 'POST',
+			body: new FormData( form ),
+			credentials: 'same-origin',
+			redirect: 'follow',
+		} );
+
+		return response.url;
+	} );
+
+	expect(
+		redirectUrl,
+		`save on the ${ slug } tab redirected back to its own tab`
+	).toMatch( new RegExp( `tab=${ slug }` ) );
+
+	await page.goto( redirectUrl );
 	await page.waitForTimeout( TOUR_PACING_MS );
 }
 
@@ -244,15 +336,23 @@ async function tourTextTab( page: Page, step: TextTabStep ): Promise< void > {
 	await captureTourStep( page, step.ordinal, step.slug );
 }
 
-// This spec only — playwright.config.ts's global video: 'on' and
+// This spec only — playwright.config.ts's global video: 'on' (unsized) and
 // trace: 'retain-on-failure' stay put for every other spec. Playwright
-// requires trace/video overrides to live at file top-level (or in the
-// config); it errors ("forces a new worker") if they're set inside a
-// describe block. The screencast the video would be built from freezes
-// after this session's first form-submit navigation (see the file header),
-// so recording one here would just be a broken artifact; a full trace,
-// unaffected by that freeze, is what replaces it.
-test.use( { trace: 'on', video: 'off' } );
+// requires trace/video/viewport overrides to live at file top-level (or in
+// the config); it errors ("forces a new worker") if they're set inside a
+// describe block. save() below never lets the recorded page perform a
+// native form submission (see the file header), so the video no longer
+// freezes and is worth keeping alongside the trace. viewport and
+// recordVideo.size are both set to 1280x1250 — wide enough to match every
+// other spec's default, tall enough for every tab's full-page height
+// (measured 748px-1226px in .superpowers/video-diagnosis.md, Webmaster Tools
+// the tallest at 1226px) so nothing needs to scroll to be recorded in full;
+// scrollForRecording() only helps future tabs that outgrow this.
+test.use( {
+	trace: 'on',
+	video: { mode: 'on', size: { width: 1280, height: 1250 } },
+	viewport: { width: 1280, height: 1250 },
+} );
 
 test.describe( 'admin tour', () => {
 	test.beforeAll( () => {
@@ -311,11 +411,12 @@ test.describe( 'admin tour', () => {
 			'input[name="taseo_settings[enabled_post_types][]"][value="page"]'
 		);
 		await expect( pageType, 'pages start enabled' ).toBeChecked();
-		// force: true for the same reason save()'s #submit click needs it —
-		// see saveWebmasterSettings() in specs/webmaster-admin.spec.ts. The
-		// toBeChecked() assertions bracketing this call independently prove
-		// the uncheck happened.
-		await pageType.uncheck( { force: true } );
+		// A plain, unforced uncheck: save() never lets this page perform a
+		// native form submission (see the file header), so the Chromium
+		// compositor freeze that used to justify a force: true here never
+		// happens in the first place. The toBeChecked() assertions
+		// bracketing this call independently prove the uncheck happened.
+		await pageType.uncheck();
 		await page.waitForTimeout( TOUR_PACING_MS );
 		await save( page, typesStep.slug );
 
