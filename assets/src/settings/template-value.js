@@ -26,6 +26,12 @@ export function parseTemplate( template ) {
 	let lastIndex = 0;
 	let match;
 
+	// Not load-bearing today: exec() with the g flag already resets
+	// lastIndex to 0 whenever it returns null, and null is the only way
+	// this loop exits, so a leftover lastIndex from a prior call can never
+	// reach this point. Kept as a guard against a future refactor that
+	// exits the loop some other way (e.g. an early `break`), which would
+	// otherwise leave lastIndex stranded mid-string for the next call.
 	TOKEN_PATTERN.lastIndex = 0;
 
 	while ( ( match = TOKEN_PATTERN.exec( template ) ) !== null ) {
