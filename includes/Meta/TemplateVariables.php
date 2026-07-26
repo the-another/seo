@@ -1,0 +1,122 @@
+<?php
+/**
+ * Template Variables Registry
+ *
+ * @package TheAnotherSEO
+ * @since 1.0.0
+ */
+
+namespace TheAnother\Plugin\SEO\Meta;
+
+/**
+ * Class TemplateVariables
+ *
+ * The single source of truth for which %%variables%% exist in which
+ * context. Both the settings UI (pills, autocomplete) and save-time
+ * validation read from here, so what the admin is offered, what the admin
+ * may save, and what CurrentContext can actually resolve stay in agreement.
+ *
+ * The availability rules below are a transcription of what
+ * CurrentContext::site_vars(), post_vars() and term_vars() produce —
+ * tests/Unit/Meta/CurrentContextVariablesTest.php enforces that they stay
+ * transcriptions rather than drifting apart again.
+ */
+class TemplateVariables {
+
+	/**
+	 * Variables available in every context.
+	 *
+	 * A method rather than a constant: the labels are translated, and
+	 * __() cannot be called in a constant expression.
+	 *
+	 * @return array<string, string> Slug => label.
+	 */
+	private function base_variables(): array {
+		return array(
+			'title'    => __( 'Title of the post, term, or site', 'the-another-seo' ),
+			'sitename' => __( 'Site title', 'the-another-seo' ),
+			'tagline'  => __( 'Site tagline', 'the-another-seo' ),
+			'sep'      => __( 'Title separator', 'the-another-seo' ),
+			'page'     => __( 'Page number on paginated views', 'the-another-seo' ),
+		);
+	}
+
+	/**
+	 * Variables available for a given context.
+	 *
+	 * @param string $object_type    'post', 'term', or 'system_page'.
+	 * @param string $object_subtype Post type, taxonomy, or system page key.
+	 * @return array<string, string> Slug => label.
+	 */
+	public function get_for( string $object_type, string $object_subtype ): array {
+		$variables = $this->base_variables();
+
+		if ( 'post' === $object_type ) {
+			$variables['excerpt']          = __( 'Excerpt', 'the-another-seo' );
+			$variables['date']             = __( 'Publish date', 'the-another-seo' );
+			$variables['primary_category'] = __( 'First assigned category', 'the-another-seo' );
+
+			// Matches CurrentContext::post_vars()'s own WooCommerce probe: a
+			// site without WooCommerce must not be offered variables that
+			// could never resolve.
+			if ( 'product' === $object_subtype && function_exists( 'wc_get_product' ) ) {
+				$variables['price'] = __( 'Product price', 'the-another-seo' );
+				$variables['sku']   = __( 'Product SKU', 'the-another-seo' );
+			}
+		} elseif ( 'term' === $object_type ) {
+			$variables['excerpt'] = __( 'Term description', 'the-another-seo' );
+		}
+
+		/**
+		 * Filters the template variables available in one context.
+		 *
+		 * The type and subtype are passed so an extension can scope a
+		 * variable to products rather than advertising it on 404 pages.
+		 * Entries whose slug does not match the resolver's own character
+		 * class are dropped — the registry must never offer a token
+		 * TemplateResolver could not expand.
+		 *
+		 * @since 1.0.0
+		 *
+		 * @param array<string, string> $variables      Slug => label.
+		 * @param string                $object_type    'post'|'term'|'system_page'.
+		 * @param string                $object_subtype Post type, taxonomy, or system page key.
+		 */
+		$filtered = apply_filters( 'taseo_template_variables', $variables, $object_type, $object_subtype );
+
+		return is_array( $filtered ) ? $this->clean( $filtered ) : $variables;
+	}
+
+	/**
+	 * Whether one variable is available in a context.
+	 *
+	 * @param string $variable       Slug, any case.
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Object subtype.
+	 * @return bool Available.
+	 */
+	public function is_available( string $variable, string $object_type, string $object_subtype ): bool {
+		return array_key_exists(
+			strtolower( $variable ),
+			$this->get_for( $object_type, $object_subtype )
+		);
+	}
+
+	/**
+	 * Drop entries a filter added that the resolver could never expand.
+	 *
+	 * @param array<mixed, mixed> $variables Candidate variables.
+	 * @return array<string, string> Clean variables.
+	 */
+	private function clean( array $variables ): array {
+		$clean = array();
+
+		foreach ( $variables as $slug => $label ) {
+			if ( is_string( $slug ) && is_string( $label ) && 1 === preg_match( '/^[a-z0-9_]+$/', $slug ) ) {
+				$clean[ $slug ] = $label;
+			}
+		}
+
+		return $clean;
+	}
+}
