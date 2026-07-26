@@ -22,6 +22,7 @@ use TheAnother\Plugin\SEO\Indexable\IndexableSync;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
+use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
@@ -101,6 +102,7 @@ class Plugin {
 
 		$c->register( 'settings', fn() => new Settings() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
+		$c->register( 'template_variables', fn() => new TemplateVariables() );
 		$c->register( 'indexable_repository', fn() => new IndexableRepository() );
 		$c->register(
 			'indexable_backfill',
@@ -157,7 +159,8 @@ class Plugin {
 				$c->get( 'indexable_backfill' ),
 				$c->get( 'sitemap_file_repository' ),
 				$c->get( 'sitemap_file_writer' ),
-				$c->get( 'sitemap_sweeper' )
+				$c->get( 'sitemap_sweeper' ),
+				$c->get( 'template_variables' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );

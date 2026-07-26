@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
@@ -25,6 +26,7 @@ class SettingsPageTest extends TestCase {
 	private $sitemap_files;
 	private $sitemap_writer;
 	private $sitemap_sweeper;
+	private TemplateVariables $template_variables;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -42,16 +44,18 @@ class SettingsPageTest extends TestCase {
 			static fn( string $key, string $value, string $url ): string => $url . '&' . $key . '=' . $value
 		);
 
-		$this->sitemap_files   = Mockery::mock( SitemapFileRepository::class );
-		$this->sitemap_writer  = Mockery::mock( SitemapFileWriter::class );
-		$this->sitemap_sweeper = Mockery::mock( SitemapSweeper::class );
+		$this->sitemap_files      = Mockery::mock( SitemapFileRepository::class );
+		$this->sitemap_writer     = Mockery::mock( SitemapFileWriter::class );
+		$this->sitemap_sweeper    = Mockery::mock( SitemapSweeper::class );
+		$this->template_variables = new TemplateVariables();
 
 		$this->page = new SettingsPage(
 			$this->settings,
 			$this->backfill,
 			$this->sitemap_files,
 			$this->sitemap_writer,
-			$this->sitemap_sweeper
+			$this->sitemap_sweeper,
+			$this->template_variables
 		);
 	}
 
@@ -465,6 +469,44 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => 'https://example.com' . $path );
 		Functions\when( 'wp_nonce_field' )->justReturn( null );
 		Functions\when( 'submit_button' )->justReturn( null );
+		Functions\when( 'get_post_types' )->justReturn( array() );
+		Functions\when( 'get_taxonomies' )->justReturn( array() );
+		Functions\when( 'checked' )->justReturn( '' );
+		Functions\when( 'get_settings_errors' )->justReturn( array() );
+	}
+
+	/**
+	 * Wire up Settings getter expectations for the templates tab, defaulting
+	 * to no enabled post types/taxonomies and empty templates unless
+	 * overridden — the system-page rows render unconditionally regardless.
+	 *
+	 * @param array<int, string> $post_types Enabled post type slugs.
+	 * @param array<int, string> $taxonomies Enabled taxonomy slugs.
+	 * @return void
+	 */
+	private function stub_templates_settings( array $post_types = array(), array $taxonomies = array() ): void {
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( $post_types );
+		$this->settings->shouldReceive( 'get_enabled_taxonomies' )->andReturn( $taxonomies );
+		$this->settings->shouldReceive( 'get_title_template' )->andReturn( '' );
+		$this->settings->shouldReceive( 'get_description_template' )->andReturn( '' );
+	}
+
+	/**
+	 * Render the settings page and return its markup.
+	 *
+	 * @return string Markup.
+	 */
+	private function render_page(): string {
+		$this->stub_render_functions();
+		$this->stub_templates_settings();
+
+		ob_start();
+		$this->page->render_page();
+		$html = (string) ob_get_clean();
+
+		unset( $_GET['tab'] );
+
+		return $html;
 	}
 
 	/**
@@ -651,5 +693,30 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
+
+	public function test_templates_tab_renders_a_pill_for_each_available_variable(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'data-taseo-template-var="%%title%%"', $html );
+		$this->assertStringContainsString( 'class="button button-small"', $html );
+	}
+
+	public function test_templates_tab_no_longer_prints_the_hardcoded_variable_line(): void {
+		$_GET['tab'] = 'templates';
+
+		$this->assertStringNotContainsString( 'Available variables:', $this->render_page() );
+	}
+
+	public function test_system_page_rows_offer_only_the_base_variables(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		// The 404 row is a system page: no excerpt, date, or primary_category.
+		$this->assertStringContainsString( 'taseo_settings[title_templates][system_page:404]', $html );
+		$this->assertStringNotContainsString( 'data-taseo-template-var="%%price%%"', $html );
 	}
 }

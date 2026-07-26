@@ -57,6 +57,7 @@ class PluginTest extends TestCase {
 			'indexable_backfill',
 			'current_context',
 			'template_resolver',
+			'template_variables',
 			'meta_output',
 			'social_output',
 			'schema_graph',

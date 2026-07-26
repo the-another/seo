@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Admin;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
@@ -90,18 +91,20 @@ class SettingsPage {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings              $settings        Settings.
-	 * @param IndexableBackfill     $backfill        Backfill.
-	 * @param SitemapFileRepository $sitemap_files   Sitemap registry (status panel).
-	 * @param SitemapFileWriter     $sitemap_writer  Sitemap writer (writability probe).
-	 * @param SitemapSweeper        $sitemap_sweeper Sitemap sweeper (regenerate action).
+	 * @param Settings              $settings           Settings.
+	 * @param IndexableBackfill     $backfill           Backfill.
+	 * @param SitemapFileRepository $sitemap_files      Sitemap registry (status panel).
+	 * @param SitemapFileWriter     $sitemap_writer     Sitemap writer (writability probe).
+	 * @param SitemapSweeper        $sitemap_sweeper    Sitemap sweeper (regenerate action).
+	 * @param TemplateVariables     $template_variables Template variables registry (per-row pills).
 	 */
 	public function __construct(
 		private readonly Settings $settings,
 		private readonly IndexableBackfill $backfill,
 		private readonly SitemapFileRepository $sitemap_files,
 		private readonly SitemapFileWriter $sitemap_writer,
-		private readonly SitemapSweeper $sitemap_sweeper
+		private readonly SitemapSweeper $sitemap_sweeper,
+		private readonly TemplateVariables $template_variables
 	) {
 	}
 
@@ -317,15 +320,13 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_templates_tab(): void {
-		echo '<p>' . esc_html__( 'Available variables: %%title%% %%sitename%% %%tagline%% %%sep%% %%excerpt%% %%primary_category%% %%date%% %%page%% %%price%% %%sku%%', 'the-another-seo' ) . '</p>';
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
 			printf(
 				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="large-text" placeholder="%4$s" />
-					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="large-text" placeholder="%6$s" />
-				</td></tr>',
+					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="large-text" placeholder="%4$s" data-taseo-template-input />
+					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="large-text" placeholder="%6$s" data-taseo-template-input />',
 				esc_html( $type ),
 				esc_attr( $type ),
 				esc_attr( $this->settings->get_title_template( 'post', $type ) ),
@@ -333,32 +334,65 @@ class SettingsPage {
 				esc_attr( $this->settings->get_description_template( 'post', $type ) ),
 				esc_attr__( 'Description template', 'the-another-seo' )
 			);
+			$this->render_variable_pills( 'post', $type );
+			echo '</td></tr>';
 		}
 
 		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
 			printf(
 				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="large-text" />
-					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="large-text" />
-				</td></tr>',
+					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="large-text" data-taseo-template-input />
+					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="large-text" data-taseo-template-input />',
 				esc_html( $tax ),
 				esc_attr( $tax ),
 				esc_attr( $this->settings->get_title_template( 'term', $tax ) ),
 				esc_attr( $this->settings->get_description_template( 'term', $tax ) )
 			);
+			$this->render_variable_pills( 'term', $tax );
+			echo '</td></tr>';
 		}
 
 		// System pages.
 		foreach ( array( 'home', 'search', '404' ) as $system ) {
 			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="large-text" /></td></tr>',
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="large-text" data-taseo-template-input />',
 				esc_html( $system ),
 				esc_attr( $system ),
 				esc_attr( $this->settings->get_title_template( 'system_page', $system ) )
 			);
+			$this->render_variable_pills( 'system_page', $system );
+			echo '</td></tr>';
 		}
 
 		echo '</table>';
+	}
+
+	/**
+	 * Render the variable pills for one template row.
+	 *
+	 * Core's own button component inside core's help-text element — no
+	 * stylesheet is involved. The data attribute is also the only channel
+	 * by which the admin script learns this row's variables: it reads the
+	 * rendered pills rather than a second, separately-serialised copy of
+	 * the registry, so the two cannot drift.
+	 *
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Object subtype.
+	 * @return void
+	 */
+	private function render_variable_pills( string $object_type, string $object_subtype ): void {
+		echo '<p class="description">';
+
+		foreach ( array_keys( $this->template_variables->get_for( $object_type, $object_subtype ) ) as $slug ) {
+			$token = '%%' . $slug . '%%';
+
+			printf(
+				'<button type="button" class="button button-small" data-taseo-template-var="%1$s">%1$s</button> ',
+				esc_attr( $token )
+			);
+		}
+
+		echo '</p>';
 	}
 
 	/**
