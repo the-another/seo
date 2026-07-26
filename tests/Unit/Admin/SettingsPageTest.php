@@ -469,10 +469,6 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => 'https://example.com' . $path );
 		Functions\when( 'wp_nonce_field' )->justReturn( null );
 		Functions\when( 'submit_button' )->justReturn( null );
-		Functions\when( 'get_post_types' )->justReturn( array() );
-		Functions\when( 'get_taxonomies' )->justReturn( array() );
-		Functions\when( 'checked' )->justReturn( '' );
-		Functions\when( 'get_settings_errors' )->justReturn( array() );
 	}
 
 	/**
@@ -494,11 +490,17 @@ class SettingsPageTest extends TestCase {
 	/**
 	 * Render the settings page and return its markup.
 	 *
+	 * Defaults to no enabled post types/taxonomies, so only the hardcoded
+	 * system-page rows render; pass non-empty lists to exercise the post
+	 * type / taxonomy loops too.
+	 *
+	 * @param array<int, string> $post_types Enabled post type slugs.
+	 * @param array<int, string> $taxonomies Enabled taxonomy slugs.
 	 * @return string Markup.
 	 */
-	private function render_page(): string {
+	private function render_page( array $post_types = array(), array $taxonomies = array() ): string {
 		$this->stub_render_functions();
-		$this->stub_templates_settings();
+		$this->stub_templates_settings( $post_types, $taxonomies );
 
 		ob_start();
 		$this->page->render_page();
@@ -718,5 +720,27 @@ class SettingsPageTest extends TestCase {
 		// The 404 row is a system page: no excerpt, date, or primary_category.
 		$this->assertStringContainsString( 'taseo_settings[title_templates][system_page:404]', $html );
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%price%%"', $html );
+	}
+
+	public function test_post_type_rows_offer_excerpt_date_and_primary_category(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page( array( 'post' ) );
+
+		$this->assertStringContainsString( 'taseo_settings[title_templates][post:post]', $html );
+		$this->assertStringContainsString( 'data-taseo-template-var="%%excerpt%%"', $html );
+		$this->assertStringContainsString( 'data-taseo-template-var="%%date%%"', $html );
+		$this->assertStringContainsString( 'data-taseo-template-var="%%primary_category%%"', $html );
+	}
+
+	public function test_term_rows_offer_excerpt_but_not_date_or_primary_category(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page( array(), array( 'category' ) );
+
+		$this->assertStringContainsString( 'taseo_settings[title_templates][term:category]', $html );
+		$this->assertStringContainsString( 'data-taseo-template-var="%%excerpt%%"', $html );
+		$this->assertStringNotContainsString( 'data-taseo-template-var="%%date%%"', $html );
+		$this->assertStringNotContainsString( 'data-taseo-template-var="%%primary_category%%"', $html );
 	}
 }
