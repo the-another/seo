@@ -1032,4 +1032,18 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'name="taseo_settings[description_templates][post:post]"', $html );
 		$this->assertStringContainsString( 'data-taseo-template-input', $html );
 	}
+
+	public function test_variable_pills_carry_both_the_token_and_its_human_label(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'data-taseo-template-var="%%title%%"', $html );
+		$this->assertStringContainsString( 'data-taseo-template-label="', $html );
+		$this->assertMatchesRegularExpression(
+			'/data-taseo-template-var="%%title%%"\s+data-taseo-template-label="[^"]+"/',
+			$html,
+			'each pill must carry its label alongside its token'
+		);
+	}
 }

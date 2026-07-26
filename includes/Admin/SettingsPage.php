@@ -546,12 +546,13 @@ class SettingsPage {
 	private function render_variable_pills( string $object_type, string $object_subtype ): void {
 		echo '<p class="description">';
 
-		foreach ( array_keys( $this->template_variables->get_for( $object_type, $object_subtype ) ) as $slug ) {
+		foreach ( $this->template_variables->get_for( $object_type, $object_subtype ) as $slug => $label ) {
 			$token = '%%' . $slug . '%%';
 
 			printf(
-				'<button type="button" class="button button-small" data-taseo-template-var="%1$s">%1$s</button> ',
-				esc_attr( $token )
+				'<button type="button" class="button button-small" data-taseo-template-var="%1$s" data-taseo-template-label="%2$s">%1$s</button> ',
+				esc_attr( $token ),
+				esc_attr( $label )
 			);
 		}
 
