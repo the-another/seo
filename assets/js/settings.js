@@ -94,29 +94,40 @@
 	/**
 	 * The open, incomplete token immediately before the caret, if any.
 	 *
-	 * An even number of %% delimiters before the caret means we sit outside
-	 * a token and there is nothing to complete; an odd number means the
-	 * last one opened a token still being typed.
+	 * PHP's TemplateResolver matches only complete %%variable%% pairs (the
+	 * same [a-z0-9_]+ character class used below) and leaves anything else
+	 * — including a stray, unpaired %% — as literal text (see
+	 * TemplateResolver::extract_variables()). This must find the same thing
+	 * PHP would leave open: strip every complete %%…%% pair out of the text
+	 * before the caret, then check whether what remains still ends in an
+	 * unclosed %%.
+	 *
+	 * Do not go back to counting %% occurrences and checking odd/even
+	 * parity. That assumes every %% pairs up strictly left to right, which
+	 * breaks the moment an earlier %% in the field is itself unpaired
+	 * (e.g. "%%oops %%title%%"): parity flips, "start" ends up anchored on
+	 * the delimiter that actually closes %%title%%, and accepting a
+	 * suggestion there splices a new token onto the end of an existing one
+	 * — %%title%%sep%% — instead of leaving no open token at all, silently
+	 * corrupting the saved template.
 	 *
 	 * @param {Element} input Input.
 	 * @return {Object|null} { start, term } or null.
 	 */
 	function openToken( input ) {
 		var before = input.value.slice( 0, input.selectionStart );
-		var count = before.split( TOKEN ).length - 1;
+		var stripped = before.replace( /%%[a-z0-9_]+%%/gi, '' );
 
-		if ( count % 2 === 0 ) {
+		if ( ! /%%[a-z0-9_]*$/i.test( stripped ) ) {
 			return null;
 		}
 
 		var start = before.lastIndexOf( TOKEN );
-		var term = before.slice( start + TOKEN.length );
 
-		if ( ! /^[a-z0-9_]*$/i.test( term ) ) {
-			return null;
-		}
-
-		return { start: start, term: term.toLowerCase() };
+		return {
+			start: start,
+			term: before.slice( start + TOKEN.length ).toLowerCase(),
+		};
 	}
 
 	document.addEventListener( 'focusin', function ( event ) {

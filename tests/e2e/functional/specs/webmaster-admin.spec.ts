@@ -232,4 +232,76 @@ test.describe( 'webmaster admin settings', () => {
 
 		await expect( input ).toHaveValue( '%%title%%' );
 	} );
+
+	test( 'the %%pri autocomplete is context-aware, not one global list', async ( {
+		page,
+	} ) => {
+		// The design spec (docs/superpowers/specs/2026-07-26-template-
+		// variables-design.md, line 148) asks for %%pri on a *product* row
+		// to suggest both %%price%% and %%primary_category%%, contrasted
+		// with a page row offering only %%primary_category%% — "the
+		// assertion that proves the autocomplete is context-aware rather
+		// than showing one global list". This e2e WordPress install has no
+		// WooCommerce (see tests/e2e/functional/environment/serve-wp.sh):
+		// no product row exists here, and %%price%% is unavailable on
+		// every row in this environment, so that half of the spec's
+		// assertion cannot be exercised at all in this environment.
+		//
+		// What follows is the strongest still-available proof of the same
+		// context-awareness, within this one tab: post:post is registered
+		// for the category taxonomy and offers %%primary_category%%;
+		// post:page is not registered for it (TemplateVariables::get_for()
+		// gates the variable on is_object_in_taxonomy()) and offers nothing
+		// for the same fragment; a system-page row, which never gets
+		// excerpt/date/primary_category at all, offers nothing either.
+		await page.goto(
+			'/wp-admin/options-general.php?page=taseo&tab=templates'
+		);
+
+		/**
+		 * Type "%%pri" into one row's title template input and read back
+		 * whatever the jQuery UI autocomplete menu settled on.
+		 *
+		 * @param inputName The template input's `name` attribute.
+		 */
+		async function suggestionsFor(
+			inputName: string
+		): Promise< string[] > {
+			const input = page.locator( `input[name="${ inputName }"]` );
+
+			await input.fill( '' );
+			await input.click();
+			await input.pressSequentially( '%%pri', { delay: 20 } );
+
+			// jQuery UI Autocomplete debounces its search (default delay:
+			// 300ms) before calling our source() function and showing the
+			// menu; give it room to settle. A menu with no matches simply
+			// never becomes visible, so a fixed wait (rather than waiting
+			// for visibility) is what lets this same helper prove both the
+			// "offers a suggestion" and "offers nothing" cases.
+			await page.waitForTimeout( 500 );
+
+			return page
+				.locator( '.ui-autocomplete:visible li' )
+				.allTextContents();
+		}
+
+		expect(
+			await suggestionsFor(
+				'taseo_settings[title_templates][post:post]'
+			)
+		).toEqual( [ '%%primary_category%%' ] );
+
+		expect(
+			await suggestionsFor(
+				'taseo_settings[title_templates][post:page]'
+			)
+		).toEqual( [] );
+
+		expect(
+			await suggestionsFor(
+				'taseo_settings[title_templates][system_page:404]'
+			)
+		).toEqual( [] );
+	} );
 } );

@@ -8,6 +8,7 @@ use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 
@@ -22,6 +23,11 @@ class TemplateVariablesTest extends TestCase {
 		Monkey\setUp();
 
 		Functions\when( '__' )->returnArg();
+
+		// Matches CurrentContext::post_vars()'s taxonomy check for the
+		// default case; tests exercising the page/product distinction
+		// override this per-test.
+		Functions\when( 'is_object_in_taxonomy' )->justReturn( true );
 
 		$this->variables = new TemplateVariables();
 	}
@@ -42,11 +48,29 @@ class TemplateVariablesTest extends TestCase {
 	}
 
 	public function test_posts_add_excerpt_date_and_primary_category(): void {
-		$slugs = array_keys( $this->variables->get_for( 'post', 'page' ) );
+		// 'page' cannot carry this: it is not registered for the category
+		// taxonomy, so use a subtype that genuinely is (see
+		// test_pages_never_get_primary_category() below for the contrast).
+		// is_object_in_taxonomy() defaults to true in setUp().
+		$slugs = array_keys( $this->variables->get_for( 'post', 'post' ) );
 
 		$this->assertContains( 'excerpt', $slugs );
 		$this->assertContains( 'date', $slugs );
 		$this->assertContains( 'primary_category', $slugs );
+	}
+
+	/**
+	 * Corrects a bug that shipped in this test suite: this used to assert
+	 * primary_category present for 'post:page', a state stock WordPress can
+	 * never produce (`page` is not registered for the `category` taxonomy),
+	 * which is exactly what let TemplateVariables offer a %%primary_category%%
+	 * pages could never resolve. See includes/Meta/TemplateVariables.php's
+	 * is_object_in_taxonomy() gate.
+	 */
+	public function test_pages_never_get_primary_category(): void {
+		Functions\when( 'is_object_in_taxonomy' )->justReturn( false );
+
+		$this->assertNotContains( 'primary_category', array_keys( $this->variables->get_for( 'post', 'page' ) ) );
 	}
 
 	public function test_terms_add_excerpt_but_not_date(): void {
@@ -71,6 +95,19 @@ class TemplateVariablesTest extends TestCase {
 		$this->assertNotContains( 'sku', $slugs );
 	}
 
+	/**
+	 * Runs in its own process: Functions\when( 'wc_get_product' ) makes
+	 * Patchwork define a real global function for the rest of the PHP
+	 * process — it can never be undefined again. Left in-process, that
+	 * would permanently flip function_exists( 'wc_get_product' ) to true
+	 * for every test running afterwards, including
+	 * test_products_omit_price_and_sku_without_woocommerce() above, which
+	 * asserts the opposite — correctness would then rest on declaration
+	 * order, and phpunit.xml.dist's executionOrder="depends,defects"
+	 * reorders tests after any local failure. Isolating this test confines
+	 * the definition to a process that exits immediately after it.
+	 */
+	#[RunInSeparateProcess]
 	public function test_products_add_price_and_sku_with_woocommerce(): void {
 		Functions\when( 'wc_get_product' )->justReturn( null );
 
@@ -80,6 +117,11 @@ class TemplateVariablesTest extends TestCase {
 		$this->assertContains( 'sku', $slugs );
 	}
 
+	/**
+	 * Same hazard as test_products_add_price_and_sku_with_woocommerce()
+	 * above: this also defines wc_get_product() in-process.
+	 */
+	#[RunInSeparateProcess]
 	public function test_non_product_post_types_never_get_price_even_with_woocommerce(): void {
 		Functions\when( 'wc_get_product' )->justReturn( null );
 

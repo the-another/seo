@@ -59,6 +59,10 @@ class CurrentContextVariablesTest extends TestCase {
 		Functions\when( 'is_search' )->justReturn( false );
 		Functions\when( 'is_404' )->justReturn( false );
 		Functions\when( 'is_post_type_archive' )->justReturn( false );
+		// Matches CurrentContext::post_vars()'s own taxonomy probe by
+		// default (see TemplateVariables::get_for()); tests exercising the
+		// page/product distinction override this per-test.
+		Functions\when( 'is_object_in_taxonomy' )->justReturn( true );
 
 		$this->repository = Mockery::mock( IndexableRepository::class );
 		$this->repository->shouldReceive( 'find' )->andReturn( null )->byDefault();
@@ -98,9 +102,16 @@ class CurrentContextVariablesTest extends TestCase {
 	 *
 	 * @param string $post_type Post type.
 	 * @param bool   $with_woo  Register a wc_get_product() returning a product.
+	 * @param bool   $has_terms Whether get_the_terms() finds a term for this
+	 *                          object. Stock WordPress can only produce that
+	 *                          for a post type actually registered for the
+	 *                          relevant taxonomy (category, or product_cat
+	 *                          for products) — pass false for a subtype
+	 *                          (like 'page') that is not, so the fixture
+	 *                          does not fake a state WordPress cannot reach.
 	 * @return array<string, string> Variables produced.
 	 */
-	private function post_vars( string $post_type, bool $with_woo = false ): array {
+	private function post_vars( string $post_type, bool $with_woo = false, bool $has_terms = true ): array {
 		$post = $this->post( $post_type );
 
 		Functions\when( 'is_singular' )->justReturn( true );
@@ -109,12 +120,16 @@ class CurrentContextVariablesTest extends TestCase {
 		Functions\when( 'get_the_excerpt' )->justReturn( 'An excerpt.' );
 		Functions\when( 'get_the_date' )->justReturn( '1 January 2026' );
 
-		// primary_category only appears when the object actually has terms —
-		// give it one, so "producible" means reachable rather than merely
-		// mentioned in the registry.
-		$term       = Mockery::mock( WP_Term::class );
-		$term->name = 'Watches';
-		Functions\when( 'get_the_terms' )->justReturn( array( $term ) );
+		if ( $has_terms ) {
+			// primary_category only appears when the object actually has terms —
+			// give it one, so "producible" means reachable rather than merely
+			// mentioned in the registry.
+			$term       = Mockery::mock( WP_Term::class );
+			$term->name = 'Watches';
+			Functions\when( 'get_the_terms' )->justReturn( array( $term ) );
+		} else {
+			Functions\when( 'get_the_terms' )->justReturn( false );
+		}
 
 		if ( $with_woo ) {
 			$product = Mockery::mock();
@@ -129,9 +144,35 @@ class CurrentContextVariablesTest extends TestCase {
 	}
 
 	public function test_post_variables_are_all_advertised_by_the_registry(): void {
-		$produced   = array_keys( $this->post_vars( 'page' ) );
+		// 'post' is genuinely registered for the category taxonomy, so
+		// primary_category is producible here (see the 'page' contrast in
+		// test_page_variables_never_include_primary_category() below —
+		// this test used to run against 'page' instead, a state stock
+		// WordPress cannot produce, which is what let the registry
+		// advertise a %%primary_category%% pages could never resolve).
+		$produced   = array_keys( $this->post_vars( 'post' ) );
+		$advertised = array_keys( $this->registry->get_for( 'post', 'post' ) );
+
+		$this->assertSame( array(), array_diff( $produced, $advertised ), 'CurrentContext produces variables the registry does not advertise' );
+		$this->assertSame( array(), array_diff( $advertised, $produced ), 'The registry advertises variables CurrentContext cannot produce' );
+	}
+
+	/**
+	 * The fix for the bug this whole test class exists to catch: 'page' is
+	 * not registered for the category taxonomy, so both sides must agree
+	 * that primary_category is absent — CurrentContext because
+	 * get_the_terms() can never find one (has_terms: false, matching stock
+	 * WordPress), and the registry because
+	 * is_object_in_taxonomy( 'page', 'category' ) is false.
+	 */
+	public function test_page_variables_never_include_primary_category(): void {
+		Functions\when( 'is_object_in_taxonomy' )->justReturn( false );
+
+		$produced   = array_keys( $this->post_vars( 'page', false, false ) );
 		$advertised = array_keys( $this->registry->get_for( 'post', 'page' ) );
 
+		$this->assertNotContains( 'primary_category', $produced );
+		$this->assertNotContains( 'primary_category', $advertised );
 		$this->assertSame( array(), array_diff( $produced, $advertised ), 'CurrentContext produces variables the registry does not advertise' );
 		$this->assertSame( array(), array_diff( $advertised, $produced ), 'The registry advertises variables CurrentContext cannot produce' );
 	}

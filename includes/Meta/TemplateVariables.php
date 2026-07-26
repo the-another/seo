@@ -52,9 +52,20 @@ class TemplateVariables {
 		$variables = $this->base_variables();
 
 		if ( 'post' === $object_type ) {
-			$variables['excerpt']          = __( 'Excerpt', 'the-another-seo' );
-			$variables['date']             = __( 'Publish date', 'the-another-seo' );
-			$variables['primary_category'] = __( 'First assigned category', 'the-another-seo' );
+			$variables['excerpt'] = __( 'Excerpt', 'the-another-seo' );
+			$variables['date']    = __( 'Publish date', 'the-another-seo' );
+
+			// Matches CurrentContext::post_vars()'s own taxonomy probe: this
+			// is a property of the SUBTYPE (is a post type registered for
+			// category/product_cat at all?), not of the individual object,
+			// so it belongs in the registry rather than being left to
+			// "the object just happens to have no terms". `page` is not
+			// registered for `category` by default, so get_the_terms()
+			// there can never resolve and the pill/autocomplete/validator
+			// must not offer this token for it.
+			if ( is_object_in_taxonomy( $object_subtype, 'product' === $object_subtype ? 'product_cat' : 'category' ) ) {
+				$variables['primary_category'] = __( 'First assigned category', 'the-another-seo' );
+			}
 
 			// Matches CurrentContext::post_vars()'s own WooCommerce probe: a
 			// site without WooCommerce must not be offered variables that

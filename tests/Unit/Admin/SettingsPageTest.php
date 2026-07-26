@@ -48,6 +48,11 @@ class SettingsPageTest extends TestCase {
 		// Default: no carried-over validation failures. Tests exercising the
 		// redirect/render boundary override this expectation directly.
 		Functions\when( 'get_settings_errors' )->justReturn( array() );
+		// This class uses a real TemplateVariables instance (see below), so
+		// its is_object_in_taxonomy() gate (see TemplateVariables::get_for())
+		// needs a stub. None of these tests exercise the page/product
+		// distinction that gate encodes, so a blanket true is enough here.
+		Functions\when( 'is_object_in_taxonomy' )->justReturn( true );
 
 		$this->sitemap_files      = Mockery::mock( SitemapFileRepository::class );
 		$this->sitemap_writer     = Mockery::mock( SitemapFileWriter::class );
