@@ -1000,13 +1000,15 @@ class SettingsPage {
 				}
 
 				if ( array() !== $invalid ) {
+					$row_label = $this->template_row_label( $type, $subtype );
+
 					add_settings_error(
 						'taseo_messages',
 						self::INVALID_TEMPLATE_CODE . $tpl_key . '__' . $row_key,
 						sprintf(
-							/* translators: 1: row label such as post:product, 2: comma-separated variable tokens. */
+							/* translators: 1: row label such as Products, 2: comma-separated variable tokens. */
 							esc_html__( '%1$s: %2$s is not available for this content type. That field was not saved; the others were.', 'the-another-seo' ),
-							esc_html( $row_key ),
+							esc_html( $row_label ),
 							esc_html( implode( ', ', $invalid ) )
 						),
 						'error'

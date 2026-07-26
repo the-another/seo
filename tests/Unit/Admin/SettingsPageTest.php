@@ -819,6 +819,9 @@ class SettingsPageTest extends TestCase {
 	}
 
 	public function test_an_unknown_variable_rejects_only_its_own_row(): void {
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Products' ) )
+		);
 		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn(
 			array( 'post:product' => '%%title%%' )
 		);
@@ -839,6 +842,9 @@ class SettingsPageTest extends TestCase {
 	}
 
 	public function test_a_variable_from_the_wrong_context_is_rejected(): void {
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Pages' ) )
+		);
 		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
 		Functions\expect( 'add_settings_error' )->once();
 
@@ -848,6 +854,29 @@ class SettingsPageTest extends TestCase {
 		);
 
 		$this->assertArrayNotHasKey( 'post:page', $clean['title_templates'] );
+	}
+
+	public function test_validation_error_names_the_row_in_plain_language(): void {
+		Functions\when( 'get_post_type_object' )->alias(
+			static fn( string $type ): object => (object) array( 'labels' => (object) array( 'name' => 'Products' ) )
+		);
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
+		$message = '';
+
+		Functions\when( 'add_settings_error' )->alias(
+			function ( string $slug, string $code, string $text ) use ( &$message ): void {
+				$message = $text;
+			}
+		);
+
+		$this->page->sanitize_settings(
+			array( 'title_templates' => array( 'post:product' => '%%title%% %%discount%%' ) ),
+			'templates'
+		);
+
+		$this->assertStringContainsString( 'Products', $message );
+		$this->assertStringNotContainsString( 'post:product', $message );
 	}
 
 	public function test_a_template_without_variables_is_valid(): void {
