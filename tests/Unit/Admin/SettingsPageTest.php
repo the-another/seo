@@ -886,4 +886,12 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertSame( 'gone_tax', $this->invoke_row_label( 'term', 'gone_tax' ) );
 	}
+
+	public function test_template_row_label_falls_back_to_the_slug_for_an_unrecognised_object_type(): void {
+		$this->assertSame( 'sidebar', $this->invoke_row_label( 'widget', 'sidebar' ) );
+	}
+
+	public function test_template_row_label_falls_back_to_the_slug_for_an_unrecognised_system_page_key(): void {
+		$this->assertSame( 'archive', $this->invoke_row_label( 'system_page', 'archive' ) );
+	}
 }
