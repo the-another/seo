@@ -252,7 +252,7 @@ class SettingsPage {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'SEO — The Another', 'the-another-seo' ) . '</h1>';
 
-		$this->print_settings_errors();
+		$this->collect_invalid_rows();
 
 		echo '<nav class="nav-tab-wrapper">';
 		foreach ( self::TABS as $slug => $label ) {
@@ -285,12 +285,24 @@ class SettingsPage {
 	}
 
 	/**
-	 * Read the settings errors once, print them, and remember which rows
-	 * they name so the matching inputs can be marked.
+	 * Read the settings errors once and remember which rows they name so
+	 * the matching inputs can be marked.
+	 *
+	 * Deliberately does not print anything. This options page is registered
+	 * with add_options_page(), so its parent is options-general.php; core's
+	 * wp-admin/admin-header.php requires wp-admin/options-head.php for every
+	 * such page, and that file calls bare settings_errors(), which — once
+	 * 'settings-updated' is on the query string — already pulls our errors
+	 * out of the settings_errors transient and prints them, before
+	 * render_page() ever runs. Printing them again here would duplicate
+	 * every notice. The get_settings_errors() call below still has to run:
+	 * it is what merges the transient into the request-lifetime
+	 * $wp_settings_errors global, and this is the only place that recovers
+	 * which rows failed so template_input_class() can mark them.
 	 *
 	 * @return void
 	 */
-	private function print_settings_errors(): void {
+	private function collect_invalid_rows(): void {
 		$errors             = get_settings_errors( 'taseo_messages' );
 		$this->invalid_rows = array();
 
@@ -300,12 +312,6 @@ class SettingsPage {
 			if ( str_starts_with( $code, self::INVALID_TEMPLATE_CODE ) ) {
 				$this->invalid_rows[] = substr( $code, strlen( self::INVALID_TEMPLATE_CODE ) );
 			}
-
-			printf(
-				'<div class="notice notice-%1$s settings-error is-dismissible"><p><strong>%2$s</strong></p></div>',
-				esc_attr( (string) ( $error['type'] ?? 'error' ) ),
-				esc_html( (string) ( $error['message'] ?? '' ) )
-			);
 		}
 	}
 

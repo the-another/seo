@@ -183,4 +183,53 @@ test.describe( 'webmaster admin settings', () => {
 			page.locator( 'meta[name="yandex-verification"]' )
 		).toHaveAttribute( 'content', 'yandexadmine2efrontend' );
 	} );
+
+	test( 'a template using an unavailable variable is rejected, siblings save', async ( {
+		page,
+	} ) => {
+		await page.goto(
+			'/wp-admin/options-general.php?page=taseo&tab=templates'
+		);
+
+		const productTitle = page.locator(
+			'input[name="taseo_settings[title_templates][post:post]"]'
+		);
+		const original = await productTitle.inputValue();
+
+		await productTitle.fill( '%%title%% %%discount%%' );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		// Both assertions run on the page the save redirected to. The error
+		// lives in the settings_errors transient, which is consumed by the
+		// first render — so .form-invalid exists here and is deliberately
+		// gone after a reload, which the next assertion relies on.
+		await expect( page.locator( '.notice-error' ) ).toContainText(
+			'%%discount%%'
+		);
+		await expect( productTitle ).toHaveClass( /form-invalid/ );
+
+		await page.reload();
+		await expect( productTitle ).toHaveValue( original );
+		await expect( productTitle ).not.toHaveClass( /form-invalid/ );
+	} );
+
+	test( 'clicking a variable pill inserts its token', async ( { page } ) => {
+		await page.goto(
+			'/wp-admin/options-general.php?page=taseo&tab=templates'
+		);
+
+		const input = page.locator(
+			'input[name="taseo_settings[title_templates][post:post]"]'
+		);
+		await input.fill( '' );
+		await input.focus();
+
+		await page
+			.locator(
+				'tr:has(input[name="taseo_settings[title_templates][post:post]"]) [data-taseo-template-var="%%title%%"]'
+			)
+			.click( { force: true } );
+
+		await expect( input ).toHaveValue( '%%title%%' );
+	} );
 } );
