@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Admin;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
@@ -89,11 +90,33 @@ class SettingsPage {
 	);
 
 	/**
+	 * Settings-error code prefix. The settings key and row key are appended
+	 * so render_page() can recover which fields failed after the redirect —
+	 * validation and rendering happen in different requests, so nothing held
+	 * in object state survives between them. Double underscore separates,
+	 * because row keys contain colons and "system_page" contains a single
+	 * underscore.
+	 *
+	 * @var string
+	 */
+	private const INVALID_TEMPLATE_CODE = 'taseo_invalid_template__';
+
+	/**
 	 * Hook suffix of this settings page, for gating asset enqueue.
 	 *
 	 * @var string
 	 */
 	private string $hook_suffix = '';
+
+	/**
+	 * Row keys rejected by the save that redirected here, as
+	 * "<settings key>__<row key>". Populated once per render from the
+	 * settings errors, since the validating request and this one are
+	 * different requests.
+	 *
+	 * @var array<int, string>|null
+	 */
+	private ?array $invalid_rows = null;
 
 	/**
 	 * Constructor.
@@ -229,6 +252,8 @@ class SettingsPage {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'SEO — The Another', 'the-another-seo' ) . '</h1>';
 
+		$this->print_settings_errors();
+
 		echo '<nav class="nav-tab-wrapper">';
 		foreach ( self::TABS as $slug => $label ) {
 			printf(
@@ -257,6 +282,47 @@ class SettingsPage {
 
 		submit_button();
 		echo '</form></div>';
+	}
+
+	/**
+	 * Read the settings errors once, print them, and remember which rows
+	 * they name so the matching inputs can be marked.
+	 *
+	 * @return void
+	 */
+	private function print_settings_errors(): void {
+		$errors             = get_settings_errors( 'taseo_messages' );
+		$this->invalid_rows = array();
+
+		foreach ( $errors as $error ) {
+			$code = (string) ( $error['code'] ?? '' );
+
+			if ( str_starts_with( $code, self::INVALID_TEMPLATE_CODE ) ) {
+				$this->invalid_rows[] = substr( $code, strlen( self::INVALID_TEMPLATE_CODE ) );
+			}
+
+			printf(
+				'<div class="notice notice-%1$s settings-error is-dismissible"><p><strong>%2$s</strong></p></div>',
+				esc_attr( (string) ( $error['type'] ?? 'error' ) ),
+				esc_html( (string) ( $error['message'] ?? '' ) )
+			);
+		}
+	}
+
+	/**
+	 * The CSS classes for a template input, adding core's .form-invalid
+	 * when the last save rejected this row.
+	 *
+	 * @param string $settings_key 'title_templates' or 'description_templates'.
+	 * @param string $row_key      Row key such as 'post:product'.
+	 * @return string Class attribute value.
+	 */
+	private function template_input_class( string $settings_key, string $row_key ): string {
+		$rows = $this->invalid_rows ?? array();
+
+		return in_array( $settings_key . '__' . $row_key, $rows, true )
+			? 'large-text form-invalid'
+			: 'large-text';
 	}
 
 	/**
@@ -358,14 +424,16 @@ class SettingsPage {
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
 			printf(
 				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="large-text" placeholder="%4$s" data-taseo-template-input />
-					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="large-text" placeholder="%6$s" data-taseo-template-input />',
+					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="%7$s" placeholder="%4$s" data-taseo-template-input />
+					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="%8$s" placeholder="%6$s" data-taseo-template-input />',
 				esc_html( $type ),
 				esc_attr( $type ),
 				esc_attr( $this->settings->get_title_template( 'post', $type ) ),
 				esc_attr__( 'Title template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_description_template( 'post', $type ) ),
-				esc_attr__( 'Description template', 'the-another-seo' )
+				esc_attr__( 'Description template', 'the-another-seo' ),
+				esc_attr( $this->template_input_class( 'title_templates', 'post:' . $type ) ),
+				esc_attr( $this->template_input_class( 'description_templates', 'post:' . $type ) )
 			);
 			$this->render_variable_pills( 'post', $type );
 			echo '</td></tr>';
@@ -374,12 +442,14 @@ class SettingsPage {
 		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
 			printf(
 				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="large-text" data-taseo-template-input />
-					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="large-text" data-taseo-template-input />',
+					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="%5$s" data-taseo-template-input />
+					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="%6$s" data-taseo-template-input />',
 				esc_html( $tax ),
 				esc_attr( $tax ),
 				esc_attr( $this->settings->get_title_template( 'term', $tax ) ),
-				esc_attr( $this->settings->get_description_template( 'term', $tax ) )
+				esc_attr( $this->settings->get_description_template( 'term', $tax ) ),
+				esc_attr( $this->template_input_class( 'title_templates', 'term:' . $tax ) ),
+				esc_attr( $this->template_input_class( 'description_templates', 'term:' . $tax ) )
 			);
 			$this->render_variable_pills( 'term', $tax );
 			echo '</td></tr>';
@@ -388,10 +458,11 @@ class SettingsPage {
 		// System pages.
 		foreach ( array( 'home', 'search', '404' ) as $system ) {
 			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="large-text" data-taseo-template-input />',
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="%4$s" data-taseo-template-input />',
 				esc_html( $system ),
 				esc_attr( $system ),
-				esc_attr( $this->settings->get_title_template( 'system_page', $system ) )
+				esc_attr( $this->settings->get_title_template( 'system_page', $system ) ),
+				esc_attr( $this->template_input_class( 'title_templates', 'system_page:' . $system ) )
 			);
 			$this->render_variable_pills( 'system_page', $system );
 			echo '</td></tr>';
@@ -679,11 +750,21 @@ class SettingsPage {
 
 		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
 
+		$errors = get_settings_errors();
+
+		if ( array() !== $errors ) {
+			// Exactly how core's options.php hands validation failures to
+			// the page it redirects to.
+			set_transient( 'settings_errors', $errors, 30 );
+		}
+
 		$redirect = admin_url( 'options-general.php?page=taseo&updated=1' );
 
 		if ( array_key_exists( $tab, self::TABS ) ) {
 			$redirect = add_query_arg( 'tab', $tab, $redirect );
 		}
+
+		$redirect = add_query_arg( 'settings-updated', 'true', $redirect );
 
 		// phpcs:ignore WordPressVIPMinimum.Security.ExitAfterRedirect.NoExit -- conditional exit based on testability flag.
 		wp_safe_redirect( $redirect );
@@ -795,9 +876,51 @@ class SettingsPage {
 		}
 
 		foreach ( array( 'title_templates', 'description_templates' ) as $tpl_key ) {
-			if ( isset( $raw[ $tpl_key ] ) && is_array( $raw[ $tpl_key ] ) ) {
-				$clean[ $tpl_key ] = array_map( 'sanitize_text_field', $raw[ $tpl_key ] );
+			if ( ! isset( $raw[ $tpl_key ] ) || ! is_array( $raw[ $tpl_key ] ) ) {
+				continue;
 			}
+
+			// Start from what is stored: a row whose template is rejected
+			// keeps its previous value while its siblings save normally.
+			// These keys hold every row, so replacing the array wholesale
+			// would let one bad row discard unrelated edits.
+			$stored = $this->settings->get( $tpl_key, array() );
+			$rows   = is_array( $stored ) ? $stored : array();
+
+			foreach ( $raw[ $tpl_key ] as $row_key => $template ) {
+				$row_key  = (string) $row_key;
+				$template = sanitize_text_field( (string) $template );
+				$parts    = explode( ':', $row_key, 2 );
+				$type     = $parts[0] ?? '';
+				$subtype  = $parts[1] ?? '';
+				$invalid  = array();
+
+				foreach ( TemplateResolver::extract_variables( $template ) as $variable ) {
+					if ( ! $this->template_variables->is_available( $variable, $type, $subtype ) ) {
+						$invalid[] = '%%' . $variable . '%%';
+					}
+				}
+
+				if ( array() !== $invalid ) {
+					add_settings_error(
+						'taseo_messages',
+						self::INVALID_TEMPLATE_CODE . $tpl_key . '__' . $row_key,
+						sprintf(
+							/* translators: 1: row label such as post:product, 2: comma-separated variable tokens. */
+							esc_html__( '%1$s: %2$s is not available for this content type. That field was not saved; the others were.', 'the-another-seo' ),
+							esc_html( $row_key ),
+							esc_html( implode( ', ', $invalid ) )
+						),
+						'error'
+					);
+
+					continue;
+				}
+
+				$rows[ $row_key ] = $template;
+			}
+
+			$clean[ $tpl_key ] = $rows;
 		}
 
 		foreach ( array( 'separator', 'facebook_app_id', 'twitter_site', 'site_represents_name', 'breadcrumb_separator', 'breadcrumb_home_label' ) as $text_key ) {

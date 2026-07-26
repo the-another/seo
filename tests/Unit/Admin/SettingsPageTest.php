@@ -43,6 +43,11 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'add_query_arg' )->alias(
 			static fn( string $key, string $value, string $url ): string => $url . '&' . $key . '=' . $value
 		);
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'esc_html__' )->returnArg();
+		// Default: no carried-over validation failures. Tests exercising the
+		// redirect/render boundary override this expectation directly.
+		Functions\when( 'get_settings_errors' )->justReturn( array() );
 
 		$this->sitemap_files      = Mockery::mock( SitemapFileRepository::class );
 		$this->sitemap_writer     = Mockery::mock( SitemapFileWriter::class );
@@ -65,6 +70,8 @@ class SettingsPageTest extends TestCase {
 	}
 
 	public function test_sanitize_settings_handles_all_field_families(): void {
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
 		$clean = $this->page->sanitize_settings(
 			array(
 				'enabled_post_types' => array( 'post', 'Product<script>' ),
@@ -763,5 +770,59 @@ class SettingsPageTest extends TestCase {
 		$this->page->enqueue_assets( 'settings_page_taseo' );
 		$this->assertArrayHasKey( 'taseo-settings', $enqueued );
 		$this->assertContains( 'jquery-ui-autocomplete', $enqueued['taseo-settings'] );
+	}
+
+	public function test_a_template_using_available_variables_saves(): void {
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'title_templates' => array( 'post:page' => '%%title%% %%sep%% %%sitename%%' ) ),
+			'templates'
+		);
+
+		$this->assertSame( '%%title%% %%sep%% %%sitename%%', $clean['title_templates']['post:page'] );
+	}
+
+	public function test_an_unknown_variable_rejects_only_its_own_row(): void {
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn(
+			array( 'post:product' => '%%title%%' )
+		);
+		Functions\expect( 'add_settings_error' )->once();
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'title_templates' => array(
+					'post:product' => '%%title%% %%discount%%',
+					'post:page'    => '%%title%% %%sep%%',
+				),
+			),
+			'templates'
+		);
+
+		$this->assertSame( '%%title%%', $clean['title_templates']['post:product'], 'rejected row keeps its stored value' );
+		$this->assertSame( '%%title%% %%sep%%', $clean['title_templates']['post:page'], 'sibling row still saves' );
+	}
+
+	public function test_a_variable_from_the_wrong_context_is_rejected(): void {
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+		Functions\expect( 'add_settings_error' )->once();
+
+		$clean = $this->page->sanitize_settings(
+			array( 'title_templates' => array( 'post:page' => '%%title%% %%price%%' ) ),
+			'templates'
+		);
+
+		$this->assertArrayNotHasKey( 'post:page', $clean['title_templates'] );
+	}
+
+	public function test_a_template_without_variables_is_valid(): void {
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'title_templates' => array( 'post:page' => 'Just a static title' ) ),
+			'templates'
+		);
+
+		$this->assertSame( 'Just a static title', $clean['title_templates']['post:page'] );
 	}
 }
