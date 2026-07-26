@@ -69,6 +69,19 @@ jobs:
             artifacts/tour/
           retention-days: 7
 
+  test-js:
+    name: JS Unit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Set up toolchain
+        run: sh scripts/setup/unit.sh
+
+      - name: Run Jest
+        run: npm ci && npm run test:unit:js
+
   # Runs Plugin Check natively via wp-cli (no browser, no Playwright) —
   # all checks, including the 5 runtime ones. See the check-plugin suite's
   # early-init canary in tests/e2e/check-plugin/run-plugin-check.mjs.
