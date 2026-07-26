@@ -48,4 +48,30 @@ class TemplateResolverTest extends TestCase {
 			$this->resolver->resolve( '%%title%%', array( 'title' => '%%sitename%%', 'sitename' => 'X' ) )
 		);
 	}
+
+	public function test_extract_variables_finds_tokens_in_order(): void {
+		$this->assertSame(
+			array( 'title', 'sep', 'sitename' ),
+			TemplateResolver::extract_variables( '%%title%% %%sep%% %%sitename%%' )
+		);
+	}
+
+	public function test_extract_variables_lowercases_and_deduplicates(): void {
+		$this->assertSame(
+			array( 'title' ),
+			TemplateResolver::extract_variables( '%%TITLE%% - %%title%%' )
+		);
+	}
+
+	public function test_extract_variables_returns_empty_for_a_template_without_tokens(): void {
+		$this->assertSame( array(), TemplateResolver::extract_variables( 'Just static text' ) );
+	}
+
+	public function test_extract_variables_ignores_unclosed_tokens(): void {
+		$this->assertSame( array(), TemplateResolver::extract_variables( '%%not closed' ) );
+	}
+
+	public function test_extract_variables_ignores_tokens_with_disallowed_characters(): void {
+		$this->assertSame( array(), TemplateResolver::extract_variables( '%%bad-slug%%' ) );
+	}
 }
