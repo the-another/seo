@@ -724,6 +724,34 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringNotContainsString( 'Available variables:', $this->render_page() );
 	}
 
+	public function test_templates_tab_explains_what_the_two_fields_do(): void {
+		$_GET['tab'] = 'templates';
+		$html        = $this->render_page();
+
+		$this->assertStringContainsString( 'title', strtolower( $html ) );
+		$this->assertStringContainsString( 'meta description', strtolower( $html ) );
+		$this->assertStringContainsString( 'class="description"', $html );
+	}
+
+	public function test_templates_tab_splits_into_three_titled_sections(): void {
+		$_GET['tab'] = 'templates';
+		$html        = $this->render_page();
+
+		$this->assertStringContainsString( '<h2>Post types</h2>', $html );
+		$this->assertStringContainsString( '<h2>Taxonomies</h2>', $html );
+		$this->assertStringContainsString( '<h2>System pages</h2>', $html );
+		$this->assertSame( 2, substr_count( $html, '<hr />' ), 'separators sit between the three sections, not after the last' );
+		$this->assertSame( 3, substr_count( $html, '<table class="form-table">' ) );
+	}
+
+	public function test_system_pages_section_explains_it_has_no_description_field(): void {
+		$_GET['tab'] = 'templates';
+		$this->assertStringContainsString(
+			'System pages take a title template only.',
+			$this->render_page()
+		);
+	}
+
 	public function test_system_page_rows_offer_only_the_base_variables(): void {
 		$_GET['tab'] = 'templates';
 

@@ -425,6 +425,12 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_templates_tab(): void {
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'The title template becomes the page\'s title element; the meta description template becomes its meta description. Leave a field empty to use the default: "%%title%% %%sep%% %%sitename%%" for titles and "%%excerpt%%" for descriptions.', 'the-another-seo' )
+		);
+
+		echo '<h2>' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
@@ -454,6 +460,13 @@ class SettingsPage {
 			echo '</td></tr>';
 		}
 
+		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2>' . esc_html__( 'Taxonomies', 'the-another-seo' ) . '</h2>';
+		echo '<table class="form-table">';
+
 		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
 			$label   = $this->template_row_label( 'term', $tax );
 			$row_key = 'term:' . $tax;
@@ -480,6 +493,17 @@ class SettingsPage {
 			$this->render_variable_pills( 'term', $tax );
 			echo '</td></tr>';
 		}
+
+		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2>' . esc_html__( 'System pages', 'the-another-seo' ) . '</h2>';
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'System pages take a title template only.', 'the-another-seo' )
+		);
+		echo '<table class="form-table">';
 
 		// System pages.
 		foreach ( array( 'home', 'search', '404' ) as $system ) {
