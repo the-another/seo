@@ -585,6 +585,49 @@ test.describe( 'webmaster admin settings', () => {
 			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
 		).toHaveValue( '%%primary_category%% tail' );
 	} );
+
+	test( 'a registered custom page gets its own template row', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		await expect(
+			page.locator( 'h2#taseo-custom-pages' )
+		).toBeVisible();
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[title_templates][custom_page:e2e_checkout]"]'
+			)
+		).toHaveCount( 1 );
+	} );
+
+	test( 'a custom page template saves and survives a reload', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		await fillTemplate(
+			page,
+			'taseo_settings[title_templates][custom_page:e2e_checkout]',
+			'%%title%% %%sep%% %%sitename%%'
+		);
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await page.goto( TEMPLATES_TAB_URL );
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[title_templates][custom_page:e2e_checkout]"]'
+			)
+		).toHaveValue( '%%title%% %%sep%% %%sitename%%' );
+	} );
+
+	test( 'the section nav jumps to a section', async ( { page } ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		await page.locator( 'a[href="#taseo-custom-pages"]' ).click();
+
+		await expect( page.locator( 'h2#taseo-custom-pages' ) ).toBeInViewport();
+	} );
 } );
 
 /**
