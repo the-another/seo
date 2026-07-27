@@ -163,13 +163,32 @@ class MetaboxTest extends TestCase {
 	}
 
 	/**
-	 * The URL override must appear exactly once — ImageField renders it, so
-	 * the field loop must not render it a second time.
+	 * The URL override must appear exactly once per image slot — ImageField
+	 * renders it, so the field loop must not render it a second time.
+	 *
+	 * The set of "must render exactly once" fields is derived from FIELDS
+	 * itself (any url field whose _id sibling is typed image_id) rather than
+	 * hardcoded to og_image_url/twitter_image_url, so a third image slot
+	 * added to FIELDS later is covered without editing this test.
 	 */
 	public function test_the_url_override_is_not_rendered_twice(): void {
 		$html = $this->render_metabox_fields( array() );
 
-		$this->assertSame( 1, substr_count( $html, 'name="taseo_meta[og_image_url]"' ) );
+		$fields = ( new \ReflectionClassConstant( Metabox::class, 'FIELDS' ) )->getValue();
+
+		foreach ( $fields as $field => $type ) {
+			$id_sibling = str_replace( '_url', '_id', $field );
+
+			if ( 'url' !== $type || 'image_id' !== ( $fields[ $id_sibling ] ?? '' ) ) {
+				continue;
+			}
+
+			$this->assertSame(
+				1,
+				substr_count( $html, 'name="taseo_meta[' . $field . ']"' ),
+				$field . ' must render exactly once'
+			);
+		}
 	}
 
 	/**

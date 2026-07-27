@@ -135,9 +135,14 @@ class Metabox {
 			$label = ucwords( str_replace( '_', ' ', $field ) );
 			$name  = 'taseo_meta[' . $field . ']';
 
-			// The URL override is rendered by ImageField alongside its
-			// attachment ID, so it must not also render on its own here.
-			if ( 'og_image_url' === $field || 'twitter_image_url' === $field ) {
+			// A url field whose _id sibling is an image_id gets its input
+			// rendered by ImageField alongside that attachment ID, so it
+			// must not also render on its own here — derived from FIELDS
+			// rather than naming og_image_url/twitter_image_url, so a future
+			// image slot is covered without touching this loop again.
+			$id_sibling = str_replace( '_url', '_id', $field );
+
+			if ( 'url' === $type && 'image_id' === ( self::FIELDS[ $id_sibling ] ?? '' ) ) {
 				continue;
 			}
 
