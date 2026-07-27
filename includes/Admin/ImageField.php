@@ -1,0 +1,127 @@
+<?php
+/**
+ * One image field: attachment picker plus URL override.
+ *
+ * @package TheAnother\SEO
+ */
+
+declare(strict_types=1);
+
+namespace TheAnother\Plugin\SEO\Admin;
+
+/**
+ * Renders an image field.
+ *
+ * The attachment ID travels in a hidden input under the field name it always
+ * had, so the submitted form is unchanged and every existing sanitizer keeps
+ * working. The picker script fills that input; with JavaScript off the input
+ * still submits whatever was stored, and the URL override beside it is an
+ * ordinary text field — so the field degrades to something usable rather than
+ * silently discarding what was saved.
+ *
+ * Core classes only: `button` and `large-text`. No stylesheet ships with this
+ * plugin.
+ */
+final class ImageField {
+
+	/**
+	 * Render one image field.
+	 *
+	 * @param string $id_name     Form name for the attachment ID input.
+	 * @param int    $id_value    Current attachment ID, 0 when unset.
+	 * @param string $url_name    Form name for the URL override input.
+	 * @param string $url_value   Current URL override, '' when unset.
+	 * @param string $html_id     Prefix for this field's HTML ids.
+	 * @param string $field_label Human-readable field name (e.g. "Og Image Id"),
+	 *                            used only to give this field's Select/Remove
+	 *                            buttons distinct accessible names — a post
+	 *                            metabox renders one of these per image slot,
+	 *                            and without it every field's buttons announce
+	 *                            as the same bare "Select image"/"Remove".
+	 * @return void
+	 */
+	public static function render(
+		string $id_name,
+		int $id_value,
+		string $url_name,
+		string $url_value,
+		string $html_id,
+		string $field_label
+	): void {
+		printf(
+			'<div data-taseo-image-field><input type="hidden" name="%1$s" value="%2$d" data-taseo-image-id />',
+			esc_attr( $id_name ),
+			(int) $id_value
+		);
+
+		if ( $id_value > 0 ) {
+			$preview = wp_get_attachment_image_url( $id_value, 'thumbnail' );
+
+			if ( is_string( $preview ) ) {
+				printf(
+					'<img src="%s" alt="" width="80" height="80" data-taseo-image-preview /><br />',
+					esc_url( $preview )
+				);
+			}
+		}
+
+		printf(
+			'<button type="button" class="button" data-taseo-image-select aria-label="%1$s">%2$s</button> <button type="button" class="button" data-taseo-image-remove aria-label="%3$s">%4$s</button>',
+			esc_attr(
+				sprintf(
+					/* translators: %s: field name, e.g. "Og Image Id". */
+					__( 'Select image for %s', 'the-another-seo' ),
+					$field_label
+				)
+			),
+			esc_html__( 'Select image', 'the-another-seo' ),
+			esc_attr(
+				sprintf(
+					/* translators: %s: field name, e.g. "Og Image Id". */
+					__( 'Remove %s', 'the-another-seo' ),
+					$field_label
+				)
+			),
+			esc_html__( 'Remove', 'the-another-seo' )
+		);
+
+		printf(
+			'<p><label for="%1$s-url">%2$s</label><br /><input type="url" id="%1$s-url" name="%3$s" value="%4$s" class="large-text" placeholder="https://…" /></p>',
+			esc_attr( $html_id ),
+			esc_html__( 'Image URL (overrides the selected image)', 'the-another-seo' ),
+			esc_attr( $url_name ),
+			esc_attr( $url_value )
+		);
+
+		echo '</div>';
+	}
+
+	/**
+	 * Enqueue the picker bundle and core's media library.
+	 *
+	 * Core's wp_enqueue_media() is what defines wp.media; without it the
+	 * picker loads and silently does nothing. The file_exists() guard matches
+	 * the settings bundle's: a source checkout that has not been built must
+	 * not fatal inside wp-admin.
+	 *
+	 * @return void
+	 */
+	public static function enqueue(): void {
+		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
+
+		if ( ! file_exists( $asset_file ) ) {
+			return;
+		}
+
+		$asset = require $asset_file;
+
+		wp_enqueue_media();
+		wp_enqueue_script(
+			'taseo-media-picker',
+			THE_ANOTHER_SEO_PLUGIN_URL . 'dist/media-picker/index.js',
+			$asset['dependencies'],
+			$asset['version'],
+			true
+		);
+	}
+}

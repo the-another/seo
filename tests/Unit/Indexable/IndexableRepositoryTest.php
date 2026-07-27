@@ -203,4 +203,14 @@ class IndexableRepositoryTest extends TestCase {
 
 		$this->repository->delete( 'post', 'product', 88123 );
 	}
+
+	/**
+	 * OVERRIDE_COLUMNS is an allowlist: a column missing from it is dropped
+	 * on write with no error at all, so the column existing in the schema is
+	 * not enough on its own.
+	 */
+	public function test_override_columns_allows_the_image_url_overrides(): void {
+		$this->assertContains( 'og_image_url', IndexableRepository::OVERRIDE_COLUMNS );
+		$this->assertContains( 'twitter_image_url', IndexableRepository::OVERRIDE_COLUMNS );
+	}
 }

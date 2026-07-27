@@ -30,6 +30,28 @@ provision_wp
 # inner dirname is already the real slug (dist-archive's --plugin-dirname).
 wp plugin install "$ZIP" --activate --path="$WP_DIR" --allow-root
 
+# A fixture plugin registering one custom page, so the Titles & Templates
+# spec has something to assert against. It registers ONLY the page and not a
+# context claim: taseo_custom_page_context runs before the built-in branches
+# and would otherwise take over real requests, disturbing every other spec.
+mkdir -p "$WP_DIR/wp-content/mu-plugins"
+cat > "$WP_DIR/wp-content/mu-plugins/taseo-custom-page-fixture.php" <<'PHP'
+<?php
+/**
+ * Plugin Name: TASEO custom page fixture
+ * Description: Registers a custom page so the e2e suite can exercise the registry.
+ */
+
+add_filter(
+	'taseo_custom_pages',
+	static function ( $pages ) {
+		$pages['e2e_checkout'] = 'E2E Checkout';
+
+		return $pages;
+	}
+);
+PHP
+
 # Pretty permalinks: the sitemap rewrites (^sitemap\.xml$ and the chunk
 # pattern) need real path URLs. A direct option write via wp-cli (unlike the
 # admin UI, it doesn't sanitize the structure based on server rewrite
@@ -40,6 +62,29 @@ wp plugin install "$ZIP" --activate --path="$WP_DIR" --allow-root
 # Plugin::start() consumes them on the next request — wp-cli counts).
 wp rewrite structure '/%postname%/' --path="$WP_DIR" --allow-root
 wp rewrite flush --path="$WP_DIR" --allow-root
+
+# Seed verification and tracking settings so the webmaster spec has
+# deterministic values to assert against. `option patch insert` writes one
+# key inside the serialized taseo_settings array without clobbering the rest.
+#
+# taseo_settings does not exist yet at this point — the plugin only creates
+# it lazily when the settings page is saved (Settings::update()). `wp option
+# patch insert` on a genuinely missing option fetches WordPress's own
+# get_option() default of boolean `false` as the "current value" and fails
+# with `Cannot create key "..." on data type boolean` when it tries to patch
+# a key into that. Seed an empty array first so the inserts below have an
+# array to patch into.
+wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root || true
+wp option patch insert taseo_settings verify_google 'googlee2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing 'BINGE2ETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_yandex 'yandexe2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_yahoo 'yahooe2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_facebook 'metae2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google_file 'googlee2efile.html' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing_file 'BINGFILETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
 
 # Drain the Action Scheduler queue: the initial indexable backfill runs as a
 # chain of async taseo_backfill_batch actions (each batch re-enqueues the
@@ -69,6 +114,15 @@ while true; do
 	wp action-scheduler action run $PENDING_IDS --path="$WP_DIR" --allow-root
 	i=$((i + 1))
 done
+
+# Publish WP_DIR for the Playwright process. provision_wp() mints it with
+# mktemp, so nothing outside this shell can discover it, and
+# setup/snapshot.setup.ts needs it to locate the SQLite database.
+# artifacts/ is already gitignored (.gitignore) and excluded from the
+# release zip (.distignore); global-setup.ts writes the admin storage
+# state into the same directory.
+mkdir -p "$REPO_ROOT/artifacts"
+printf '%s\n' "$WP_DIR" > "$REPO_ROOT/artifacts/e2e-wp-dir.txt"
 
 # Multiple built-in-server workers so WordPress's own loopback requests
 # (cron spawn, site health) can't deadlock the single PHP process. The

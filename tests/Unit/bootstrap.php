@@ -32,6 +32,64 @@ if ( ! defined( 'THE_ANOTHER_SEO_VERSION' ) ) {
 	define( 'THE_ANOTHER_SEO_VERSION', '0.1.0' );
 }
 
+if ( ! defined( 'THE_ANOTHER_SEO_PLUGIN_URL' ) ) {
+	define( 'THE_ANOTHER_SEO_PLUGIN_URL', 'https://example.com/wp-content/plugins/the-another-seo/' );
+}
+
+// A disposable scratch directory, NOT the real project root. Code that reads
+// a built asset file off disk (SettingsPage::enqueue_assets, ImageField::
+// enqueue) needs a path that actually exists so its "not built yet"
+// file_exists() guard is testable both ways — but it does not need to be the
+// real dist/ a release zip or a running site reads from. This constant used
+// to point at the real project root, and SettingsPageTest/MetaboxTest wrote a
+// stub dist/*/index.asset.php there for the duration of a handful of tests,
+// restoring it afterwards. That is exactly backwards when it goes wrong: a
+// test interrupted before its restore ran (an assertion failure not wrapped
+// in try/finally, a killed process) left a 'version' => 'testassetversion'
+// stub sitting in real build output. A scratch directory starts with no
+// dist/ at all — file_exists() naturally returns false there until a test
+// deliberately writes one — so the worst an interrupted run can do is leave
+// stray files in a directory nothing but this test run ever reads.
+if ( ! defined( 'THE_ANOTHER_SEO_PLUGIN_DIR' ) ) {
+	$taseo_scratch_plugin_dir = rtrim( sys_get_temp_dir(), '/' ) . '/taseo-phpunit-' . getmypid() . '/';
+
+	define( 'THE_ANOTHER_SEO_PLUGIN_DIR', $taseo_scratch_plugin_dir );
+
+	/**
+	 * Best-effort cleanup. Not load-bearing for correctness (every test that
+	 * writes here already restores what it changed), just hygiene so a local
+	 * run doesn't accumulate one throwaway directory per PHPUnit invocation.
+	 *
+	 * @param string $dir Directory to remove recursively.
+	 * @return void
+	 */
+	function taseo_rrmdir( string $dir ): void {
+		if ( ! is_dir( $dir ) ) {
+			return;
+		}
+
+		$items = scandir( $dir );
+
+		foreach ( false === $items ? array() : $items as $item ) {
+			if ( '.' === $item || '..' === $item ) {
+				continue;
+			}
+
+			$path = $dir . '/' . $item;
+
+			if ( is_dir( $path ) ) {
+				taseo_rrmdir( $path );
+			} else {
+				unlink( $path );
+			}
+		}
+
+		rmdir( $dir );
+	}
+
+	register_shutdown_function( 'taseo_rrmdir', $taseo_scratch_plugin_dir );
+}
+
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
 		public $errors     = array();

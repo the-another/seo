@@ -27,6 +27,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
+
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
 
@@ -39,6 +47,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
@@ -53,21 +69,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
+
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh
 
       - name: Run functional e2e suite
         run: sh scripts/tests/e2e.sh
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      - name: Upload e2e video, traces, and tour screenshots
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: playwright-report-functional
           path: |
-            playwright-report/
             test-results/
+            artifacts/tour/
           retention-days: 7
+
+  test-js:
+    name: JS Unit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
+
+      - name: Set up toolchain
+        run: sh scripts/setup/unit.sh
+
+      - name: Run Jest
+        run: npm ci && npm run test:unit:js
 
   # Runs Plugin Check natively via wp-cli (no browser, no Playwright) —
   # all checks, including the 5 runtime ones. See the check-plugin suite's
@@ -78,6 +123,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh

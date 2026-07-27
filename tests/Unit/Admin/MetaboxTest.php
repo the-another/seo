@@ -127,4 +127,204 @@ class MetaboxTest extends TestCase {
 
 		$this->metabox->handle_save_term( 44, 99, 'product_cat' );
 	}
+
+	public function test_sanitize_runs_image_url_overrides_through_esc_url_raw(): void {
+		$seen = array();
+
+		Functions\when( 'esc_url_raw' )->alias(
+			static function ( $value ) use ( &$seen ): string {
+				$seen[] = $value;
+
+				return $value;
+			}
+		);
+
+		$clean = $this->metabox->sanitize_submission(
+			array(
+				'og_image_url'      => 'https://cdn.example.com/og.jpg',
+				'twitter_image_url' => 'https://cdn.example.com/tw.jpg',
+			)
+		);
+
+		$this->assertSame( 'https://cdn.example.com/og.jpg', $clean['og_image_url'] );
+		$this->assertSame( 'https://cdn.example.com/tw.jpg', $clean['twitter_image_url'] );
+		$this->assertContains( 'https://cdn.example.com/og.jpg', $seen );
+	}
+
+	/**
+	 * Both image slots previously fell through to the plain-text branch and
+	 * rendered as bare boxes labelled "Og Image Id".
+	 */
+	public function test_metabox_renders_image_slots_as_pickers(): void {
+		$html = $this->render_metabox_fields( array( 'og_image_id' => '42' ) );
+
+		$this->assertStringContainsString( 'data-taseo-image-field', $html );
+		$this->assertStringContainsString( 'name="taseo_meta[og_image_url]"', $html );
+	}
+
+	/**
+	 * The URL override must appear exactly once per image slot — ImageField
+	 * renders it, so the field loop must not render it a second time.
+	 *
+	 * The set of "must render exactly once" fields is derived from FIELDS
+	 * itself (any url field whose _id sibling is typed image_id) rather than
+	 * hardcoded to og_image_url/twitter_image_url, so a third image slot
+	 * added to FIELDS later is covered without editing this test.
+	 */
+	public function test_the_url_override_is_not_rendered_twice(): void {
+		$html = $this->render_metabox_fields( array() );
+
+		$fields = ( new \ReflectionClassConstant( Metabox::class, 'FIELDS' ) )->getValue();
+
+		foreach ( $fields as $field => $type ) {
+			$id_sibling = str_replace( '_url', '_id', $field );
+
+			if ( 'url' !== $type || 'image_id' !== ( $fields[ $id_sibling ] ?? '' ) ) {
+				continue;
+			}
+
+			$this->assertSame(
+				1,
+				substr_count( $html, 'name="taseo_meta[' . $field . ']"' ),
+				$field . ' must render exactly once'
+			);
+		}
+	}
+
+	/**
+	 * The path ImageField::enqueue() reads its dependencies and version from.
+	 *
+	 * @return string Absolute path.
+	 */
+	private function media_picker_asset_file(): string {
+		return THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
+	}
+
+	/**
+	 * Put a known built asset file where ImageField::enqueue() expects one.
+	 *
+	 * dist/ is build output and is not in the source tree, so neither its
+	 * presence nor its absence can be assumed: this test owns the file for
+	 * its duration and puts everything back exactly as it found it.
+	 *
+	 * @return callable Restores the previous state.
+	 */
+	private function with_built_media_picker_asset_file(): callable {
+		$file     = $this->media_picker_asset_file();
+		$existing = file_exists( $file ) ? (string) file_get_contents( $file ) : null;
+		$made_dir = ! is_dir( dirname( $file ) );
+
+		if ( $made_dir ) {
+			mkdir( dirname( $file ), 0777, true );
+		}
+
+		file_put_contents(
+			$file,
+			"<?php return array('dependencies' => array(), 'version' => 'testassetversion');"
+		);
+
+		return function () use ( $file, $existing, $made_dir ): void {
+			if ( null === $existing ) {
+				unlink( $file );
+
+				if ( $made_dir ) {
+					rmdir( dirname( $file ) );
+				}
+
+				return;
+			}
+
+			file_put_contents( $file, $existing );
+		};
+	}
+
+	/**
+	 * The screen list is private (Metabox::FIELDS sets the precedent: a list
+	 * a test could read directly is a weaker check than exercising what it
+	 * governs), so this drives enqueue_media_picker() itself for every screen
+	 * that must carry the picker and one that must not — catching a wrong
+	 * screen list and a broken guard alike.
+	 */
+	public function test_the_picker_enqueues_on_post_and_term_screens(): void {
+		Functions\when( 'wp_enqueue_script' )->justReturn( null );
+
+		foreach ( array( 'post.php', 'post-new.php', 'term.php' ) as $hook ) {
+			$called  = false;
+			$restore = $this->with_built_media_picker_asset_file();
+
+			Functions\when( 'wp_enqueue_media' )->alias(
+				static function () use ( &$called ): void {
+					$called = true;
+				}
+			);
+
+			$this->metabox->enqueue_media_picker( $hook );
+
+			$restore();
+
+			$this->assertTrue( $called, "expected the picker to enqueue on {$hook}" );
+		}
+	}
+
+	/**
+	 * options-general.php never renders any of this plugin's fields at all.
+	 * edit-tags.php is the term LIST screen: render_term_fields() hooks
+	 * "{$taxonomy}_edit_form_fields", which core only fires from term.php
+	 * (via edit-tag-form.php); edit-tags.php fires
+	 * "{$taxonomy}_add_form_fields" instead, so it never renders a picker
+	 * either, and enqueuing the media library there would be pure waste.
+	 */
+	public function test_the_picker_does_not_enqueue_on_unrelated_screens(): void {
+		Functions\when( 'wp_enqueue_script' )->justReturn( null );
+
+		foreach ( array( 'options-general.php', 'edit-tags.php' ) as $hook ) {
+			$called  = false;
+			$restore = $this->with_built_media_picker_asset_file();
+
+			Functions\when( 'wp_enqueue_media' )->alias(
+				static function () use ( &$called ): void {
+					$called = true;
+				}
+			);
+
+			$this->metabox->enqueue_media_picker( $hook );
+
+			$restore();
+
+			$this->assertFalse( $called, "expected the picker not to enqueue on {$hook}" );
+		}
+	}
+
+	/**
+	 * Render Metabox's private render_fields() via reflection and return its
+	 * markup.
+	 *
+	 * esc_html() is deliberately not stubbed here: it is a real function
+	 * defined directly in tests/Unit/bootstrap.php rather than through a
+	 * Patchwork-wrapped include, so Brain\Monkey cannot redefine it (see the
+	 * same note on SettingsPageTest::stub_render_functions()). Its real
+	 * htmlspecialchars() implementation is a no-op on the plain field labels
+	 * these tests render, so none is needed.
+	 *
+	 * @param array<string, mixed> $row Indexable row.
+	 * @return string Rendered markup.
+	 */
+	private function render_metabox_fields( array $row ): string {
+		Functions\when( 'wp_nonce_field' )->justReturn( '' );
+		Functions\when( 'esc_attr' )->returnArg();
+		Functions\when( 'esc_textarea' )->returnArg();
+		Functions\when( 'esc_html__' )->returnArg();
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'esc_url' )->returnArg();
+		Functions\when( 'checked' )->justReturn( '' );
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/thumb.jpg' );
+
+		$method = new \ReflectionMethod( Metabox::class, 'render_fields' );
+		$method->setAccessible( true );
+
+		ob_start();
+		$method->invoke( $this->metabox, $row );
+
+		return (string) ob_get_clean();
+	}
 }

@@ -1,14 +1,14 @@
 {
 	"name": "the-another-seo",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Performance-first SEO for WordPress at catalog scale.",
 	"author": "The Another",
 	"license": "GPL-2.0-or-later",
 	"homepage": "https://theanother.org/plugin/seo/",
 	"scripts": {
-		"build": "wp-scripts build blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
+		"build": "wp-scripts build blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs && wp-scripts build assets/src/settings/index.js --output-path=dist/settings && wp-scripts build assets/src/media-picker/index.js --output-path=dist/media-picker",
 		"start": "wp-scripts start blocks/breadcrumbs/index.js --output-path=dist/breadcrumbs",
-		"lint:js": "wp-scripts lint-js blocks",
+		"lint:js": "wp-scripts lint-js blocks assets/src",
 		"plugin-zip": "composer build && npm run build && sh scripts/dist-archive.sh && node scripts/version-zip.js",
 		"plugin-zip:check": "composer build && npm run build && sh scripts/dist-archive.sh && node scripts/version-zip.js --label=test",
 		"version": "node scripts/version-bump.js",
@@ -17,7 +17,8 @@
 		"version:major": "node scripts/version-bump.js major",
 		"test:e2e": "npx playwright test --config tests/e2e/functional/playwright.config.ts",
 		"test:e2e:ui": "npx playwright test --config tests/e2e/functional/playwright.config.ts --ui",
-		"check:plugin": "node tests/e2e/check-plugin/run-plugin-check.mjs"
+		"check:plugin": "node tests/e2e/check-plugin/run-plugin-check.mjs",
+		"test:unit:js": "wp-scripts test-unit-js --testPathPattern=assets/src"
 	},
 	"devDependencies": {
 		"@playwright/test": "^1.59.1",

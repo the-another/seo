@@ -34,12 +34,14 @@ class CurrentContext {
 	/**
 	 * Constructor.
 	 *
-	 * @param IndexableRepository $repository Repository.
-	 * @param Settings            $settings   Settings.
+	 * @param IndexableRepository $repository   Repository.
+	 * @param Settings            $settings     Settings.
+	 * @param CustomPages         $custom_pages Custom page registry.
 	 */
 	public function __construct(
 		private readonly IndexableRepository $repository,
-		private readonly Settings $settings
+		private readonly Settings $settings,
+		private readonly CustomPages $custom_pages
 	) {
 	}
 
@@ -64,6 +66,12 @@ class CurrentContext {
 	 * @return array<string, mixed>|null Context array, or null if unmanaged.
 	 */
 	private function do_resolve(): ?array {
+		$custom_page = $this->resolve_custom_page();
+
+		if ( null !== $custom_page ) {
+			return $custom_page;
+		}
+
 		if ( is_singular() ) {
 			$post = get_queried_object();
 
@@ -128,6 +136,67 @@ class CurrentContext {
 		}
 
 		return null;
+	}
+
+	/**
+	 * Context for a plugin-registered custom page claiming this request.
+	 *
+	 * Applied before every built-in branch, not at the fallthrough. A virtual
+	 * page is usually a real WordPress page — WooCommerce's checkout is both
+	 * is_checkout() and is_singular() — so a fallthrough filter would never
+	 * see it: is_singular() resolves it as post:page first, and when `page`
+	 * is not an enabled post type that branch returns null early, so the
+	 * fallthrough is never reached either.
+	 *
+	 * What keeps that override power safe is that claiming a request takes
+	 * two deliberate acts in two filters: the subtype must be registered
+	 * through taseo_custom_pages as well as declared here. Anything
+	 * malformed or unregistered is ignored and resolution continues into the
+	 * built-in branches unchanged.
+	 *
+	 * The filter returns a declaration rather than a context array, so the
+	 * shape build() produces stays ours to change.
+	 *
+	 * @return array<string, mixed>|null Context, or null to continue resolving.
+	 */
+	private function resolve_custom_page(): ?array {
+		/**
+		 * Filters in a context for a plugin-registered custom page.
+		 *
+		 * Return null to leave the request alone, or an array of:
+		 *   'subtype'   string, required, must be registered via taseo_custom_pages.
+		 *   'vars'      array,  optional, merged over the site-level variables.
+		 *   'permalink' string, optional.
+		 *
+		 * @since 1.0.0
+		 *
+		 * @param array<string, mixed>|null $declaration Declaration, or null.
+		 */
+		$declaration = apply_filters( 'taseo_custom_page_context', null );
+
+		if ( ! is_array( $declaration ) || ! isset( $declaration['subtype'] ) || ! is_scalar( $declaration['subtype'] ) ) {
+			return null;
+		}
+
+		$subtype = (string) $declaration['subtype'];
+
+		if ( ! $this->custom_pages->has( $subtype ) ) {
+			return null;
+		}
+
+		$vars = isset( $declaration['vars'] ) && is_array( $declaration['vars'] )
+			? $declaration['vars']
+			: array();
+
+		$permalink = isset( $declaration['permalink'] ) ? (string) $declaration['permalink'] : '';
+
+		return $this->build(
+			'custom_page',
+			$subtype,
+			0,
+			array_merge( $this->site_vars(), $vars ),
+			$permalink
+		);
 	}
 
 	/**

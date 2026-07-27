@@ -10,6 +10,8 @@ namespace TheAnother\Plugin\SEO;
 
 use TheAnother\Plugin\SEO\Admin\Metabox;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
+use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
@@ -18,8 +20,10 @@ use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
+use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
@@ -29,6 +33,8 @@ use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
+use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
+use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
 /**
  * Class Plugin
@@ -96,7 +102,9 @@ class Plugin {
 		$c = $this->container;
 
 		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'custom_pages', fn() => new CustomPages() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
+		$c->register( 'template_variables', fn() => new TemplateVariables() );
 		$c->register( 'indexable_repository', fn() => new IndexableRepository() );
 		$c->register(
 			'indexable_backfill',
@@ -114,7 +122,7 @@ class Plugin {
 		);
 		$c->register(
 			'current_context',
-			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
+			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ), $c->get( 'custom_pages' ) )
 		);
 		$c->register(
 			'meta_output',
@@ -153,7 +161,9 @@ class Plugin {
 				$c->get( 'indexable_backfill' ),
 				$c->get( 'sitemap_file_repository' ),
 				$c->get( 'sitemap_file_writer' ),
-				$c->get( 'sitemap_sweeper' )
+				$c->get( 'sitemap_sweeper' ),
+				$c->get( 'template_variables' ),
+				$c->get( 'custom_pages' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
@@ -186,6 +196,22 @@ class Plugin {
 			)
 		);
 		$c->register( 'blocks', fn() => new Blocks() );
+		$c->register(
+			'verification_output',
+			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ) )
+		);
+		$c->register(
+			'verification_file_server',
+			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ) )
+		);
+		$c->register(
+			'analytics_output',
+			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ) )
+		);
+		$c->register(
+			'meta_pixel_output',
+			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ) )
+		);
 	}
 
 	/**
@@ -206,6 +232,10 @@ class Plugin {
 		$this->container->get( 'sitemap_assignment' )->init( $hook_manager );
 		$this->container->get( 'sitemap_sweeper' )->init( $hook_manager );
 		$this->container->get( 'sitemap_server' )->init( $hook_manager );
+		$this->container->get( 'verification_output' )->init( $hook_manager );
+		$this->container->get( 'verification_file_server' )->init( $hook_manager );
+		$this->container->get( 'analytics_output' )->init( $hook_manager );
+		$this->container->get( 'meta_pixel_output' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );

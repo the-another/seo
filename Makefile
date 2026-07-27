@@ -1,4 +1,4 @@
-.PHONY: docker-build docker-build-e2e install install-dev require update dump-autoload lint format test coverage test-e2e release check-plugin version-patch version-minor version-major all clean
+.PHONY: docker-build docker-build-e2e install install-dev require update dump-autoload lint format test coverage test-js test-e2e release check-plugin version-patch version-minor version-major all clean
 
 # Docker image names
 DOCKER_IMAGE = the-another-seo-runner:latest
@@ -62,6 +62,10 @@ test: docker-build
 # writes Clover XML to build/coverage/ for tooling.
 coverage: docker-build
 	$(DOCKER_RUN) sh -c "rm -rf .phpunit.cache && mkdir -p build/coverage && php -dzend_extension=xdebug.so -dxdebug.mode=coverage ./vendor/bin/phpunit --coverage-text --coverage-clover=build/coverage/clover.xml"
+
+# Run the JavaScript unit tests (Jest via @wordpress/scripts, in Docker).
+test-js: docker-build
+	$(DOCKER_RUN) sh -c "npm install --no-audit --no-fund && npm run test:unit:js"
 
 # Package plugin for distribution: lint + test gates, then zip into build/
 # (everything runs inside Docker). Note: the zip step reinstalls composer

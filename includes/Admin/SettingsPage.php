@@ -10,17 +10,23 @@ namespace TheAnother\Plugin\SEO\Admin;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
+use TheAnother\Plugin\SEO\Meta\TemplateResolver;
+use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
+use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
+use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
 /**
  * Class SettingsPage
  *
  * Tabbed options screen. Tabs: General, Post Types & Taxonomies, Titles &
- * Templates, Social Networks, Schema & Breadcrumbs, Sitemap. General carries
- * the backfill progress indicator and the Rescan everything action.
+ * Templates, Social Networks, Schema & Breadcrumbs, Sitemap, Webmaster Tools.
+ * General carries the backfill progress indicator and the Rescan everything
+ * action.
  */
 class SettingsPage {
 
@@ -30,6 +36,44 @@ class SettingsPage {
 	 * @var array<int, string>
 	 */
 	private const SCHEMA_TYPE_CHOICES = array( 'None', 'WebPage', 'Article', 'Product' );
+
+	/**
+	 * Verification meta-tag settings keys.
+	 *
+	 * @var array<int, string>
+	 */
+	private const VERIFICATION_CODE_KEYS = array(
+		'verify_google',
+		'verify_bing',
+		'verify_yandex',
+		'verify_yahoo',
+		'verify_facebook',
+	);
+
+	/**
+	 * Verification file settings keys => validation pattern.
+	 *
+	 * Anchored, and allowing no slash or dot beyond the single extension:
+	 * these values are compared against an incoming request path.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_FILE_PATTERNS = array(
+		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
+		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
+		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	);
+
+	/**
+	 * Tracking ID settings keys => validation pattern.
+	 *
+	 * @var array<string, string>
+	 */
+	private const TRACKING_ID_PATTERNS = array(
+		'analytics_ga4_id' => '/^G-[A-Z0-9]{4,}$/',
+		'analytics_gtm_id' => '/^GTM-[A-Z0-9]{4,}$/',
+		'meta_pixel_id'    => '/^[0-9]{10,20}$/',
+	);
 
 	/**
 	 * Tab slugs => labels (labels translated at render time).
@@ -43,23 +87,57 @@ class SettingsPage {
 		'social'    => 'Social Networks',
 		'schema'    => 'Schema & Breadcrumbs',
 		'sitemap'   => 'Sitemap',
+		'webmaster' => 'Webmaster Tools',
 	);
+
+	/**
+	 * Settings-error code prefix. The settings key and row key are appended
+	 * so render_page() can recover which fields failed after the redirect —
+	 * validation and rendering happen in different requests, so nothing held
+	 * in object state survives between them. Double underscore separates,
+	 * because row keys contain colons and "system_page" contains a single
+	 * underscore.
+	 *
+	 * @var string
+	 */
+	private const INVALID_TEMPLATE_CODE = 'taseo_invalid_template__';
+
+	/**
+	 * Hook suffix of this settings page, for gating asset enqueue.
+	 *
+	 * @var string
+	 */
+	private string $hook_suffix = '';
+
+	/**
+	 * Row keys rejected by the save that redirected here, as
+	 * "<settings key>__<row key>". Populated once per render from the
+	 * settings errors, since the validating request and this one are
+	 * different requests.
+	 *
+	 * @var array<int, string>|null
+	 */
+	private ?array $invalid_rows = null;
 
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings              $settings        Settings.
-	 * @param IndexableBackfill     $backfill        Backfill.
-	 * @param SitemapFileRepository $sitemap_files   Sitemap registry (status panel).
-	 * @param SitemapFileWriter     $sitemap_writer  Sitemap writer (writability probe).
-	 * @param SitemapSweeper        $sitemap_sweeper Sitemap sweeper (regenerate action).
+	 * @param Settings              $settings           Settings.
+	 * @param IndexableBackfill     $backfill           Backfill.
+	 * @param SitemapFileRepository $sitemap_files      Sitemap registry (status panel).
+	 * @param SitemapFileWriter     $sitemap_writer     Sitemap writer (writability probe).
+	 * @param SitemapSweeper        $sitemap_sweeper    Sitemap sweeper (regenerate action).
+	 * @param TemplateVariables     $template_variables Template variables registry (per-row pills).
+	 * @param CustomPages           $custom_pages       Plugin-registered custom pages.
 	 */
 	public function __construct(
 		private readonly Settings $settings,
 		private readonly IndexableBackfill $backfill,
 		private readonly SitemapFileRepository $sitemap_files,
 		private readonly SitemapFileWriter $sitemap_writer,
-		private readonly SitemapSweeper $sitemap_sweeper
+		private readonly SitemapSweeper $sitemap_sweeper,
+		private readonly TemplateVariables $template_variables,
+		private readonly CustomPages $custom_pages
 	) {
 	}
 
@@ -78,6 +156,7 @@ class SettingsPage {
 		$hook_manager->register_action( 'admin_post_taseo_sitemap_regenerate', array( $this, 'handle_sitemap_regenerate' ), 10, 0 );
 		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_conflict_notice' ) );
 		$hook_manager->register_action( 'admin_notices', array( $this, 'maybe_print_sitemap_storage_notice' ) );
+		$hook_manager->register_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
 	/**
@@ -86,13 +165,56 @@ class SettingsPage {
 	 * @return void
 	 */
 	public function register_menu(): void {
-		add_options_page(
+		$this->hook_suffix = (string) add_options_page(
 			__( 'SEO — The Another', 'the-another-seo' ),
 			__( 'SEO — The Another', 'the-another-seo' ),
 			'manage_options',
 			'taseo',
 			array( $this, 'render_page' )
 		);
+	}
+
+	/**
+	 * Enqueue this page's script, and only on this page.
+	 *
+	 * Dependencies and version come from the generated asset file rather than
+	 * a hand-written list, which is how core tracks what a built bundle
+	 * actually imports — the surface pulls in wp-rich-text, wp-components and
+	 * wp-element, all of them already shipped by WordPress. The file_exists()
+	 * guard matters: a source checkout that has not been built would otherwise
+	 * fatal on `require`, and this runs in wp-admin. dist/ is deliberately not
+	 * excluded by .distignore, so the built file ships in the release zip.
+	 *
+	 * The stylesheet is core's own wp-components, which the autocomplete
+	 * popover needs to be readable. ImageField::enqueue() at the end pulls in
+	 * core's media library plus the picker bundle the social/schema tabs'
+	 * image fields need; no stylesheet of our own is enqueued.
+	 *
+	 * @param string $hook_suffix Current admin page's hook suffix.
+	 * @return void
+	 */
+	public function enqueue_assets( string $hook_suffix ): void {
+		if ( '' === $this->hook_suffix || $hook_suffix !== $this->hook_suffix ) {
+			return;
+		}
+
+		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/settings/index.asset.php';
+
+		if ( ! file_exists( $asset_file ) ) {
+			return;
+		}
+
+		$asset = require $asset_file;
+
+		wp_enqueue_script(
+			'taseo-settings',
+			THE_ANOTHER_SEO_PLUGIN_URL . 'dist/settings/index.js',
+			$asset['dependencies'],
+			$asset['version'],
+			true
+		);
+		wp_enqueue_style( 'wp-components' );
+		ImageField::enqueue();
 	}
 
 	/**
@@ -151,6 +273,8 @@ class SettingsPage {
 
 		echo '<div class="wrap"><h1>' . esc_html__( 'SEO — The Another', 'the-another-seo' ) . '</h1>';
 
+		$this->collect_invalid_rows();
+
 		echo '<nav class="nav-tab-wrapper">';
 		foreach ( self::TABS as $slug => $label ) {
 			printf(
@@ -173,11 +297,59 @@ class SettingsPage {
 			'social'    => $this->render_social_tab(),
 			'schema'    => $this->render_schema_tab(),
 			'sitemap'   => $this->render_sitemap_tab(),
+			'webmaster' => $this->render_webmaster_tab(),
 			default     => $this->render_general_tab(),
 		};
 
 		submit_button();
 		echo '</form></div>';
+	}
+
+	/**
+	 * Read the settings errors once and remember which rows they name so
+	 * the matching inputs can be marked.
+	 *
+	 * Deliberately does not print anything. This options page is registered
+	 * with add_options_page(), so its parent is options-general.php; core's
+	 * wp-admin/admin-header.php requires wp-admin/options-head.php for every
+	 * such page, and that file calls bare settings_errors(), which — once
+	 * 'settings-updated' is on the query string — already pulls our errors
+	 * out of the settings_errors transient and prints them, before
+	 * render_page() ever runs. Printing them again here would duplicate
+	 * every notice. The get_settings_errors() call below still has to run:
+	 * it is what merges the transient into the request-lifetime
+	 * $wp_settings_errors global, and this is the only place that recovers
+	 * which rows failed so template_input_class() can mark them.
+	 *
+	 * @return void
+	 */
+	private function collect_invalid_rows(): void {
+		$errors             = get_settings_errors( 'taseo_messages' );
+		$this->invalid_rows = array();
+
+		foreach ( $errors as $error ) {
+			$code = (string) ( $error['code'] ?? '' );
+
+			if ( str_starts_with( $code, self::INVALID_TEMPLATE_CODE ) ) {
+				$this->invalid_rows[] = substr( $code, strlen( self::INVALID_TEMPLATE_CODE ) );
+			}
+		}
+	}
+
+	/**
+	 * The CSS classes for a template input, adding core's .form-invalid
+	 * when the last save rejected this row.
+	 *
+	 * @param string $settings_key 'title_templates' or 'description_templates'.
+	 * @param string $row_key      Row key such as 'post:product'.
+	 * @return string Class attribute value.
+	 */
+	private function template_input_class( string $settings_key, string $row_key ): string {
+		$rows = $this->invalid_rows ?? array();
+
+		return in_array( $settings_key . '__' . $row_key, $rows, true )
+			? 'large-text form-invalid'
+			: 'large-text';
 	}
 
 	/**
@@ -274,48 +446,296 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_templates_tab(): void {
-		echo '<p>' . esc_html__( 'Available variables: %%title%% %%sitename%% %%tagline%% %%sep%% %%excerpt%% %%primary_category%% %%date%% %%page%% %%price%% %%sku%%', 'the-another-seo' ) . '</p>';
+		$sections = array(
+			'taseo-post-types'   => __( 'Post types', 'the-another-seo' ),
+			'taseo-taxonomies'   => __( 'Taxonomies', 'the-another-seo' ),
+			'taseo-system-pages' => __( 'System pages', 'the-another-seo' ),
+			'taseo-custom-pages' => __( 'Custom pages', 'the-another-seo' ),
+		);
+		$last     = array_key_last( $sections );
+
+		echo '<ul class="subsubsub">';
+
+		foreach ( $sections as $anchor => $section_label ) {
+			printf(
+				'<li><a href="#%1$s">%2$s</a>%3$s</li>',
+				esc_attr( $anchor ),
+				esc_html( $section_label ),
+				$anchor === $last ? '' : ' |'
+			);
+		}
+
+		echo '</ul>';
+		// .subsubsub is float: left (wp-admin/css/common.css:428), so without
+		// this the first heading wraps beside the nav instead of below it.
+		echo '<div class="clear"></div>';
+
+		echo '<h2 id="taseo-post-types">' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
+			$label   = $this->template_row_label( 'post', $type );
+			$row_key = 'post:' . $type;
+
 			printf(
-				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][post:%2$s]" value="%3$s" class="large-text" placeholder="%4$s" />
-					<input type="text" name="taseo_settings[description_templates][post:%2$s]" value="%5$s" class="large-text" placeholder="%6$s" />
-				</td></tr>',
-				esc_html( $type ),
-				esc_attr( $type ),
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'post-' . $type ),
+				esc_html__( 'Title template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_title_template( 'post', $type ) ),
-				esc_attr__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
 				esc_attr( $this->settings->get_description_template( 'post', $type ) ),
-				esc_attr__( 'Description template', 'the-another-seo' )
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
 			);
-		}
-
-		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
-			printf(
-				'<tr><th scope="row">%1$s</th><td>
-					<input type="text" name="taseo_settings[title_templates][term:%2$s]" value="%3$s" class="large-text" />
-					<input type="text" name="taseo_settings[description_templates][term:%2$s]" value="%4$s" class="large-text" />
-				</td></tr>',
-				esc_html( $tax ),
-				esc_attr( $tax ),
-				esc_attr( $this->settings->get_title_template( 'term', $tax ) ),
-				esc_attr( $this->settings->get_description_template( 'term', $tax ) )
-			);
-		}
-
-		// System pages.
-		foreach ( array( 'home', 'search', '404' ) as $system ) {
-			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[title_templates][system_page:%2$s]" value="%3$s" class="large-text" /></td></tr>',
-				esc_html( $system ),
-				esc_attr( $system ),
-				esc_attr( $this->settings->get_title_template( 'system_page', $system ) )
-			);
+			$this->render_variable_pills( 'post', $type );
+			echo '</td></tr>';
 		}
 
 		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2 id="taseo-taxonomies">' . esc_html__( 'Taxonomies', 'the-another-seo' ) . '</h2>';
+		echo '<table class="form-table">';
+
+		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
+			$label   = $this->template_row_label( 'term', $tax );
+			$row_key = 'term:' . $tax;
+
+			printf(
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'term-' . $tax ),
+				esc_html__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_title_template( 'term', $tax ) ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_description_template( 'term', $tax ) ),
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
+			);
+			$this->render_variable_pills( 'term', $tax );
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2 id="taseo-system-pages">' . esc_html__( 'System pages', 'the-another-seo' ) . '</h2>';
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'System pages take a title template only.', 'the-another-seo' )
+		);
+		echo '<table class="form-table">';
+
+		foreach ( array( 'home', 'search', '404' ) as $system ) {
+			$label   = $this->template_row_label( 'system_page', $system );
+			$row_key = 'system_page:' . $system;
+
+			printf(
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $label ),
+				esc_attr( $row_key ),
+				esc_attr( 'system-page-' . $system ),
+				esc_html__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_title_template( 'system_page', $system ) ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) )
+			);
+			$this->render_variable_pills( 'system_page', $system, false );
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2 id="taseo-custom-pages">' . esc_html__( 'Custom pages', 'the-another-seo' ) . '</h2>';
+
+		$custom_pages = $this->custom_pages->all();
+
+		if ( array() === $custom_pages ) {
+			$this->render_custom_pages_empty_state();
+
+			return;
+		}
+
+		echo '<table class="form-table">';
+
+		foreach ( $custom_pages as $key => $page_label ) {
+			$row_key = 'custom_page:' . $key;
+
+			printf(
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $this->template_row_label( 'custom_page', $key ) ),
+				esc_attr( $row_key ),
+				esc_attr( 'custom-page-' . $key ),
+				esc_html__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_title_template( 'custom_page', $key ) ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_description_template( 'custom_page', $key ) ),
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
+			);
+			$this->render_variable_pills( 'custom_page', $key );
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+	}
+
+	/**
+	 * Explain how to register a custom page, when none are.
+	 *
+	 * Both filters are shown deliberately. Registering a row without also
+	 * claiming a request produces template fields that save, redisplay, and
+	 * never render — the exact mistake this text exists to prevent.
+	 *
+	 * @return void
+	 */
+	private function render_custom_pages_empty_state(): void {
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'No custom pages are registered. Another plugin can add one — a checkout screen, an account area, any page this plugin cannot know about — by registering it and then claiming the request it appears on. Both steps are needed: a registered page with no claimed request gets template fields that never render.', 'the-another-seo' )
+		);
+
+		$snippet = "add_filter( 'taseo_custom_pages', function ( \$pages ) {\n"
+			. "    \$pages['checkout'] = __( 'Checkout', 'my-plugin' );\n"
+			. "    return \$pages;\n"
+			. "} );\n\n"
+			. "add_filter( 'taseo_custom_page_context', function ( \$context ) {\n"
+			. "    if ( function_exists( 'is_checkout' ) && is_checkout() ) {\n"
+			. "        return array(\n"
+			. "            'subtype' => 'checkout',\n"
+			. "            'vars'    => array( 'title' => __( 'Checkout', 'my-plugin' ) ),\n"
+			. "        );\n"
+			. "    }\n\n"
+			. "    return \$context;\n"
+			. '} );';
+
+		printf( '<pre><code>%s</code></pre>', esc_html( $snippet ) );
+	}
+
+	/**
+	 * Render the variable pills for one template row.
+	 *
+	 * Core's own button component inside core's help-text element — no
+	 * stylesheet is involved. The data attribute is also the only channel
+	 * by which the admin script learns this row's variables: it reads the
+	 * rendered pills rather than a second, separately-serialised copy of
+	 * the registry, so the two cannot drift.
+	 *
+	 * The pill shows the variable's human label rather than its %%token%%,
+	 * matching the chip that clicking it inserts. The token stays in
+	 * data-taseo-template-var, which is what the script and the tests read;
+	 * nothing depends on the visible text.
+	 *
+	 * The heading is load-bearing rather than decorative. The pills sit
+	 * below the last input in the row, so without it they read as belonging
+	 * to the meta description alone — which is backwards, since a click
+	 * lands in whichever field was last focused and defaults to the title.
+	 *
+	 * @param string $object_type     Object type.
+	 * @param string $object_subtype  Object subtype.
+	 * @param bool   $has_description Whether the row also has a description field.
+	 * @return void
+	 */
+	private function render_variable_pills( string $object_type, string $object_subtype, bool $has_description = true ): void {
+		printf(
+			'<p class="description"><strong>%1$s</strong> %2$s</p>',
+			esc_html__( 'Available variables', 'the-another-seo' ),
+			$has_description
+				? esc_html__( '— these apply to both fields above.', 'the-another-seo' )
+				: ''
+		);
+
+		echo '<p class="description">';
+
+		foreach ( $this->template_variables->get_for( $object_type, $object_subtype ) as $slug => $label ) {
+			$token = '%%' . $slug . '%%';
+
+			printf(
+				'<button type="button" class="button button-small" data-taseo-template-var="%1$s" data-taseo-template-label="%2$s">%3$s</button> ',
+				esc_attr( $token ),
+				esc_attr( $label ),
+				esc_html( $label )
+			);
+		}
+
+		echo '</p>';
+	}
+
+	/**
+	 * Human-readable name for one template row.
+	 *
+	 * Post types and taxonomies carry registered labels; render_types_tab()
+	 * already reads the same properties. System pages are ours to name.
+	 *
+	 * Falls back to the subtype slug when nothing is registered under it: a
+	 * post type whose plugin has been deactivated leaves its stored
+	 * templates behind, and that row must stay identifiable and editable
+	 * rather than rendering an empty heading.
+	 *
+	 * The row heading and the validation error both call this, so the
+	 * screen and its error messages cannot describe the same row
+	 * differently.
+	 *
+	 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
+	 * @param string $object_subtype Post type, taxonomy, system page key, or custom page key.
+	 * @return string Human-readable label.
+	 */
+	private function template_row_label( string $object_type, string $object_subtype ): string {
+		if ( 'post' === $object_type ) {
+			$object = get_post_type_object( $object_subtype );
+
+			return isset( $object->labels->name ) ? (string) $object->labels->name : $object_subtype;
+		}
+
+		if ( 'term' === $object_type ) {
+			$taxonomy = get_taxonomy( $object_subtype );
+
+			return isset( $taxonomy->labels->name ) ? (string) $taxonomy->labels->name : $object_subtype;
+		}
+
+		if ( 'custom_page' === $object_type ) {
+			return $this->custom_pages->all()[ $object_subtype ] ?? $object_subtype;
+		}
+
+		$system_labels = array(
+			'home'   => __( 'Home page', 'the-another-seo' ),
+			'search' => __( 'Search results', 'the-another-seo' ),
+			'404'    => __( 'Not found (404)', 'the-another-seo' ),
+		);
+
+		return $system_labels[ $object_subtype ] ?? $object_subtype;
 	}
 
 	/**
@@ -337,12 +757,16 @@ class SettingsPage {
 			checked( $this->settings->is_twitter_enabled(), true, false ),
 			esc_html__( 'Output Twitter Card tags (X)', 'the-another-seo' )
 		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="number" name="taseo_settings[default_social_image_id]" value="%d" class="small-text" /> %s</td></tr>',
-			esc_html__( 'Default social image', 'the-another-seo' ),
+		echo '<tr><th scope="row">' . esc_html__( 'Default social image', 'the-another-seo' ) . '</th><td>';
+		ImageField::render(
+			'taseo_settings[default_social_image_id]',
 			(int) $this->settings->get_default_social_image_id(),
-			esc_html__( '(attachment ID)', 'the-another-seo' )
+			'taseo_settings[default_social_image_url]',
+			$this->settings->get_default_social_image_url(),
+			'taseo-default-social-image',
+			__( 'Default social image', 'the-another-seo' )
 		);
+		echo '</td></tr>';
 		printf(
 			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[facebook_app_id]" value="%s" /></td></tr>',
 			esc_html__( 'Facebook App ID', 'the-another-seo' ),
@@ -379,12 +803,16 @@ class SettingsPage {
 			esc_html__( 'Name', 'the-another-seo' ),
 			esc_attr( $this->settings->get_site_represents_name() )
 		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="number" name="taseo_settings[site_logo_id]" value="%d" class="small-text" /> %s</td></tr>',
-			esc_html__( 'Logo', 'the-another-seo' ),
+		echo '<tr><th scope="row">' . esc_html__( 'Logo', 'the-another-seo' ) . '</th><td>';
+		ImageField::render(
+			'taseo_settings[site_logo_id]',
 			(int) $this->settings->get_site_logo_id(),
-			esc_html__( '(attachment ID)', 'the-another-seo' )
+			'taseo_settings[site_logo_url]',
+			$this->settings->get_site_logo_url(),
+			'taseo-site-logo',
+			__( 'Logo', 'the-another-seo' )
 		);
+		echo '</td></tr>';
 		printf(
 			'<tr><th scope="row">%s</th><td><textarea name="taseo_settings[same_as_urls]" rows="4" class="large-text" placeholder="https://…">%s</textarea><br />%s</td></tr>',
 			esc_html__( 'Social profile URLs (sameAs)', 'the-another-seo' ),
@@ -473,6 +901,87 @@ class SettingsPage {
 	}
 
 	/**
+	 * Webmaster Tools tab: site verification and tracking snippets.
+	 *
+	 * @return void
+	 */
+	private function render_webmaster_tab(): void {
+		$services = array(
+			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), 'verify_google', 'verify_google_file', __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ) ),
+			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), 'verify_bing', 'verify_bing_file', __( 'Token from BingSiteAuth.xml', 'the-another-seo' ) ),
+			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), 'verify_yandex', 'verify_yandex_file', __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ) ),
+			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), 'verify_yahoo', '', '' ),
+			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), 'verify_facebook', '', '' ),
+		);
+
+		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only.', 'the-another-seo' ) . '</p>';
+		echo '<table class="form-table">';
+
+		foreach ( $services as $engine => $service ) {
+			list( $label, $code_key, $file_key, $file_hint ) = $service;
+
+			printf(
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" class="regular-text" placeholder="%4$s" />',
+				esc_html( $label ),
+				esc_attr( $code_key ),
+				esc_attr( $this->settings->get_verification_code( $engine ) ),
+				esc_attr__( 'Verification code', 'the-another-seo' )
+			);
+
+			if ( '' !== $file_key ) {
+				$file_value = $this->settings->get_verification_file( $engine );
+
+				printf(
+					'<br /><input type="text" name="taseo_settings[%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
+					esc_attr( $file_key ),
+					esc_attr( $file_value ),
+					esc_attr( $file_hint )
+				);
+
+				if ( '' !== $file_value ) {
+					$filename = 'bing' === $engine ? VerificationFileServer::BING_FILENAME : $file_value;
+
+					printf(
+						' <a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
+						esc_url( home_url( '/' . $filename ) )
+					);
+				}
+			}
+
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+
+		echo '<h2>' . esc_html__( 'Tracking', 'the-another-seo' ) . '</h2>';
+		echo '<table class="form-table">';
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_ga4_id]" value="%s" placeholder="G-XXXXXXXXXX" /></td></tr>',
+			esc_html__( 'GA4 Measurement ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_ga4_id() )
+		);
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_gtm_id]" value="%s" placeholder="GTM-XXXXXXX" /></td></tr>',
+			esc_html__( 'Tag Manager Container ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_gtm_id() )
+		);
+		printf(
+			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[meta_pixel_id]" value="%s" placeholder="123456789012345" /></td></tr>',
+			esc_html__( 'Meta Pixel ID', 'the-another-seo' ),
+			esc_attr( $this->settings->get_meta_pixel_id() )
+		);
+		echo '</table>';
+
+		if ( '' !== $this->settings->get_ga4_id() && '' !== $this->settings->get_gtm_id() ) {
+			printf(
+				'<div class="notice notice-warning inline"><p>%s</p></div>',
+				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
+			);
+		}
+	}
+
+	/**
 	 * Admin_post save handler.
 	 *
 	 * @param bool $do_exit Exit after redirect (false in tests).
@@ -488,8 +997,24 @@ class SettingsPage {
 
 		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
 
+		$errors = get_settings_errors();
+
+		if ( array() !== $errors ) {
+			// Exactly how core's options.php hands validation failures to
+			// the page it redirects to.
+			set_transient( 'settings_errors', $errors, 30 );
+		}
+
+		$redirect = admin_url( 'options-general.php?page=taseo&updated=1' );
+
+		if ( array_key_exists( $tab, self::TABS ) ) {
+			$redirect = add_query_arg( 'tab', $tab, $redirect );
+		}
+
+		$redirect = add_query_arg( 'settings-updated', 'true', $redirect );
+
 		// phpcs:ignore WordPressVIPMinimum.Security.ExitAfterRedirect.NoExit -- conditional exit based on testability flag.
-		wp_safe_redirect( admin_url( 'options-general.php?page=taseo&updated=1' ) );
+		wp_safe_redirect( $redirect );
 
 		if ( $do_exit ) {
 			exit;
@@ -577,6 +1102,39 @@ class SettingsPage {
 	}
 
 	/**
+	 * Sanitize a title/description template value.
+	 *
+	 * Neither sanitize_text_field() nor sanitize_textarea_field() (they
+	 * share the same code path) may be used here. WordPress's underlying
+	 * _sanitize_text_fields() ends with an unconditional loop that treats
+	 * any substring matching /%[a-f0-9]{2}/i as a stray percent-encoded
+	 * byte and deletes it. `%%date%%` contains such a substring at offset 1
+	 * ("%da"), so sanitize_text_field( '%%date%%' ) silently returns
+	 * '%te%%' — the row is stored corrupted, and because the mangled text
+	 * no longer contains a %%token%%, TemplateResolver::extract_variables()
+	 * finds nothing to reject, so validation never notices either. `date`
+	 * is the only current registry slug whose first two characters are
+	 * both hex digits, but any future slug with that shape would break the
+	 * same way. See the round-trip test in SettingsPageTest that fails if
+	 * this helper is replaced with sanitize_text_field() again.
+	 *
+	 * This does everything sanitize_text_field() does except the
+	 * percent-octet strip: invalid-UTF8 check, tag stripping, whitespace/
+	 * newline collapse to a single space, trim. Tags must still be
+	 * stripped and newlines collapsed — this value is rendered into a
+	 * <title> element and a meta tag.
+	 *
+	 * @param string $template Raw posted template.
+	 * @return string Sanitized template.
+	 */
+	private function sanitize_template( string $template ): string {
+		$template = wp_check_invalid_utf8( $template );
+		$template = wp_strip_all_tags( $template );
+
+		return trim( (string) preg_replace( '/[\r\n\t ]+/', ' ', $template ) );
+	}
+
+	/**
 	 * Sanitize a raw settings submission.
 	 *
 	 * Boolean and checkbox-list keys owned by the submitted tab are force-set
@@ -598,9 +1156,63 @@ class SettingsPage {
 		}
 
 		foreach ( array( 'title_templates', 'description_templates' ) as $tpl_key ) {
-			if ( isset( $raw[ $tpl_key ] ) && is_array( $raw[ $tpl_key ] ) ) {
-				$clean[ $tpl_key ] = array_map( 'sanitize_text_field', $raw[ $tpl_key ] );
+			if ( ! isset( $raw[ $tpl_key ] ) || ! is_array( $raw[ $tpl_key ] ) ) {
+				continue;
 			}
+
+			// Start from what is stored: a row whose template is rejected
+			// keeps its previous value while its siblings save normally.
+			// These keys hold every row, so replacing the array wholesale
+			// would let one bad row discard unrelated edits.
+			$stored = $this->settings->get( $tpl_key, array() );
+			$rows   = is_array( $stored ) ? $stored : array();
+
+			foreach ( $raw[ $tpl_key ] as $row_key => $template ) {
+				$row_key  = (string) $row_key;
+				$template = $this->sanitize_template( (string) $template );
+				$parts    = explode( ':', $row_key, 2 );
+				$type     = $parts[0] ?? '';
+				$subtype  = $parts[1] ?? '';
+				$invalid  = array();
+
+				foreach ( TemplateResolver::extract_variables( $template ) as $variable ) {
+					if ( ! $this->template_variables->is_available( $variable, $type, $subtype ) ) {
+						$invalid[] = '%%' . $variable . '%%';
+					}
+				}
+
+				if ( array() !== $invalid ) {
+					$row_label = $this->template_row_label( $type, $subtype );
+
+					if ( '' === $row_label ) {
+						// A posted row key with no colon (not something a form
+						// control can produce, but the key is attacker-
+						// controlled) resolves to an empty label. Every other
+						// call site here passes form-controlled type/subtype
+						// pairs; this is the one whose input is not, so fall
+						// back to the raw key rather than print a blank name.
+						$row_label = $row_key;
+					}
+
+					add_settings_error(
+						'taseo_messages',
+						self::INVALID_TEMPLATE_CODE . $tpl_key . '__' . $row_key,
+						sprintf(
+							/* translators: 1: row label such as Products, 2: comma-separated variable tokens. */
+							esc_html__( '%1$s: %2$s is not available for this content type. That field was not saved; the others were.', 'the-another-seo' ),
+							esc_html( $row_label ),
+							esc_html( implode( ', ', $invalid ) )
+						),
+						'error'
+					);
+
+					continue;
+				}
+
+				$rows[ $row_key ] = $template;
+			}
+
+			$clean[ $tpl_key ] = $rows;
 		}
 
 		foreach ( array( 'separator', 'facebook_app_id', 'twitter_site', 'site_represents_name', 'breadcrumb_separator', 'breadcrumb_home_label' ) as $text_key ) {
@@ -618,6 +1230,12 @@ class SettingsPage {
 		foreach ( array( 'default_social_image_id', 'site_logo_id' ) as $id_key ) {
 			if ( isset( $raw[ $id_key ] ) ) {
 				$clean[ $id_key ] = absint( $raw[ $id_key ] );
+			}
+		}
+
+		foreach ( array( 'default_social_image_url', 'site_logo_url' ) as $url_key ) {
+			if ( isset( $raw[ $url_key ] ) ) {
+				$clean[ $url_key ] = esc_url_raw( (string) $raw[ $url_key ] );
 			}
 		}
 
@@ -646,6 +1264,34 @@ class SettingsPage {
 				$clean['schema_types'][ sanitize_key( (string) $subtype ) ] =
 					in_array( $type, self::SCHEMA_TYPE_CHOICES, true ) ? $type : 'WebPage';
 			}
+		}
+
+		foreach ( self::VERIFICATION_CODE_KEYS as $code_key ) {
+			if ( isset( $raw[ $code_key ] ) ) {
+				$clean[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
+			}
+		}
+
+		foreach ( self::VERIFICATION_FILE_PATTERNS as $file_key => $pattern ) {
+			if ( ! isset( $raw[ $file_key ] ) ) {
+				continue;
+			}
+
+			$value = trim( (string) $raw[ $file_key ] );
+			$value = 'verify_bing_file' === $file_key ? $value : strtolower( $value );
+
+			$clean[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+		}
+
+		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
+			if ( ! isset( $raw[ $id_key ] ) ) {
+				continue;
+			}
+
+			$value = trim( (string) $raw[ $id_key ] );
+			$value = 'meta_pixel_id' === $id_key ? $value : strtoupper( $value );
+
+			$clean[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
 		}
 
 		if ( 'social' === $tab ) {

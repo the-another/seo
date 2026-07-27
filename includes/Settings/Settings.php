@@ -35,6 +35,31 @@ class Settings {
 	);
 
 	/**
+	 * Engine slug => settings key for verification meta-tag codes.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_KEYS = array(
+		'google'   => 'verify_google',
+		'bing'     => 'verify_bing',
+		'yandex'   => 'verify_yandex',
+		'yahoo'    => 'verify_yahoo',
+		'facebook' => 'verify_facebook',
+	);
+
+	/**
+	 * Engine slug => settings key for verification files. Yahoo retired its
+	 * own webmaster tools; Meta does not publish its file body format.
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_FILE_KEYS = array(
+		'google' => 'verify_google_file',
+		'bing'   => 'verify_bing_file',
+		'yandex' => 'verify_yandex_file',
+	);
+
+	/**
 	 * Get one settings key.
 	 *
 	 * @param string $key      Key.
@@ -123,9 +148,20 @@ class Settings {
 		$templates = $this->get( 'description_templates', array() );
 		$key       = $object_type . ':' . $object_subtype;
 
-		return is_array( $templates ) && ! empty( $templates[ $key ] )
-			? (string) $templates[ $key ]
-			: '%%excerpt%%';
+		if ( is_array( $templates ) && ! empty( $templates[ $key ] ) ) {
+			return (string) $templates[ $key ];
+		}
+
+		// %%excerpt%% is only ever guaranteed resolvable for post and term
+		// rows (TemplateVariables::get_for() adds it there and nowhere
+		// else). A custom_page has no built-in source of an excerpt-like
+		// field — the registering plugin decides what, if anything, its
+		// page's description is — so handing back that token as a default
+		// would be a guess the type can't back up, and the validator would
+		// reject it on every save until the plugin author overrides it. An
+		// empty template means "no meta description", which MetaOutput
+		// already handles.
+		return 'custom_page' === $object_type ? '' : '%%excerpt%%';
 	}
 
 	/**
@@ -162,6 +198,15 @@ class Settings {
 	 */
 	public function get_default_social_image_id(): int {
 		return (int) $this->get( 'default_social_image_id', 0 );
+	}
+
+	/**
+	 * Sitewide fallback social image URL, overriding the attachment.
+	 *
+	 * @return string URL, or '' when unset.
+	 */
+	public function get_default_social_image_url(): string {
+		return (string) $this->get( 'default_social_image_url', '' );
 	}
 
 	/**
@@ -225,6 +270,15 @@ class Settings {
 	 */
 	public function get_site_logo_id(): int {
 		return (int) $this->get( 'site_logo_id', 0 );
+	}
+
+	/**
+	 * Logo URL for the Organization node, overriding the attachment.
+	 *
+	 * @return string URL, or '' when unset.
+	 */
+	public function get_site_logo_url(): string {
+		return (string) $this->get( 'site_logo_url', '' );
 	}
 
 	/**
@@ -295,5 +349,58 @@ class Settings {
 		$stored = (int) $this->get( 'sitemap_max_links', 1000 );
 
 		return max( 1, min( 1000, $stored ) );
+	}
+
+	/**
+	 * Verification meta-tag code for one service.
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Code, '' when unset or unknown.
+	 */
+	public function get_verification_code( string $engine ): string {
+		$key = self::VERIFICATION_KEYS[ $engine ] ?? '';
+
+		return '' === $key ? '' : (string) $this->get( $key, '' );
+	}
+
+	/**
+	 * Verification file value for one service. Google and Yandex store the
+	 * full filename; Bing stores only the token (its filename is fixed).
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Value, '' when unset or unknown.
+	 */
+	public function get_verification_file( string $engine ): string {
+		$key = self::VERIFICATION_FILE_KEYS[ $engine ] ?? '';
+
+		return '' === $key ? '' : (string) $this->get( $key, '' );
+	}
+
+	/**
+	 * GA4 measurement ID.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_ga4_id(): string {
+		return (string) $this->get( 'analytics_ga4_id', '' );
+	}
+
+	/**
+	 * Google Tag Manager container ID.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_gtm_id(): string {
+		return (string) $this->get( 'analytics_gtm_id', '' );
+	}
+
+	/**
+	 * Meta Pixel ID. Returned as a string, never cast to int: a leading
+	 * zero is significant and casting would silently change the pixel.
+	 *
+	 * @return string ID or ''.
+	 */
+	public function get_meta_pixel_id(): string {
+		return (string) $this->get( 'meta_pixel_id', '' );
 	}
 }

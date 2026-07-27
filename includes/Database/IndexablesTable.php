@@ -21,7 +21,7 @@ class IndexablesTable {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '1.1.0';
+	public const DB_VERSION = '1.2.0';
 
 	/**
 	 * Version option name.
@@ -67,9 +67,11 @@ class IndexablesTable {
 			og_title TEXT NULL,
 			og_description TEXT NULL,
 			og_image_id BIGINT UNSIGNED NULL,
+			og_image_url TEXT NULL,
 			twitter_title TEXT NULL,
 			twitter_description TEXT NULL,
 			twitter_image_id BIGINT UNSIGNED NULL,
+			twitter_image_url TEXT NULL,
 			breadcrumb_title TEXT NULL,
 			schema_disabled TINYINT(1) NOT NULL DEFAULT 0,
 			is_indexable TINYINT(1) NOT NULL DEFAULT 1,

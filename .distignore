@@ -28,8 +28,9 @@
 /playwright-report/
 
 # Build output (zips must never nest a previous zip). NOTE: /dist/ is NOT
-# ignored — it holds the built block JS the plugin loads at runtime; the
-# plugin-zip pipeline rebuilds it fresh immediately before archiving.
+# ignored — it holds the built block JS and admin settings bundle the plugin
+# loads at runtime; the plugin-zip pipeline rebuilds it fresh immediately
+# before archiving.
 /build/
 *.zip
 
