@@ -446,19 +446,6 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_templates_tab(): void {
-		printf(
-			'<p class="description">%s</p>',
-			esc_html__( 'The title template becomes the page\'s title element; the meta description template becomes its meta description. Leave a field empty to use the default: "%%title%% %%sep%% %%sitename%%" for titles and "%%excerpt%%" for descriptions.', 'the-another-seo' )
-		);
-
-		// Stated once here rather than under every row: eight copies of the
-		// same sentence is noise, and the per-row heading only has to name
-		// the pills and say which fields they serve.
-		printf(
-			'<p class="description">%s</p>',
-			esc_html__( 'Click a variable to insert it into the field you last used.', 'the-another-seo' )
-		);
-
 		$sections = array(
 			'taseo-post-types'   => __( 'Post types', 'the-another-seo' ),
 			'taseo-taxonomies'   => __( 'Taxonomies', 'the-another-seo' ),

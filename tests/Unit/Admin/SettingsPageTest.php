@@ -806,12 +806,6 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertStringContainsString( 'Available variables', $html );
 		$this->assertStringContainsString( 'these apply to both fields above', $html );
-
-		// Stated once in the tab intro rather than repeated under every row.
-		$this->assertSame(
-			1,
-			substr_count( $html, 'Click a variable to insert it into the field you last used.' )
-		);
 	}
 
 	/**
@@ -826,16 +820,6 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertStringContainsString( 'Available variables', $html );
 		$this->assertStringNotContainsString( 'these apply to both fields above', $html );
-	}
-
-	public function test_templates_tab_explains_what_the_two_fields_do(): void {
-		$_GET['tab'] = 'templates';
-		$html        = $this->render_page();
-
-		// A phrase distinctive to the intro paragraph itself, not merely
-		// shared with other markup on the page (field labels, variable
-		// pills, etc.) — this must fail if the intro is deleted.
-		$this->assertStringContainsString( 'Leave a field empty to use the default', $html );
 	}
 
 	public function test_templates_tab_splits_into_four_titled_sections(): void {
