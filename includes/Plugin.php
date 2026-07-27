@@ -122,7 +122,7 @@ class Plugin {
 		);
 		$c->register(
 			'current_context',
-			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
+			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ), $c->get( 'custom_pages' ) )
 		);
 		$c->register(
 			'meta_output',

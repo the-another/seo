@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use WP_Post;
@@ -138,7 +139,7 @@ class CurrentContextVariablesTest extends TestCase {
 			Functions\when( 'wc_get_product' )->justReturn( $product );
 		}
 
-		$context = ( new CurrentContext( $this->repository, $this->settings ) )->resolve();
+		$context = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
 
 		return $context['vars'];
 	}
@@ -208,7 +209,7 @@ class CurrentContextVariablesTest extends TestCase {
 		Functions\when( 'is_category' )->justReturn( true );
 		Functions\when( 'get_queried_object' )->justReturn( $term );
 
-		$context    = ( new CurrentContext( $this->repository, $this->settings ) )->resolve();
+		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
 		$produced   = array_keys( $context['vars'] );
 		$advertised = array_keys( $this->registry->get_for( 'term', 'category' ) );
 
@@ -219,7 +220,7 @@ class CurrentContextVariablesTest extends TestCase {
 	public function test_system_page_variables_match_the_registry(): void {
 		Functions\when( 'is_404' )->justReturn( true );
 
-		$context    = ( new CurrentContext( $this->repository, $this->settings ) )->resolve();
+		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
 		$produced   = array_keys( $context['vars'] );
 		$advertised = array_keys( $this->registry->get_for( 'system_page', '404' ) );
 
