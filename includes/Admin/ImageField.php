@@ -27,11 +27,17 @@ final class ImageField {
 	/**
 	 * Render one image field.
 	 *
-	 * @param string $id_name   Form name for the attachment ID input.
-	 * @param int    $id_value  Current attachment ID, 0 when unset.
-	 * @param string $url_name  Form name for the URL override input.
-	 * @param string $url_value Current URL override, '' when unset.
-	 * @param string $html_id   Prefix for this field's HTML ids.
+	 * @param string $id_name     Form name for the attachment ID input.
+	 * @param int    $id_value    Current attachment ID, 0 when unset.
+	 * @param string $url_name    Form name for the URL override input.
+	 * @param string $url_value   Current URL override, '' when unset.
+	 * @param string $html_id     Prefix for this field's HTML ids.
+	 * @param string $field_label Human-readable field name (e.g. "Og Image Id"),
+	 *                            used only to give this field's Select/Remove
+	 *                            buttons distinct accessible names — a post
+	 *                            metabox renders one of these per image slot,
+	 *                            and without it every field's buttons announce
+	 *                            as the same bare "Select image"/"Remove".
 	 * @return void
 	 */
 	public static function render(
@@ -39,7 +45,8 @@ final class ImageField {
 		int $id_value,
 		string $url_name,
 		string $url_value,
-		string $html_id
+		string $html_id,
+		string $field_label
 	): void {
 		printf(
 			'<div data-taseo-image-field><input type="hidden" name="%1$s" value="%2$d" data-taseo-image-id />',
@@ -59,8 +66,22 @@ final class ImageField {
 		}
 
 		printf(
-			'<button type="button" class="button" data-taseo-image-select>%1$s</button> <button type="button" class="button" data-taseo-image-remove>%2$s</button>',
+			'<button type="button" class="button" data-taseo-image-select aria-label="%1$s">%2$s</button> <button type="button" class="button" data-taseo-image-remove aria-label="%3$s">%4$s</button>',
+			esc_attr(
+				sprintf(
+					/* translators: %s: field name, e.g. "Og Image Id". */
+					__( 'Select image for %s', 'the-another-seo' ),
+					$field_label
+				)
+			),
 			esc_html__( 'Select image', 'the-another-seo' ),
+			esc_attr(
+				sprintf(
+					/* translators: %s: field name, e.g. "Og Image Id". */
+					__( 'Remove %s', 'the-another-seo' ),
+					$field_label
+				)
+			),
 			esc_html__( 'Remove', 'the-another-seo' )
 		);
 

@@ -248,7 +248,7 @@ class MetaboxTest extends TestCase {
 	public function test_the_picker_enqueues_on_post_and_term_screens(): void {
 		Functions\when( 'wp_enqueue_script' )->justReturn( null );
 
-		foreach ( array( 'post.php', 'post-new.php', 'term.php', 'edit-tags.php' ) as $hook ) {
+		foreach ( array( 'post.php', 'post-new.php', 'term.php' ) as $hook ) {
 			$called  = false;
 			$restore = $this->with_built_media_picker_asset_file();
 
@@ -266,23 +266,33 @@ class MetaboxTest extends TestCase {
 		}
 	}
 
+	/**
+	 * options-general.php never renders any of this plugin's fields at all.
+	 * edit-tags.php is the term LIST screen: render_term_fields() hooks
+	 * "{$taxonomy}_edit_form_fields", which core only fires from term.php
+	 * (via edit-tag-form.php); edit-tags.php fires
+	 * "{$taxonomy}_add_form_fields" instead, so it never renders a picker
+	 * either, and enqueuing the media library there would be pure waste.
+	 */
 	public function test_the_picker_does_not_enqueue_on_unrelated_screens(): void {
 		Functions\when( 'wp_enqueue_script' )->justReturn( null );
 
-		$called  = false;
-		$restore = $this->with_built_media_picker_asset_file();
+		foreach ( array( 'options-general.php', 'edit-tags.php' ) as $hook ) {
+			$called  = false;
+			$restore = $this->with_built_media_picker_asset_file();
 
-		Functions\when( 'wp_enqueue_media' )->alias(
-			static function () use ( &$called ): void {
-				$called = true;
-			}
-		);
+			Functions\when( 'wp_enqueue_media' )->alias(
+				static function () use ( &$called ): void {
+					$called = true;
+				}
+			);
 
-		$this->metabox->enqueue_media_picker( 'options-general.php' );
+			$this->metabox->enqueue_media_picker( $hook );
 
-		$restore();
+			$restore();
 
-		$this->assertFalse( $called );
+			$this->assertFalse( $called, "expected the picker not to enqueue on {$hook}" );
+		}
 	}
 
 	/**
@@ -304,6 +314,7 @@ class MetaboxTest extends TestCase {
 		Functions\when( 'esc_attr' )->returnArg();
 		Functions\when( 'esc_textarea' )->returnArg();
 		Functions\when( 'esc_html__' )->returnArg();
+		Functions\when( '__' )->returnArg();
 		Functions\when( 'esc_url' )->returnArg();
 		Functions\when( 'checked' )->justReturn( '' );
 		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/thumb.jpg' );

@@ -50,11 +50,18 @@ class Metabox {
 	 * Admin screens that render image fields.
 	 *
 	 * Term screens carry the same picker as the post metabox, since
-	 * render_term_fields() reuses render_fields().
+	 * render_term_fields() reuses render_fields() — but only term.php runs
+	 * it. render_term_fields() hooks "{$taxonomy}_edit_form_fields", which
+	 * core only fires from wp-admin/edit-tag-form.php (included by
+	 * term.php, the single-term edit screen); edit-tags.php is the term
+	 * list screen and fires "{$taxonomy}_add_form_fields" instead, a
+	 * different hook this class does not register. Enqueuing here too
+	 * would load the media library on a screen with no picker to bind it
+	 * to.
 	 *
 	 * @var array<int, string>
 	 */
-	private const PICKER_SCREENS = array( 'post.php', 'post-new.php', 'term.php', 'edit-tags.php' );
+	private const PICKER_SCREENS = array( 'post.php', 'post-new.php', 'term.php' );
 
 	/**
 	 * Constructor.
@@ -171,8 +178,11 @@ class Metabox {
 				continue;
 			}
 
-			echo '<p>';
-
+			// Image fields render their own wrapper (ImageField's
+			// data-taseo-image-field <div>) rather than a <p>: a <div> is not
+			// valid content for a <p> element, so wrapping one in <p> here
+			// would leave the browser auto-closing the paragraph before the
+			// div and reopening a stray empty one after it.
 			if ( 'image_id' === $type ) {
 				$url_field = str_replace( '_id', '_url', $field );
 
@@ -182,9 +192,16 @@ class Metabox {
 					(int) $value,
 					'taseo_meta[' . $url_field . ']',
 					isset( $row[ $url_field ] ) ? (string) $row[ $url_field ] : '',
-					'taseo-meta-' . str_replace( '_', '-', $field )
+					'taseo-meta-' . str_replace( '_', '-', $field ),
+					$label
 				);
-			} elseif ( 'checkbox' === $type ) {
+
+				continue;
+			}
+
+			echo '<p>';
+
+			if ( 'checkbox' === $type ) {
 				echo '<label><input type="checkbox" name="' . esc_attr( $name ) . '" value="1" ' . checked( '1', $value, false ) . ' /> ' . esc_html( $label ) . '</label>';
 			} elseif ( 'textarea' === $type ) {
 				echo '<label>' . esc_html( $label ) . '<br /><textarea name="' . esc_attr( $name ) . '" rows="2" class="large-text">' . esc_textarea( $value ) . '</textarea></label>';

@@ -21,9 +21,14 @@ function openPicker( field ) {
 		return;
 	}
 
+	// title and button.text are deliberately omitted: core's wp.media() only
+	// fills a property from its own (already-translated) defaults when it is
+	// undefined — Underscore's _.defaults() never overwrites an explicit ''.
+	// This plugin emits no data-taseo-image-title/-button attributes, so
+	// reading them here would always produce '', which would permanently
+	// beat core's real "Select Image" title and "Select" button text with a
+	// blank one. Passing nothing at all lets core's own defaults apply.
 	const frame = window.wp.media( {
-		title: field.dataset.taseoImageTitle || '',
-		button: { text: field.dataset.taseoImageButton || '' },
 		library: { type: 'image' },
 		multiple: false,
 	} );

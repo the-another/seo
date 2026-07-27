@@ -671,7 +671,8 @@ class SettingsPage {
 			(int) $this->settings->get_default_social_image_id(),
 			'taseo_settings[default_social_image_url]',
 			$this->settings->get_default_social_image_url(),
-			'taseo-default-social-image'
+			'taseo-default-social-image',
+			__( 'Default social image', 'the-another-seo' )
 		);
 		echo '</td></tr>';
 		printf(
@@ -716,7 +717,8 @@ class SettingsPage {
 			(int) $this->settings->get_site_logo_id(),
 			'taseo_settings[site_logo_url]',
 			$this->settings->get_site_logo_url(),
-			'taseo-site-logo'
+			'taseo-site-logo',
+			__( 'Logo', 'the-another-seo' )
 		);
 		echo '</td></tr>';
 		printf(

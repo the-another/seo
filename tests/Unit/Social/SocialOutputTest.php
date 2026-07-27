@@ -238,6 +238,24 @@ class SocialOutputTest extends TestCase {
 	}
 
 	/**
+	 * The settings-level counterpart of test_a_row_image_url_beats_the_row_attachment():
+	 * both default_social_image_url and default_social_image_id resolve to a
+	 * real value here (the ID is not 0), so the URL only wins if resolve_image_url()
+	 * checks it first — swapping those two candidates would slip past every
+	 * other test in this file, since they leave the ID at its default 0.
+	 */
+	public function test_the_sitewide_url_beats_the_sitewide_attachment(): void {
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/attachment-fallback.jpg' );
+		$this->settings->shouldReceive( 'get_default_social_image_url' )->andReturn( 'https://cdn.example.com/site.jpg' );
+		$this->settings->shouldReceive( 'get_default_social_image_id' )->andReturn( 55 );
+
+		$html = $this->render_social( array() );
+
+		$this->assertStringContainsString( 'https://cdn.example.com/site.jpg', $html );
+		$this->assertStringNotContainsString( 'https://example.com/attachment-fallback.jpg', $html );
+	}
+
+	/**
 	 * The filter is applied last, so add_filter is always the final word.
 	 */
 	public function test_the_og_image_filter_wins_over_every_stored_value(): void {

@@ -29,14 +29,15 @@ class ImageFieldTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function render( int $id_value = 0, string $url_value = '' ): string {
+	private function render( int $id_value = 0, string $url_value = '', string $field_label = 'Default social image' ): string {
 		ob_start();
 		ImageField::render(
 			'taseo_settings[default_social_image_id]',
 			$id_value,
 			'taseo_settings[default_social_image_url]',
 			$url_value,
-			'taseo-default-social-image'
+			'taseo-default-social-image',
+			$field_label
 		);
 
 		return (string) ob_get_clean();
@@ -95,5 +96,36 @@ class ImageFieldTest extends TestCase {
 	 */
 	public function test_it_introduces_no_class_of_our_own(): void {
 		$this->assertStringNotContainsString( 'class="taseo', $this->render( 42 ) );
+	}
+
+	/**
+	 * A post metabox renders both the OG and the Twitter image field on the
+	 * same screen; without a distinct accessible name a screen-reader user
+	 * meets two identical "Select image" / "Remove" buttons with nothing
+	 * telling them apart.
+	 */
+	public function test_the_select_and_remove_buttons_carry_a_field_specific_accessible_name(): void {
+		$html = $this->render( 0, '', 'Og Image Id' );
+
+		$this->assertMatchesRegularExpression(
+			'/data-taseo-image-select aria-label="[^"]*Og Image Id[^"]*"/',
+			$html
+		);
+		$this->assertMatchesRegularExpression(
+			'/data-taseo-image-remove aria-label="[^"]*Og Image Id[^"]*"/',
+			$html
+		);
+	}
+
+	/**
+	 * The two labels must actually differ from each other — otherwise the
+	 * field label was accepted but never wired into the buttons at all.
+	 */
+	public function test_different_fields_get_different_accessible_names(): void {
+		$og_html = $this->render( 0, '', 'Og Image Id' );
+		$tw_html = $this->render( 0, '', 'Twitter Image Id' );
+
+		$this->assertStringNotContainsString( 'Twitter Image Id', $og_html );
+		$this->assertStringNotContainsString( 'Og Image Id', $tw_html );
 	}
 }
