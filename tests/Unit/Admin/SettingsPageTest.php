@@ -842,10 +842,10 @@ class SettingsPageTest extends TestCase {
 		$_GET['tab'] = 'templates';
 		$html        = $this->render_page();
 
-		$this->assertStringContainsString( '<h2>Post types</h2>', $html );
-		$this->assertStringContainsString( '<h2>Taxonomies</h2>', $html );
-		$this->assertStringContainsString( '<h2>System pages</h2>', $html );
-		$this->assertStringContainsString( '<h2>Custom pages</h2>', $html );
+		$this->assertStringContainsString( '<h2 id="taseo-post-types">Post types</h2>', $html );
+		$this->assertStringContainsString( '<h2 id="taseo-taxonomies">Taxonomies</h2>', $html );
+		$this->assertStringContainsString( '<h2 id="taseo-system-pages">System pages</h2>', $html );
+		$this->assertStringContainsString( '<h2 id="taseo-custom-pages">Custom pages</h2>', $html );
 		$this->assertSame( 3, substr_count( $html, '<hr />' ), 'separators sit between the four sections, not after the last' );
 		// Custom pages is empty by default here, so its section renders the
 		// empty state rather than a fourth table.
@@ -1514,5 +1514,35 @@ class SettingsPageTest extends TestCase {
 			'<input type="number" name="taseo_settings[default_social_image_id]"',
 			$html
 		);
+	}
+
+	/**
+	 * Asserted as a pair rather than as two lists: a renamed heading id with
+	 * no matching nav change would leave both halves individually plausible
+	 * and the link broken.
+	 */
+	public function test_the_section_nav_links_match_the_section_headings(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		foreach ( array( 'taseo-post-types', 'taseo-taxonomies', 'taseo-system-pages', 'taseo-custom-pages' ) as $anchor ) {
+			$this->assertStringContainsString( 'href="#' . $anchor . '"', $html, "nav link missing for {$anchor}" );
+			$this->assertStringContainsString( 'id="' . $anchor . '"', $html, "heading id missing for {$anchor}" );
+		}
+	}
+
+	/**
+	 * .subsubsub is float: left (wp-admin/css/common.css:428). Without the
+	 * clear, the first heading wraps alongside the nav instead of below it.
+	 */
+	public function test_the_section_nav_uses_core_classes_and_clears_its_float(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'class="subsubsub"', $html );
+		$this->assertStringContainsString( 'class="clear"', $html );
+		$this->assertStringNotContainsString( 'class="taseo', $html );
 	}
 }

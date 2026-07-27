@@ -459,7 +459,31 @@ class SettingsPage {
 			esc_html__( 'Click a variable to insert it into the field you last used.', 'the-another-seo' )
 		);
 
-		echo '<h2>' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
+		$sections = array(
+			'taseo-post-types'   => __( 'Post types', 'the-another-seo' ),
+			'taseo-taxonomies'   => __( 'Taxonomies', 'the-another-seo' ),
+			'taseo-system-pages' => __( 'System pages', 'the-another-seo' ),
+			'taseo-custom-pages' => __( 'Custom pages', 'the-another-seo' ),
+		);
+		$last     = array_key_last( $sections );
+
+		echo '<ul class="subsubsub">';
+
+		foreach ( $sections as $anchor => $section_label ) {
+			printf(
+				'<li><a href="#%1$s">%2$s</a>%3$s</li>',
+				esc_attr( $anchor ),
+				esc_html( $section_label ),
+				$anchor === $last ? '' : ' |'
+			);
+		}
+
+		echo '</ul>';
+		// .subsubsub is float: left (wp-admin/css/common.css:428), so without
+		// this the first heading wraps beside the nav instead of below it.
+		echo '<div class="clear"></div>';
+
+		echo '<h2 id="taseo-post-types">' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_post_types() as $type ) {
@@ -493,7 +517,7 @@ class SettingsPage {
 
 		echo '<hr />';
 
-		echo '<h2>' . esc_html__( 'Taxonomies', 'the-another-seo' ) . '</h2>';
+		echo '<h2 id="taseo-taxonomies">' . esc_html__( 'Taxonomies', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
 		foreach ( $this->settings->get_enabled_taxonomies() as $tax ) {
@@ -527,7 +551,7 @@ class SettingsPage {
 
 		echo '<hr />';
 
-		echo '<h2>' . esc_html__( 'System pages', 'the-another-seo' ) . '</h2>';
+		echo '<h2 id="taseo-system-pages">' . esc_html__( 'System pages', 'the-another-seo' ) . '</h2>';
 		printf(
 			'<p class="description">%s</p>',
 			esc_html__( 'System pages take a title template only.', 'the-another-seo' )
@@ -560,7 +584,7 @@ class SettingsPage {
 
 		echo '<hr />';
 
-		echo '<h2>' . esc_html__( 'Custom pages', 'the-another-seo' ) . '</h2>';
+		echo '<h2 id="taseo-custom-pages">' . esc_html__( 'Custom pages', 'the-another-seo' ) . '</h2>';
 
 		$custom_pages = $this->custom_pages->all();
 
