@@ -67,15 +67,21 @@ Custom pages
 
 ## Front-end resolution
 
-`CurrentContext::resolve()` gains one extension point, at the final fallthrough where it currently returns `null`:
+`CurrentContext::do_resolve()` gains one extension point, **at the top, before the `is_singular()` branch**:
 
 ```php
 apply_filters( 'taseo_custom_page_context', null );
 ```
 
-Three deliberate constraints, each of which rules out an easier and worse alternative:
+**Why first rather than last, corrected during planning.** The obvious reading — "claim an otherwise-unhandled request", applied at the fallthrough where `do_resolve()` returns `null` — is broken for the exact case this feature exists for. A virtual page is usually a real WordPress page: WooCommerce's checkout satisfies `is_checkout()` *and* `is_singular()`. At the fallthrough the filter would never run, because the `is_singular()` branch resolves it as `post:page` first. And when `page` is not an enabled post type, that branch `return null`s early, so the fallthrough is not reached either. Running the filter last would mean a checkout page could never be registered as a custom page — the motivating example.
 
-**It fires only when nothing else matched.** Applying it to every resolve would let one careless filter break title output for every post and term on the site. "Claim an otherwise-unhandled request" is what a custom page needs and all it needs.
+The filter therefore runs first and can claim any request. Three things keep that safe, and they are why the override power is acceptable:
+
+- **`null` is the default return**, so a site with no such filter behaves exactly as before.
+- **The subtype must be registered** through `taseo_custom_pages`. Claiming a request takes two deliberate acts in two different filters, not one stray return.
+- **A malformed or unregistered declaration is ignored** and resolution continues into the built-in branches unchanged, rather than blanking the page.
+
+A plugin that unconditionally returns a declaration will override every context on the site. That is a bug in that plugin, and it is the cost of supporting page-backed custom pages at all.
 
 **It returns a declaration, not a context.** The filter returns `null` or:
 
@@ -150,8 +156,9 @@ The section headings keep their existing wording, so the nav labels and the head
 | `taseo_custom_pages` returns a non-array | Treated as empty; section shows the empty state |
 | Key contains characters outside `[a-z0-9_-]` | That entry is skipped, not rewritten — a rewritten key would break the plugin's own resolution filter |
 | Registered label is empty | Falls back to the key, as a deregistered post type falls back to its slug |
-| `taseo_custom_page_context` returns an unregistered subtype | Ignored; resolution falls through to `null` |
-| Filter returns a malformed array | Ignored; resolution falls through to `null` |
+| `taseo_custom_page_context` returns an unregistered subtype | Ignored; resolution continues into the built-in branches unchanged |
+| Filter returns a malformed array, or anything but an array | Ignored; resolution continues into the built-in branches unchanged |
+| Filter unconditionally returns a registered declaration | It overrides every context on the site. A bug in that plugin, and the stated cost of letting a custom page claim a page-backed request |
 | A plugin registering pages is deactivated | Its rows disappear from the screen; stored templates stay in the option and reappear if it is reactivated |
 | Two plugins register the same key | Last filter to run wins, as with any WordPress filter |
 | Anchor for a section with no rows | The heading still renders, so the anchor still resolves |
@@ -163,10 +170,11 @@ The section headings keep their existing wording, so the nav labels and the head
 - `has()` is true only for a registered key.
 
 **Unit** (`tests/Unit/Meta/CurrentContextTest.php`):
-- With nothing else matching, a well-formed `taseo_custom_page_context` return produces a context whose `object_type` is `custom_page` and whose `vars` merge over `site_vars()`.
-- An unregistered subtype resolves to `null`.
-- A malformed return resolves to `null`.
-- **The filter does not fire when an earlier branch already matched** — the check that it cannot hijack post or term output.
+- A well-formed `taseo_custom_page_context` return produces a context whose `object_type` is `custom_page` and whose `vars` merge over `site_vars()`, with the plugin's values winning on a collision.
+- **A declaration claims a request that `is_singular()` would otherwise have resolved as a post** — the test that pins the corrected ordering, and the one that fails if the filter is moved back to the fallthrough.
+- An unregistered subtype is ignored and resolution continues into the built-in branches, rather than returning `null`.
+- A malformed return — not an array, or no `subtype` — does the same.
+- With no filter registered, every existing resolution path behaves exactly as it does today.
 
 **Unit** (`tests/Unit/Admin/SettingsPageTest.php`):
 - A registered page renders a row with `name="taseo_settings[title_templates][custom_page:checkout]"` and the matching description input.
@@ -182,5 +190,4 @@ The section headings keep their existing wording, so the nav labels and the head
 - **Per-object overrides for custom pages.** The metabox covers posts and terms; a custom page has no edit screen to hang one on.
 - **Registering custom pages through the admin UI.** This is an extension point for plugins, not a page builder.
 - **Scroll-spy or `current` state on the subnav.**
-- **Applying the resolution filter to matched contexts.** Overriding an already-resolved post or term context is a different feature with a much wider blast radius.
 - **The other tabs' navigation.** Only Titles & Templates has enough sections to need it.
