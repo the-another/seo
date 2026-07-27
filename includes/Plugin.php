@@ -20,6 +20,7 @@ use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
@@ -101,6 +102,7 @@ class Plugin {
 		$c = $this->container;
 
 		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'custom_pages', fn() => new CustomPages() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
 		$c->register( 'template_variables', fn() => new TemplateVariables() );
 		$c->register( 'indexable_repository', fn() => new IndexableRepository() );
