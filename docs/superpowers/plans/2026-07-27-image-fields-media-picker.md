@@ -658,16 +658,18 @@ class ImageFieldTest extends TestCase {
 	}
 
 	/**
-	 * No stylesheet ships with this plugin, so any class here must be one
-	 * WordPress already defines.
+	 * No stylesheet ships with this plugin, so every class here must be one
+	 * WordPress already defines. `data-taseo-image-*` attributes are the
+	 * script's binding hooks and are fine; a class of our own is not, which
+	 * is why this asserts on `class="taseo` rather than on the bare string
+	 * `taseo-image` — the latter appears in every data attribute and would
+	 * fail against correct markup.
 	 */
 	public function test_it_introduces_no_class_of_our_own(): void {
-		$this->assertStringNotContainsString( 'taseo-image', $this->render( 42 ) );
+		$this->assertStringNotContainsString( 'class="taseo', $this->render( 42 ) );
 	}
 }
 ```
-
-Note the last test's intent: `data-taseo-image-*` **attributes** are fine, a `taseo-image-*` **class** is not. Write the markup with no `class="taseo-..."` anywhere, and that assertion holds because attribute names are `data-taseo-image-…` — the test checks for the bare `taseo-image` string, so name the wrapper attribute `data-taseo-image-field` and confirm the assertion still passes; if it does not, tighten the assertion to `class="taseo` instead. Resolve this while writing the test, not later.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
@@ -1208,13 +1210,14 @@ git commit -m "feat: resolve images through URL overrides and per-slot filters"
 **Files:**
 - Create: `assets/src/media-picker/index.js`
 - Modify: `package.json:9` (`build` script)
+- Modify: `includes/Admin/ImageField.php` (add `enqueue()`)
 - Modify: `includes/Admin/SettingsPage.php` (`enqueue_assets()`)
 - Modify: `includes/Admin/Metabox.php` (new `admin_enqueue_scripts` registration and handler)
 - Test: `tests/Unit/Admin/SettingsPageTest.php`, `tests/Unit/Admin/MetaboxTest.php`
 
 **Interfaces:**
-- Consumes: the `[data-taseo-image-field]` markup from Task 4.
-- Produces: script handle `taseo-media-picker`, built to `dist/media-picker/index.js`.
+- Consumes: `ImageField::render()` and the `[data-taseo-image-field]` markup from Task 4.
+- Produces: `ImageField::enqueue(): void` — the single enqueue used by both callers — and script handle `taseo-media-picker`, built to `dist/media-picker/index.js`.
 
 - [ ] **Step 1: Write the picker script**
 
@@ -1387,19 +1390,15 @@ Add to `tests/Unit/Admin/MetaboxTest.php`:
 
 Reuse `with_built_asset_file()` and the existing enqueue helper in `SettingsPageTest.php`; if the helper only writes `dist/settings/index.asset.php`, extend it to write `dist/media-picker/index.asset.php` too.
 
-- [ ] **Step 5: Enqueue on the settings page**
+- [ ] **Step 5: Give `ImageField` the enqueue, and call it from the settings page**
 
-In `includes/Admin/SettingsPage.php`, at the end of `enqueue_assets()` (inside the existing `$hook_suffix` guard, after `wp_enqueue_style( 'wp-components' );`):
+`SettingsPage` and `Metabox` both need this script and share no base class. Rather than each carrying its own copy of the enqueue, `ImageField` owns it: the class already renders the markup, so owning the script that drives that markup keeps both in one place and means a change to the handle or path cannot land in one caller and not the other.
 
-```php
-		$this->enqueue_media_picker();
-```
-
-and add the shared method:
+Add to `includes/Admin/ImageField.php`:
 
 ```php
 	/**
-	 * Enqueue the image picker bundle.
+	 * Enqueue the picker bundle and core's media library.
 	 *
 	 * wp_enqueue_media() is what defines wp.media; without it the picker
 	 * loads and silently does nothing. The file_exists() guard matches the
@@ -1408,7 +1407,7 @@ and add the shared method:
 	 *
 	 * @return void
 	 */
-	private function enqueue_media_picker(): void {
+	public static function enqueue(): void {
 		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
 
 		if ( ! file_exists( $asset_file ) ) {
@@ -1426,6 +1425,12 @@ and add the shared method:
 			true
 		);
 	}
+```
+
+In `includes/Admin/SettingsPage.php`, at the end of `enqueue_assets()` (inside the existing `$hook_suffix` guard, after `wp_enqueue_style( 'wp-components' );`):
+
+```php
+		ImageField::enqueue();
 ```
 
 - [ ] **Step 6: Enqueue on post and term screens**
@@ -1450,7 +1455,7 @@ register the hook alongside the existing ones in the constructor:
 		$hook_manager->register_action( 'admin_enqueue_scripts', array( $this, 'enqueue_media_picker' ) );
 ```
 
-and add the handler, duplicating the enqueue body rather than reaching into `SettingsPage` (the two classes share no base and a public accessor would exist only for this):
+and add the handler, which screens the hook and then delegates to the same `ImageField::enqueue()` the settings page uses:
 
 ```php
 	/**
@@ -1464,22 +1469,7 @@ and add the handler, duplicating the enqueue body rather than reaching into `Set
 			return;
 		}
 
-		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
-
-		if ( ! file_exists( $asset_file ) ) {
-			return;
-		}
-
-		$asset = require $asset_file;
-
-		wp_enqueue_media();
-		wp_enqueue_script(
-			'taseo-media-picker',
-			THE_ANOTHER_SEO_PLUGIN_URL . 'dist/media-picker/index.js',
-			$asset['dependencies'],
-			$asset['version'],
-			true
-		);
+		ImageField::enqueue();
 	}
 ```
 
