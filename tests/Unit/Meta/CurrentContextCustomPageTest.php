@@ -128,13 +128,28 @@ class CurrentContextCustomPageTest extends TestCase {
 		$this->assertNull( $this->resolve() );
 	}
 
+	/**
+	 * has() is stubbed to return true for any argument, so the only thing
+	 * standing between this declaration and build() is the isset( 'subtype' )
+	 * guard itself — a weakened guard (e.g. `$declaration['subtype'] ?? ''`)
+	 * would let this resolve and turn assertNull() into a real failure.
+	 */
 	public function test_a_malformed_declaration_is_ignored(): void {
+		$this->custom_pages->shouldReceive( 'has' )->andReturn( true );
+
 		Filters\expectApplied( 'taseo_custom_page_context' )->andReturn( array( 'no_subtype' => true ) );
 
 		$this->assertNull( $this->resolve() );
 	}
 
+	/**
+	 * has() is stubbed to return true for any argument, so the only thing
+	 * standing between this declaration and build() is the is_array() guard
+	 * itself.
+	 */
 	public function test_a_non_array_declaration_is_ignored(): void {
+		$this->custom_pages->shouldReceive( 'has' )->andReturn( true );
+
 		Filters\expectApplied( 'taseo_custom_page_context' )->andReturn( 'nonsense' );
 
 		$this->assertNull( $this->resolve() );
