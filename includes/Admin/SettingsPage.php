@@ -183,7 +183,9 @@ class SettingsPage {
 	 * excluded by .distignore, so the built file ships in the release zip.
 	 *
 	 * The stylesheet is core's own wp-components, which the autocomplete
-	 * popover needs to be readable. Nothing of ours is enqueued.
+	 * popover needs to be readable. ImageField::enqueue() at the end pulls in
+	 * core's media library plus the picker bundle the social/schema tabs'
+	 * image fields need; no stylesheet of our own is enqueued.
 	 *
 	 * @param string $hook_suffix Current admin page's hook suffix.
 	 * @return void
@@ -209,6 +211,7 @@ class SettingsPage {
 			true
 		);
 		wp_enqueue_style( 'wp-components' );
+		ImageField::enqueue();
 	}
 
 	/**

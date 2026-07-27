@@ -47,6 +47,16 @@ class Metabox {
 	);
 
 	/**
+	 * Admin screens that render image fields.
+	 *
+	 * Term screens carry the same picker as the post metabox, since
+	 * render_term_fields() reuses render_fields().
+	 *
+	 * @var array<int, string>
+	 */
+	private const PICKER_SCREENS = array( 'post.php', 'post-new.php', 'term.php', 'edit-tags.php' );
+
+	/**
 	 * Constructor.
 	 *
 	 * @param IndexableRepository $repository Repository.
@@ -68,6 +78,7 @@ class Metabox {
 		$hook_manager->register_action( 'add_meta_boxes', array( $this, 'register_post_metabox' ) );
 		$hook_manager->register_action( 'save_post', array( $this, 'handle_save_post' ), 20 );
 		$hook_manager->register_action( 'edited_term', array( $this, 'handle_save_term' ), 20, 3 );
+		$hook_manager->register_action( 'admin_enqueue_scripts', array( $this, 'enqueue_media_picker' ) );
 
 		$hook_manager->register_action(
 			'admin_init',
@@ -93,6 +104,20 @@ class Metabox {
 			'normal',
 			'default'
 		);
+	}
+
+	/**
+	 * Enqueue the image picker on screens that render image fields.
+	 *
+	 * @param string $hook_suffix Current admin page's hook suffix.
+	 * @return void
+	 */
+	public function enqueue_media_picker( string $hook_suffix ): void {
+		if ( ! in_array( $hook_suffix, self::PICKER_SCREENS, true ) ) {
+			return;
+		}
+
+		ImageField::enqueue();
 	}
 
 	/**

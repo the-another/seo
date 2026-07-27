@@ -192,6 +192,100 @@ class MetaboxTest extends TestCase {
 	}
 
 	/**
+	 * The path ImageField::enqueue() reads its dependencies and version from.
+	 *
+	 * @return string Absolute path.
+	 */
+	private function media_picker_asset_file(): string {
+		return THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
+	}
+
+	/**
+	 * Put a known built asset file where ImageField::enqueue() expects one.
+	 *
+	 * dist/ is build output and is not in the source tree, so neither its
+	 * presence nor its absence can be assumed: this test owns the file for
+	 * its duration and puts everything back exactly as it found it.
+	 *
+	 * @return callable Restores the previous state.
+	 */
+	private function with_built_media_picker_asset_file(): callable {
+		$file     = $this->media_picker_asset_file();
+		$existing = file_exists( $file ) ? (string) file_get_contents( $file ) : null;
+		$made_dir = ! is_dir( dirname( $file ) );
+
+		if ( $made_dir ) {
+			mkdir( dirname( $file ), 0777, true );
+		}
+
+		file_put_contents(
+			$file,
+			"<?php return array('dependencies' => array(), 'version' => 'testassetversion');"
+		);
+
+		return function () use ( $file, $existing, $made_dir ): void {
+			if ( null === $existing ) {
+				unlink( $file );
+
+				if ( $made_dir ) {
+					rmdir( dirname( $file ) );
+				}
+
+				return;
+			}
+
+			file_put_contents( $file, $existing );
+		};
+	}
+
+	/**
+	 * The screen list is private (Metabox::FIELDS sets the precedent: a list
+	 * a test could read directly is a weaker check than exercising what it
+	 * governs), so this drives enqueue_media_picker() itself for every screen
+	 * that must carry the picker and one that must not — catching a wrong
+	 * screen list and a broken guard alike.
+	 */
+	public function test_the_picker_enqueues_on_post_and_term_screens(): void {
+		Functions\when( 'wp_enqueue_script' )->justReturn( null );
+
+		foreach ( array( 'post.php', 'post-new.php', 'term.php', 'edit-tags.php' ) as $hook ) {
+			$called  = false;
+			$restore = $this->with_built_media_picker_asset_file();
+
+			Functions\when( 'wp_enqueue_media' )->alias(
+				static function () use ( &$called ): void {
+					$called = true;
+				}
+			);
+
+			$this->metabox->enqueue_media_picker( $hook );
+
+			$restore();
+
+			$this->assertTrue( $called, "expected the picker to enqueue on {$hook}" );
+		}
+	}
+
+	public function test_the_picker_does_not_enqueue_on_unrelated_screens(): void {
+		Functions\when( 'wp_enqueue_script' )->justReturn( null );
+
+		$called  = false;
+		$restore = $this->with_built_media_picker_asset_file();
+
+		Functions\when( 'wp_enqueue_media' )->alias(
+			static function () use ( &$called ): void {
+				$called = true;
+			}
+		);
+
+		$this->metabox->enqueue_media_picker( 'options-general.php' );
+
+		$restore();
+
+		$this->assertFalse( $called );
+	}
+
+	/**
 	 * Render Metabox's private render_fields() via reflection and return its
 	 * markup.
 	 *

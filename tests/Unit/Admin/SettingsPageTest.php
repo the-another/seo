@@ -895,16 +895,25 @@ class SettingsPageTest extends TestCase {
 	}
 
 	/**
-	 * Put a known asset file where the enqueue expects a built one.
+	 * The path ImageField::enqueue() reads its dependencies and version
+	 * from — enqueue_assets() calls it at the end of its own guard.
 	 *
-	 * dist/ is build output and is not in the source tree, so neither its
-	 * presence nor its absence can be assumed: these tests own the file for
-	 * their duration and put the directory back exactly as they found it.
+	 * @return string Absolute path.
+	 */
+	private function media_picker_asset_file(): string {
+		return THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
+	}
+
+	/**
+	 * Put a known built asset file at $file, returning a callable that
+	 * restores whatever was there before (including its absence, and the
+	 * directory this created for it).
 	 *
+	 * @param string $file         Absolute path to write.
+	 * @param array  $dependencies Dependency handles for the asset file.
 	 * @return callable Restores the previous state.
 	 */
-	private function with_built_asset_file(): callable {
-		$file     = $this->settings_asset_file();
+	private function write_built_asset_file( string $file, array $dependencies ): callable {
 		$existing = file_exists( $file ) ? (string) file_get_contents( $file ) : null;
 		$made_dir = ! is_dir( dirname( $file ) );
 
@@ -914,7 +923,7 @@ class SettingsPageTest extends TestCase {
 
 		file_put_contents(
 			$file,
-			"<?php return array('dependencies' => array('wp-element', 'wp-rich-text'), 'version' => 'testassetversion');"
+			'<?php return array(\'dependencies\' => ' . var_export( $dependencies, true ) . ", 'version' => 'testassetversion');"
 		);
 
 		return function () use ( $file, $existing, $made_dir ): void {
@@ -930,6 +939,43 @@ class SettingsPageTest extends TestCase {
 
 			file_put_contents( $file, $existing );
 		};
+	}
+
+	/**
+	 * Put known asset files where both enqueue_assets() and the
+	 * ImageField::enqueue() it delegates to expect built ones.
+	 *
+	 * dist/ is build output and is not in the source tree, so neither its
+	 * presence nor its absence can be assumed: these tests own the files for
+	 * their duration and put everything back exactly as they found it.
+	 *
+	 * @return callable Restores the previous state.
+	 */
+	private function with_built_asset_file(): callable {
+		$restore_settings     = $this->write_built_asset_file( $this->settings_asset_file(), array( 'wp-element', 'wp-rich-text' ) );
+		$restore_media_picker = $this->write_built_asset_file( $this->media_picker_asset_file(), array() );
+
+		return function () use ( $restore_settings, $restore_media_picker ): void {
+			$restore_media_picker();
+			$restore_settings();
+		};
+	}
+
+	/**
+	 * Register the settings page and enqueue on its own screen — the shared
+	 * setup every enqueue-side-effect test needs, short of the asserting
+	 * itself.
+	 *
+	 * @return void
+	 */
+	private function enqueue_on_our_page(): void {
+		Functions\when( '__' )->returnArg();
+		Functions\when( 'add_options_page' )->justReturn( 'settings_page_taseo' );
+		Functions\when( 'wp_enqueue_script' )->justReturn( null );
+		Functions\when( 'wp_enqueue_style' )->justReturn( null );
+
+		$this->page->register_menu();
+		$this->page->enqueue_assets( 'settings_page_taseo' );
 	}
 
 	public function test_assets_enqueue_only_on_this_settings_page(): void {
@@ -953,6 +999,9 @@ class SettingsPageTest extends TestCase {
 				$styles[] = $handle;
 			}
 		);
+		// enqueue_assets() delegates to ImageField::enqueue() at the end of
+		// its guard, which calls this — not under test here.
+		Functions\when( 'wp_enqueue_media' )->justReturn( null );
 
 		try {
 			$this->page->register_menu();
@@ -1008,6 +1057,27 @@ class SettingsPageTest extends TestCase {
 				file_put_contents( $file, $backup );
 			}
 		}
+	}
+
+	/**
+	 * wp.media is undefined without wp_enqueue_media(), so the picker would
+	 * silently do nothing.
+	 */
+	public function test_the_settings_page_enqueues_the_media_library(): void {
+		$called  = false;
+		$restore = $this->with_built_asset_file();
+
+		Functions\when( 'wp_enqueue_media' )->alias(
+			static function () use ( &$called ): void {
+				$called = true;
+			}
+		);
+
+		$this->enqueue_on_our_page();
+
+		$restore();
+
+		$this->assertTrue( $called );
 	}
 
 	public function test_a_template_using_available_variables_saves(): void {

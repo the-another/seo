@@ -74,4 +74,33 @@ final class ImageField {
 
 		echo '</div>';
 	}
+
+	/**
+	 * Enqueue the picker bundle and core's media library.
+	 *
+	 * Core's wp_enqueue_media() is what defines wp.media; without it the
+	 * picker loads and silently does nothing. The file_exists() guard matches
+	 * the settings bundle's: a source checkout that has not been built must
+	 * not fatal inside wp-admin.
+	 *
+	 * @return void
+	 */
+	public static function enqueue(): void {
+		$asset_file = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/media-picker/index.asset.php';
+
+		if ( ! file_exists( $asset_file ) ) {
+			return;
+		}
+
+		$asset = require $asset_file;
+
+		wp_enqueue_media();
+		wp_enqueue_script(
+			'taseo-media-picker',
+			THE_ANOTHER_SEO_PLUGIN_URL . 'dist/media-picker/index.js',
+			$asset['dependencies'],
+			$asset['version'],
+			true
+		);
+	}
 }
