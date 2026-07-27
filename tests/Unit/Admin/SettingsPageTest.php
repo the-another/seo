@@ -8,6 +8,7 @@ use Brain\Monkey\Functions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
@@ -38,6 +39,11 @@ class SettingsPageTest extends TestCase {
 
 		Functions\when( 'sanitize_key' )->alias( fn( $v ) => strtolower( (string) $v ) );
 		Functions\when( 'sanitize_text_field' )->returnArg();
+		// SettingsPage::sanitize_template() calls these instead of
+		// sanitize_text_field() (see its docblock); tests exercising actual
+		// tag-stripping/UTF-8 behaviour override these with faithful aliases.
+		Functions\when( 'wp_check_invalid_utf8' )->returnArg();
+		Functions\when( 'wp_strip_all_tags' )->returnArg();
 		Functions\when( 'esc_url_raw' )->returnArg();
 		Functions\when( 'absint' )->alias( fn( $v ) => abs( (int) $v ) );
 		Functions\when( 'add_query_arg' )->alias(
@@ -993,6 +999,123 @@ class SettingsPageTest extends TestCase {
 		);
 
 		$this->assertSame( 'Just a static title', $clean['title_templates']['post:page'] );
+	}
+
+	/**
+	 * Regression test for the hex-prefixed-slug corruption bug.
+	 *
+	 * WordPress's sanitize_text_field() ends (via _sanitize_text_fields() in
+	 * wp-includes/formatting.php) with an unconditional loop that strips any
+	 * substring matching /%[a-f0-9]{2}/i, treating it as a stray
+	 * percent-encoded byte. `%%date%%` contains such a substring at offset 1
+	 * ("%da"), so sanitize_text_field( '%%date%%' ) silently returns
+	 * '%te%%'. The row then saves corrupted, and because the mangled text no
+	 * longer contains a %%token%%, extract_variables() finds nothing to
+	 * reject, so validation never notices either.
+	 *
+	 * This test stubs sanitize_text_field() with a faithful port of that
+	 * real WordPress behaviour instead of this file's usual no-op
+	 * returnArg() stub, so it exercises the actual defect rather than
+	 * masking it. It also stubs wp_check_invalid_utf8() and
+	 * wp_strip_all_tags(), which the fix uses in place of
+	 * sanitize_text_field().
+	 *
+	 * Runs in its own process: stubbing wc_get_product() (needed so
+	 * %%price%%/%%sku%% are valid for the post:product row under test)
+	 * permanently flips function_exists( 'wc_get_product' ) to true for the
+	 * rest of the process — same hazard documented in
+	 * TemplateVariablesTest::test_products_add_price_and_sku_with_woocommerce().
+	 */
+	#[RunInSeparateProcess]
+	public function test_every_registry_variable_survives_a_save_round_trip_byte_identically(): void {
+		Functions\when( 'wc_get_product' )->justReturn( null );
+
+		// Faithful port of wp-includes/formatting.php's _sanitize_text_fields(),
+		// specifically its unconditional percent-octet strip — the real source
+		// of the corruption, not the no-op returnArg() the rest of this file uses.
+		Functions\when( 'sanitize_text_field' )->alias(
+			static function ( $str ): string {
+				$filtered = trim( (string) preg_replace( '/[\r\n\t ]+/', ' ', (string) $str ) );
+				$found    = false;
+
+				while ( preg_match( '/%[a-f0-9]{2}/i', $filtered, $match ) ) {
+					$filtered = str_replace( $match[0], '', $filtered );
+					$found    = true;
+				}
+
+				if ( $found ) {
+					$filtered = trim( (string) preg_replace( '/ +/', ' ', $filtered ) );
+				}
+
+				return $filtered;
+			}
+		);
+
+		// Stand-ins for the functions the fix uses instead of sanitize_text_field().
+		Functions\when( 'wp_check_invalid_utf8' )->returnArg();
+		Functions\when( 'wp_strip_all_tags' )->alias(
+			static function ( $text, $remove_breaks = false ): string {
+				$text = preg_replace( '@<(script|style)[^>]*?>.*?</\\1>@si', '', (string) $text );
+				$text = strip_tags( $text );
+
+				if ( $remove_breaks ) {
+					$text = preg_replace( '/[\r\n\t ]+/', ' ', $text );
+				}
+
+				return trim( (string) $text );
+			}
+		);
+
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
+		// All ten TemplateVariables::get_for( 'post', 'product' ) slugs. date
+		// is the only one whose first two characters are both in [a-f0-9],
+		// which is what makes sanitize_text_field()'s percent-octet loop
+		// treat "%da" as a stray encoded byte and eat it; the other nine are
+		// here as a regression net for any future hex-prefixed slug.
+		$template = '%%date%% %%sep%% %%sitename%% %%title%% %%tagline%% %%page%% '
+			. '%%excerpt%% %%primary_category%% %%price%% %%sku%%';
+
+		$clean = $this->page->sanitize_settings(
+			array( 'title_templates' => array( 'post:product' => $template ) ),
+			'templates'
+		);
+
+		$this->assertSame( $template, $clean['title_templates']['post:product'] );
+	}
+
+	/**
+	 * Guards against the fix regressing into a no-op sanitizer: templates
+	 * render straight into a <title> element and a meta tag, so tags must
+	 * still be stripped and newlines/whitespace still collapsed.
+	 */
+	public function test_template_sanitizer_still_strips_tags_and_collapses_whitespace(): void {
+		Functions\when( 'wp_check_invalid_utf8' )->returnArg();
+		Functions\when( 'wp_strip_all_tags' )->alias(
+			static function ( $text, $remove_breaks = false ): string {
+				$text = preg_replace( '@<(script|style)[^>]*?>.*?</\\1>@si', '', (string) $text );
+				$text = strip_tags( $text );
+
+				if ( $remove_breaks ) {
+					$text = preg_replace( '/[\r\n\t ]+/', ' ', $text );
+				}
+
+				return trim( (string) $text );
+			}
+		);
+
+		$this->settings->shouldReceive( 'get' )->with( 'title_templates', array() )->andReturn( array() );
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'title_templates' => array(
+					'post:page' => "  <script>alert(1)</script><b>Hello</b>\n\n  World  \t",
+				),
+			),
+			'templates'
+		);
+
+		$this->assertSame( 'Hello World', $clean['title_templates']['post:page'] );
 	}
 
 	/**

@@ -971,6 +971,39 @@ class SettingsPage {
 	}
 
 	/**
+	 * Sanitize a title/description template value.
+	 *
+	 * Neither sanitize_text_field() nor sanitize_textarea_field() (they
+	 * share the same code path) may be used here. WordPress's underlying
+	 * _sanitize_text_fields() ends with an unconditional loop that treats
+	 * any substring matching /%[a-f0-9]{2}/i as a stray percent-encoded
+	 * byte and deletes it. `%%date%%` contains such a substring at offset 1
+	 * ("%da"), so sanitize_text_field( '%%date%%' ) silently returns
+	 * '%te%%' — the row is stored corrupted, and because the mangled text
+	 * no longer contains a %%token%%, TemplateResolver::extract_variables()
+	 * finds nothing to reject, so validation never notices either. `date`
+	 * is the only current registry slug whose first two characters are
+	 * both hex digits, but any future slug with that shape would break the
+	 * same way. See the round-trip test in SettingsPageTest that fails if
+	 * this helper is replaced with sanitize_text_field() again.
+	 *
+	 * This does everything sanitize_text_field() does except the
+	 * percent-octet strip: invalid-UTF8 check, tag stripping, whitespace/
+	 * newline collapse to a single space, trim. Tags must still be
+	 * stripped and newlines collapsed — this value is rendered into a
+	 * <title> element and a meta tag.
+	 *
+	 * @param string $template Raw posted template.
+	 * @return string Sanitized template.
+	 */
+	private function sanitize_template( string $template ): string {
+		$template = wp_check_invalid_utf8( $template );
+		$template = wp_strip_all_tags( $template );
+
+		return trim( (string) preg_replace( '/[\r\n\t ]+/', ' ', $template ) );
+	}
+
+	/**
 	 * Sanitize a raw settings submission.
 	 *
 	 * Boolean and checkbox-list keys owned by the submitted tab are force-set
@@ -1005,7 +1038,7 @@ class SettingsPage {
 
 			foreach ( $raw[ $tpl_key ] as $row_key => $template ) {
 				$row_key  = (string) $row_key;
-				$template = sanitize_text_field( (string) $template );
+				$template = $this->sanitize_template( (string) $template );
 				$parts    = explode( ':', $row_key, 2 );
 				$type     = $parts[0] ?? '';
 				$subtype  = $parts[1] ?? '';
