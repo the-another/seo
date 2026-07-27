@@ -582,3 +582,102 @@ test.describe( 'webmaster admin settings', () => {
 		).toHaveValue( '%%primary_category%% tail' );
 	} );
 } );
+
+/**
+ * The Social tab's default social image: a wp.media picker plus a URL
+ * override, replacing the old attachment-ID number box. Covers the picker
+ * markup itself, the URL override's round trip, and — the most important of
+ * the three — the no-JS degradation path: with the picker bundle blocked,
+ * the hidden input carrying the stored attachment ID must still submit
+ * whatever it held, so an unrelated save on this tab can never silently
+ * clear an administrator's image.
+ */
+test.describe( 'social tab image field', () => {
+	const SOCIAL_TAB_URL =
+		'/wp-admin/options-general.php?page=taseo&tab=social';
+
+	test( 'the default social image is a picker, not a number box', async ( {
+		page,
+	} ) => {
+		await page.goto( SOCIAL_TAB_URL );
+
+		const field = page.locator(
+			'[data-taseo-image-field]:has(input[name="taseo_settings[default_social_image_id]"])'
+		);
+
+		await expect( field ).toBeVisible();
+		await expect(
+			field.locator( '[data-taseo-image-select]' )
+		).toBeVisible();
+		await expect(
+			page.locator(
+				'input[type="number"][name="taseo_settings[default_social_image_id]"]'
+			)
+		).toHaveCount( 0 );
+	} );
+
+	test( 'a URL override saves and survives a reload', async ( { page } ) => {
+		await page.goto( SOCIAL_TAB_URL );
+
+		await page
+			.locator( 'input[name="taseo_settings[default_social_image_url]"]' )
+			.fill( 'https://cdn.example.com/social.jpg' );
+		// force: true — every #submit click in this file uses it; see the
+		// wedge documented on saveWebmasterSettings() above.
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await page.goto( SOCIAL_TAB_URL );
+		await expect(
+			page.locator( 'input[name="taseo_settings[default_social_image_url]"]' )
+		).toHaveValue( 'https://cdn.example.com/social.jpg' );
+	} );
+
+	/**
+	 * The degradation assertion. With the picker blocked the hidden input
+	 * must still submit whatever was stored — losing it would silently
+	 * clear an administrator's image on an unrelated save.
+	 *
+	 * The environment never seeds default_social_image_id, so it starts at
+	 * 0. Reading "before" straight off that would make this test vacuous
+	 * against exactly the regression it exists to catch: a bug that
+	 * silently zeroes the field would produce before === after === '0'
+	 * either way, so the assertion at the end would hold whether or not the
+	 * save path actually preserved anything (the same trap noted throughout
+	 * this plan's progress ledger — see
+	 * .superpowers/sdd/2026-07-27-image-fields-media-picker/progress.md).
+	 * So this first stores a real, non-zero ID — attachment 42 need not
+	 * exist; ImageField::render() only fetches a preview when the ID is
+	 * > 0, and a missing attachment just skips that — with the picker
+	 * script blocked for the whole test, proving the round trip needs no
+	 * JS at any point, not just for the second save.
+	 */
+	test( 'with the picker script blocked the stored image id still saves', async ( {
+		page,
+	} ) => {
+		await page.route( '**/dist/media-picker/**', ( route ) =>
+			route.abort()
+		);
+
+		await page.goto( SOCIAL_TAB_URL );
+
+		const idInput = page.locator(
+			'input[name="taseo_settings[default_social_image_id]"]'
+		);
+		await idInput.evaluate( ( el: HTMLInputElement ) => {
+			el.value = '42';
+		} );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await page.goto( SOCIAL_TAB_URL );
+		const before = await idInput.inputValue();
+		expect( before ).toBe( '42' );
+
+		await page
+			.locator( 'input[name="taseo_settings[facebook_app_id]"]' )
+			.fill( '1234567890' );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await page.goto( SOCIAL_TAB_URL );
+		await expect( idInput ).toHaveValue( before );
+	} );
+} );
