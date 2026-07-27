@@ -148,9 +148,20 @@ class Settings {
 		$templates = $this->get( 'description_templates', array() );
 		$key       = $object_type . ':' . $object_subtype;
 
-		return is_array( $templates ) && ! empty( $templates[ $key ] )
-			? (string) $templates[ $key ]
-			: '%%excerpt%%';
+		if ( is_array( $templates ) && ! empty( $templates[ $key ] ) ) {
+			return (string) $templates[ $key ];
+		}
+
+		// %%excerpt%% is only ever guaranteed resolvable for post and term
+		// rows (TemplateVariables::get_for() adds it there and nowhere
+		// else). A custom_page has no built-in source of an excerpt-like
+		// field — the registering plugin decides what, if anything, its
+		// page's description is — so handing back that token as a default
+		// would be a guess the type can't back up, and the validator would
+		// reject it on every save until the plugin author overrides it. An
+		// empty template means "no meta description", which MetaOutput
+		// already handles.
+		return 'custom_page' === $object_type ? '' : '%%excerpt%%';
 	}
 
 	/**

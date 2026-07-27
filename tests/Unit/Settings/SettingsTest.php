@@ -72,6 +72,42 @@ class SettingsTest extends TestCase {
 		);
 	}
 
+	public function test_description_template_falls_back_to_excerpt_for_post(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame(
+			'%%excerpt%%',
+			( new Settings() )->get_description_template( 'post', 'product' )
+		);
+	}
+
+	public function test_description_template_falls_back_to_empty_string_for_custom_page(): void {
+		// %%excerpt%% is only ever guaranteed resolvable for post and term
+		// rows (TemplateVariables::get_for()); a custom_page has no built-in
+		// source of one, so handing back that token as a default would be a
+		// guess the type can't back up — and the settings-page validator
+		// would reject it on every save until the registering plugin's
+		// author overrides it. An empty template ("no meta description") is
+		// the only default this type can honestly offer.
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame(
+			'',
+			( new Settings() )->get_description_template( 'custom_page', 'checkout' )
+		);
+	}
+
+	public function test_description_template_reads_stored_per_subtype_value(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array( 'description_templates' => array( 'custom_page:checkout' => '%%title%% details' ) )
+		);
+
+		$this->assertSame(
+			'%%title%% details',
+			( new Settings() )->get_description_template( 'custom_page', 'checkout' )
+		);
+	}
+
 	public function test_schema_type_defaults(): void {
 		Functions\when( 'get_option' )->justReturn( array() );
 		$settings = new Settings();

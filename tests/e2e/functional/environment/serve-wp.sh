@@ -86,23 +86,6 @@ wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_
 wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
 
-# The custom page fixture's OWN unedited default matters here, not just its
-# seeded verification values above. Settings::get_description_template()'s
-# hardcoded fallback for a never-configured row is the literal string
-# '%%excerpt%%' — valid for 'post' and 'term' rows (TemplateVariables adds
-# excerpt/term-description there) but NOT for 'custom_page' rows, which get
-# only the base variable set. Left unseeded, that invalid default is what
-# renders into the description field's value="" attribute, and — because the
-# Templates tab is one form — riding along on ANY save on that tab, forever,
-# until an admin happens to overwrite it. That is a real defect in the
-# custom-pages feature (see task-5-report.md), independent of this suite.
-# The value must be non-empty: get_description_template()'s own guard is
-# `! empty( $templates[ $key ] )`, so a seeded '' is indistinguishable from
-# unset and still falls through to the invalid default. '%%title%%' is a
-# base variable, valid for every object type, so it seeds a real value
-# without tripping the same bug it works around.
-wp option patch insert taseo_settings description_templates --format=json '{"custom_page:e2e_checkout":"%%title%%"}' --path="$WP_DIR" --allow-root
-
 # Drain the Action Scheduler queue: the initial indexable backfill runs as a
 # chain of async taseo_backfill_batch actions (each batch re-enqueues the
 # next). Draining it here makes indexable rows and static sitemap chunk
