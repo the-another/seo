@@ -150,4 +150,57 @@ class MetaboxTest extends TestCase {
 		$this->assertSame( 'https://cdn.example.com/tw.jpg', $clean['twitter_image_url'] );
 		$this->assertContains( 'https://cdn.example.com/og.jpg', $seen );
 	}
+
+	/**
+	 * Both image slots previously fell through to the plain-text branch and
+	 * rendered as bare boxes labelled "Og Image Id".
+	 */
+	public function test_metabox_renders_image_slots_as_pickers(): void {
+		$html = $this->render_metabox_fields( array( 'og_image_id' => '42' ) );
+
+		$this->assertStringContainsString( 'data-taseo-image-field', $html );
+		$this->assertStringContainsString( 'name="taseo_meta[og_image_url]"', $html );
+	}
+
+	/**
+	 * The URL override must appear exactly once — ImageField renders it, so
+	 * the field loop must not render it a second time.
+	 */
+	public function test_the_url_override_is_not_rendered_twice(): void {
+		$html = $this->render_metabox_fields( array() );
+
+		$this->assertSame( 1, substr_count( $html, 'name="taseo_meta[og_image_url]"' ) );
+	}
+
+	/**
+	 * Render Metabox's private render_fields() via reflection and return its
+	 * markup.
+	 *
+	 * esc_html() is deliberately not stubbed here: it is a real function
+	 * defined directly in tests/Unit/bootstrap.php rather than through a
+	 * Patchwork-wrapped include, so Brain\Monkey cannot redefine it (see the
+	 * same note on SettingsPageTest::stub_render_functions()). Its real
+	 * htmlspecialchars() implementation is a no-op on the plain field labels
+	 * these tests render, so none is needed.
+	 *
+	 * @param array<string, mixed> $row Indexable row.
+	 * @return string Rendered markup.
+	 */
+	private function render_metabox_fields( array $row ): string {
+		Functions\when( 'wp_nonce_field' )->justReturn( '' );
+		Functions\when( 'esc_attr' )->returnArg();
+		Functions\when( 'esc_textarea' )->returnArg();
+		Functions\when( 'esc_html__' )->returnArg();
+		Functions\when( 'esc_url' )->returnArg();
+		Functions\when( 'checked' )->justReturn( '' );
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/thumb.jpg' );
+
+		$method = new \ReflectionMethod( Metabox::class, 'render_fields' );
+		$method->setAccessible( true );
+
+		ob_start();
+		$method->invoke( $this->metabox, $row );
+
+		return (string) ob_get_clean();
+	}
 }

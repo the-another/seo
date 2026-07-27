@@ -135,9 +135,26 @@ class Metabox {
 			$label = ucwords( str_replace( '_', ' ', $field ) );
 			$name  = 'taseo_meta[' . $field . ']';
 
+			// The URL override is rendered by ImageField alongside its
+			// attachment ID, so it must not also render on its own here.
+			if ( 'og_image_url' === $field || 'twitter_image_url' === $field ) {
+				continue;
+			}
+
 			echo '<p>';
 
-			if ( 'checkbox' === $type ) {
+			if ( 'image_id' === $type ) {
+				$url_field = str_replace( '_id', '_url', $field );
+
+				echo '<label>' . esc_html( $label ) . '</label><br />';
+				ImageField::render(
+					$name,
+					(int) $value,
+					'taseo_meta[' . $url_field . ']',
+					isset( $row[ $url_field ] ) ? (string) $row[ $url_field ] : '',
+					'taseo-meta-' . str_replace( '_', '-', $field )
+				);
+			} elseif ( 'checkbox' === $type ) {
 				echo '<label><input type="checkbox" name="' . esc_attr( $name ) . '" value="1" ' . checked( '1', $value, false ) . ' /> ' . esc_html( $label ) . '</label>';
 			} elseif ( 'textarea' === $type ) {
 				echo '<label>' . esc_html( $label ) . '<br /><textarea name="' . esc_attr( $name ) . '" rows="2" class="large-text">' . esc_textarea( $value ) . '</textarea></label>';

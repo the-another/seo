@@ -662,12 +662,15 @@ class SettingsPage {
 			checked( $this->settings->is_twitter_enabled(), true, false ),
 			esc_html__( 'Output Twitter Card tags (X)', 'the-another-seo' )
 		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="number" name="taseo_settings[default_social_image_id]" value="%d" class="small-text" /> %s</td></tr>',
-			esc_html__( 'Default social image', 'the-another-seo' ),
+		echo '<tr><th scope="row">' . esc_html__( 'Default social image', 'the-another-seo' ) . '</th><td>';
+		ImageField::render(
+			'taseo_settings[default_social_image_id]',
 			(int) $this->settings->get_default_social_image_id(),
-			esc_html__( '(attachment ID)', 'the-another-seo' )
+			'taseo_settings[default_social_image_url]',
+			$this->settings->get_default_social_image_url(),
+			'taseo-default-social-image'
 		);
+		echo '</td></tr>';
 		printf(
 			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[facebook_app_id]" value="%s" /></td></tr>',
 			esc_html__( 'Facebook App ID', 'the-another-seo' ),
@@ -704,12 +707,15 @@ class SettingsPage {
 			esc_html__( 'Name', 'the-another-seo' ),
 			esc_attr( $this->settings->get_site_represents_name() )
 		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="number" name="taseo_settings[site_logo_id]" value="%d" class="small-text" /> %s</td></tr>',
-			esc_html__( 'Logo', 'the-another-seo' ),
+		echo '<tr><th scope="row">' . esc_html__( 'Logo', 'the-another-seo' ) . '</th><td>';
+		ImageField::render(
+			'taseo_settings[site_logo_id]',
 			(int) $this->settings->get_site_logo_id(),
-			esc_html__( '(attachment ID)', 'the-another-seo' )
+			'taseo_settings[site_logo_url]',
+			$this->settings->get_site_logo_url(),
+			'taseo-site-logo'
 		);
+		echo '</td></tr>';
 		printf(
 			'<tr><th scope="row">%s</th><td><textarea name="taseo_settings[same_as_urls]" rows="4" class="large-text" placeholder="https://…">%s</textarea><br />%s</td></tr>',
 			esc_html__( 'Social profile URLs (sameAs)', 'the-another-seo' ),

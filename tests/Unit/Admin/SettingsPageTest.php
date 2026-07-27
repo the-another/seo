@@ -1365,4 +1365,26 @@ class SettingsPageTest extends TestCase {
 			'each pill must carry its label alongside its token'
 		);
 	}
+
+	public function test_social_tab_renders_an_image_picker_not_a_number_box(): void {
+		$_GET['tab'] = 'social';
+
+		Functions\when( 'checked' )->justReturn( '' );
+
+		$this->settings->shouldReceive( 'is_open_graph_enabled' )->andReturn( false );
+		$this->settings->shouldReceive( 'is_twitter_enabled' )->andReturn( false );
+		$this->settings->shouldReceive( 'get_default_social_image_id' )->andReturn( 0 );
+		$this->settings->shouldReceive( 'get_default_social_image_url' )->andReturn( '' );
+		$this->settings->shouldReceive( 'get_facebook_app_id' )->andReturn( '' );
+		$this->settings->shouldReceive( 'get_twitter_site' )->andReturn( '' );
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'data-taseo-image-field', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[default_social_image_url]"', $html );
+		$this->assertStringNotContainsString(
+			'<input type="number" name="taseo_settings[default_social_image_id]"',
+			$html
+		);
+	}
 }
