@@ -27,7 +27,7 @@ class Metabox {
 	 *
 	 * @var array<string, string>
 	 */
-	private const FIELDS = array(
+	public const FIELDS = array(
 		'title'               => 'text',
 		'description'         => 'textarea',
 		'canonical_url'       => 'url',
@@ -37,9 +37,11 @@ class Metabox {
 		'og_title'            => 'text',
 		'og_description'      => 'textarea',
 		'og_image_id'         => 'image_id',
+		'og_image_url'        => 'url',
 		'twitter_title'       => 'text',
 		'twitter_description' => 'textarea',
 		'twitter_image_id'    => 'image_id',
+		'twitter_image_url'   => 'url',
 		'breadcrumb_title'    => 'text',
 		'schema_disabled'     => 'checkbox',
 	);

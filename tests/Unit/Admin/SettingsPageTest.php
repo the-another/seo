@@ -107,6 +107,36 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( 'WebPage', $clean['schema_types']['page'] ); // invalid value coerced to default.
 	}
 
+	public function test_sanitize_stores_the_image_url_overrides(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'default_social_image_url' => 'https://cdn.example.com/social.jpg',
+				'site_logo_url'             => 'https://cdn.example.com/logo.png',
+			),
+			'social'
+		);
+
+		$this->assertSame( 'https://cdn.example.com/social.jpg', $clean['default_social_image_url'] );
+		$this->assertSame( 'https://cdn.example.com/logo.png', $clean['site_logo_url'] );
+	}
+
+	/**
+	 * The URL override is a sibling of the ID, not a replacement: saving one
+	 * must not disturb the other.
+	 */
+	public function test_sanitize_keeps_the_attachment_ids_alongside_the_urls(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'default_social_image_id'  => '42',
+				'default_social_image_url' => 'https://cdn.example.com/social.jpg',
+			),
+			'social'
+		);
+
+		$this->assertSame( 42, $clean['default_social_image_id'] );
+		$this->assertSame( 'https://cdn.example.com/social.jpg', $clean['default_social_image_url'] );
+	}
+
 	public function test_handle_rescan_dispatches_full_chain(): void {
 		$_POST['taseo_settings_nonce'] = 'nonce';
 

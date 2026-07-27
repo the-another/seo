@@ -215,4 +215,27 @@ class SettingsTest extends TestCase {
 
 		$this->assertSame( '0987654321098', ( new Settings() )->get_meta_pixel_id() );
 	}
+
+	public function test_image_url_overrides_default_to_empty_string(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$settings = new Settings();
+
+		$this->assertSame( '', $settings->get_default_social_image_url() );
+		$this->assertSame( '', $settings->get_site_logo_url() );
+	}
+
+	public function test_image_url_overrides_are_read_from_the_option(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'default_social_image_url' => 'https://cdn.example.com/social.jpg',
+				'site_logo_url'            => 'https://cdn.example.com/logo.png',
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'https://cdn.example.com/social.jpg', $settings->get_default_social_image_url() );
+		$this->assertSame( 'https://cdn.example.com/logo.png', $settings->get_site_logo_url() );
+	}
 }

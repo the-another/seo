@@ -1130,6 +1130,12 @@ class SettingsPage {
 			}
 		}
 
+		foreach ( array( 'default_social_image_url', 'site_logo_url' ) as $url_key ) {
+			if ( isset( $raw[ $url_key ] ) ) {
+				$clean[ $url_key ] = esc_url_raw( (string) $raw[ $url_key ] );
+			}
+		}
+
 		if ( isset( $raw['site_represents'] ) ) {
 			$clean['site_represents'] = 'person' === $raw['site_represents'] ? 'person' : 'organization';
 		}

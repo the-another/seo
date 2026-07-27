@@ -190,6 +190,15 @@ class Settings {
 	}
 
 	/**
+	 * Sitewide fallback social image URL, overriding the attachment.
+	 *
+	 * @return string URL, or '' when unset.
+	 */
+	public function get_default_social_image_url(): string {
+		return (string) $this->get( 'default_social_image_url', '' );
+	}
+
+	/**
 	 * Facebook App ID.
 	 *
 	 * @return string App ID or ''.
@@ -250,6 +259,15 @@ class Settings {
 	 */
 	public function get_site_logo_id(): int {
 		return (int) $this->get( 'site_logo_id', 0 );
+	}
+
+	/**
+	 * Logo URL for the Organization node, overriding the attachment.
+	 *
+	 * @return string URL, or '' when unset.
+	 */
+	public function get_site_logo_url(): string {
+		return (string) $this->get( 'site_logo_url', '' );
 	}
 
 	/**
