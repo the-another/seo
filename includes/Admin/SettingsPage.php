@@ -445,6 +445,14 @@ class SettingsPage {
 			esc_html__( 'The title template becomes the page\'s title element; the meta description template becomes its meta description. Leave a field empty to use the default: "%%title%% %%sep%% %%sitename%%" for titles and "%%excerpt%%" for descriptions.', 'the-another-seo' )
 		);
 
+		// Stated once here rather than under every row: eight copies of the
+		// same sentence is noise, and the per-row heading only has to name
+		// the pills and say which fields they serve.
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'Click a variable to insert it into the field you last used.', 'the-another-seo' )
+		);
+
 		echo '<h2>' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
@@ -538,7 +546,7 @@ class SettingsPage {
 				esc_attr( $this->settings->get_title_template( 'system_page', $system ) ),
 				esc_attr( $this->template_input_class( 'title_templates', $row_key ) )
 			);
-			$this->render_variable_pills( 'system_page', $system );
+			$this->render_variable_pills( 'system_page', $system, false );
 			echo '</td></tr>';
 		}
 
@@ -554,20 +562,40 @@ class SettingsPage {
 	 * rendered pills rather than a second, separately-serialised copy of
 	 * the registry, so the two cannot drift.
 	 *
-	 * @param string $object_type    Object type.
-	 * @param string $object_subtype Object subtype.
+	 * The pill shows the variable's human label rather than its %%token%%,
+	 * matching the chip that clicking it inserts. The token stays in
+	 * data-taseo-template-var, which is what the script and the tests read;
+	 * nothing depends on the visible text.
+	 *
+	 * The heading is load-bearing rather than decorative. The pills sit
+	 * below the last input in the row, so without it they read as belonging
+	 * to the meta description alone — which is backwards, since a click
+	 * lands in whichever field was last focused and defaults to the title.
+	 *
+	 * @param string $object_type     Object type.
+	 * @param string $object_subtype  Object subtype.
+	 * @param bool   $has_description Whether the row also has a description field.
 	 * @return void
 	 */
-	private function render_variable_pills( string $object_type, string $object_subtype ): void {
+	private function render_variable_pills( string $object_type, string $object_subtype, bool $has_description = true ): void {
+		printf(
+			'<p class="description"><strong>%1$s</strong> %2$s</p>',
+			esc_html__( 'Available variables', 'the-another-seo' ),
+			$has_description
+				? esc_html__( '— these apply to both fields above.', 'the-another-seo' )
+				: ''
+		);
+
 		echo '<p class="description">';
 
 		foreach ( $this->template_variables->get_for( $object_type, $object_subtype ) as $slug => $label ) {
 			$token = '%%' . $slug . '%%';
 
 			printf(
-				'<button type="button" class="button button-small" data-taseo-template-var="%1$s" data-taseo-template-label="%2$s">%1$s</button> ',
+				'<button type="button" class="button button-small" data-taseo-template-var="%1$s" data-taseo-template-label="%2$s">%3$s</button> ',
 				esc_attr( $token ),
-				esc_attr( $label )
+				esc_attr( $label ),
+				esc_html( $label )
 			);
 		}
 

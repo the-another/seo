@@ -29,15 +29,21 @@ class TemplateVariables {
 	 * A method rather than a constant: the labels are translated, and
 	 * __() cannot be called in a constant expression.
 	 *
+	 * Labels are short names, not descriptions. They are rendered twice:
+	 * as the clickable pills under each row, and as the chip the variable
+	 * becomes inside the template field itself. A chip sits inline in a
+	 * single-line input, so a descriptive phrase there crowds out the
+	 * template it is part of.
+	 *
 	 * @return array<string, string> Slug => label.
 	 */
 	private function base_variables(): array {
 		return array(
-			'title'    => __( 'Title of the post, term, or site', 'the-another-seo' ),
+			'title'    => __( 'Title', 'the-another-seo' ),
 			'sitename' => __( 'Site title', 'the-another-seo' ),
-			'tagline'  => __( 'Site tagline', 'the-another-seo' ),
-			'sep'      => __( 'Title separator', 'the-another-seo' ),
-			'page'     => __( 'Page number on paginated views', 'the-another-seo' ),
+			'tagline'  => __( 'Tagline', 'the-another-seo' ),
+			'sep'      => __( 'Separator', 'the-another-seo' ),
+			'page'     => __( 'Page number', 'the-another-seo' ),
 		);
 	}
 
@@ -64,15 +70,15 @@ class TemplateVariables {
 			// there can never resolve and the pill/autocomplete/validator
 			// must not offer this token for it.
 			if ( is_object_in_taxonomy( $object_subtype, 'product' === $object_subtype ? 'product_cat' : 'category' ) ) {
-				$variables['primary_category'] = __( 'First assigned category', 'the-another-seo' );
+				$variables['primary_category'] = __( 'Primary category', 'the-another-seo' );
 			}
 
 			// Matches CurrentContext::post_vars()'s own WooCommerce probe: a
 			// site without WooCommerce must not be offered variables that
 			// could never resolve.
 			if ( 'product' === $object_subtype && function_exists( 'wc_get_product' ) ) {
-				$variables['price'] = __( 'Product price', 'the-another-seo' );
-				$variables['sku']   = __( 'Product SKU', 'the-another-seo' );
+				$variables['price'] = __( 'Price', 'the-another-seo' );
+				$variables['sku']   = __( 'SKU', 'the-another-seo' );
 			}
 		} elseif ( 'term' === $object_type ) {
 			$variables['excerpt'] = __( 'Term description', 'the-another-seo' );

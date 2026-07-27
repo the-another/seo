@@ -246,7 +246,7 @@ test.describe( 'webmaster admin settings', () => {
 			templateSurface( page, POST_TITLE_INPUT ).locator(
 				'[data-taseo-token="%%title%%"]'
 			)
-		).toHaveText( 'Title of the post, term, or site' );
+		).toHaveText( 'Title' );
 	} );
 
 	test( 'a stored template renders as chips showing human labels', async ( {
@@ -267,8 +267,8 @@ test.describe( 'webmaster admin settings', () => {
 		const chips = surface.locator( '[data-taseo-token]' );
 		await expect( chips ).toHaveCount( 3 );
 		await expect( chips ).toHaveText( [
-			'Title of the post, term, or site',
-			'Title separator',
+			'Title',
+			'Separator',
 			'Site title',
 		] );
 		await expect( surface ).not.toContainText( '%%' );
@@ -429,7 +429,7 @@ test.describe( 'webmaster admin settings', () => {
 			templateSurface( page, POST_TITLE_INPUT ).locator(
 				'[data-taseo-token="%%TITLE%%"]'
 			)
-		).toHaveText( 'Title of the post, term, or site' );
+		).toHaveText( 'Title' );
 
 		await fillTemplate( page, POST_TITLE_INPUT, original );
 		await page.locator( '#submit' ).click( { force: true } );
@@ -569,7 +569,7 @@ test.describe( 'webmaster admin settings', () => {
 		const chip = templateSurface( page, POST_TITLE_INPUT ).locator(
 			'[data-taseo-token="%%primary_category%%"]'
 		);
-		await expect( chip ).toHaveText( 'First assigned category' );
+		await expect( chip ).toHaveText( 'Primary category' );
 		await expect(
 			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
 		).toHaveValue( '%%primary_category%%' );

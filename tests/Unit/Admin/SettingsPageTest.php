@@ -724,10 +724,72 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'class="button button-small"', $html );
 	}
 
+	/**
+	 * The pre-pill implementation printed one static sentence listing every
+	 * token as body text, which could drift from the registry. What must not
+	 * come back is that hardcoded run of tokens — not the words "Available
+	 * variables", which now legitimately head the pills. Asserting the
+	 * distinctive prefix rather than the heading keeps this test about the
+	 * drift hazard it was written for.
+	 */
 	public function test_templates_tab_no_longer_prints_the_hardcoded_variable_line(): void {
 		$_GET['tab'] = 'templates';
 
-		$this->assertStringNotContainsString( 'Available variables:', $this->render_page() );
+		$this->assertStringNotContainsString(
+			'Available variables: %%title%% %%sitename%%',
+			$this->render_page()
+		);
+	}
+
+	public function test_templates_tab_pills_show_the_label_not_the_raw_token(): void {
+		$_GET['tab'] = 'templates';
+
+		$html = $this->render_page();
+
+		// The token stays in the data attribute — that is what the admin
+		// script and the e2e selectors read — while the visible text is the
+		// human label, matching the chip a click on this pill inserts.
+		$this->assertStringContainsString( 'data-taseo-template-var="%%sitename%%"', $html );
+		$this->assertStringContainsString( '>Site title</button>', $html );
+		$this->assertStringNotContainsString( '>%%sitename%%</button>', $html );
+	}
+
+	/**
+	 * The pills render below the last input in the row, so without a heading
+	 * they read as belonging to the meta description alone — which is
+	 * backwards, since a click lands in whichever field was last focused and
+	 * defaults to the title.
+	 */
+	public function test_templates_tab_labels_the_variable_pills(): void {
+		$_GET['tab'] = 'templates';
+		Functions\when( 'get_post_type_object' )->justReturn( null );
+
+		// A post-type row, because only rows with both fields carry the
+		// two-field wording; system pages get the single-field variant.
+		$html = $this->render_page( array( 'post' ) );
+
+		$this->assertStringContainsString( 'Available variables', $html );
+		$this->assertStringContainsString( 'these apply to both fields above', $html );
+
+		// Stated once in the tab intro rather than repeated under every row.
+		$this->assertSame(
+			1,
+			substr_count( $html, 'Click a variable to insert it into the field you last used.' )
+		);
+	}
+
+	/**
+	 * System pages have a title field and no description field, so their pill
+	 * heading must not tell the administrator both fields accept these.
+	 */
+	public function test_system_page_pill_heading_does_not_claim_a_description_field(): void {
+		$_GET['tab'] = 'templates';
+
+		// No post types or taxonomies, so every row rendered is a system page.
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'Available variables', $html );
+		$this->assertStringNotContainsString( 'these apply to both fields above', $html );
 	}
 
 	public function test_templates_tab_explains_what_the_two_fields_do(): void {

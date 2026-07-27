@@ -414,7 +414,7 @@ test.describe( 'admin tour', () => {
 		await tourTextTab( page, {
 			ordinal: 1,
 			slug: 'general',
-			label: 'Title separator',
+			label: 'Separator',
 			selector: 'input[name="taseo_settings[separator]"]',
 			value: '|',
 		} );
@@ -477,8 +477,8 @@ test.describe( 'admin tour', () => {
 				'taseo_settings[title_templates][post:post]'
 			).locator( '[data-taseo-token]' )
 		).toHaveText( [
-			'Title of the post, term, or site',
-			'Title separator',
+			'Title',
+			'Separator',
 		] );
 
 		await tourTextTab( page, {
