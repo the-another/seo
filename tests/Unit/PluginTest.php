@@ -9,6 +9,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Container;
+use TheAnother\Plugin\SEO\Installer;
 use TheAnother\Plugin\SEO\Plugin;
 
 #[CoversClass( Plugin::class )]
@@ -136,5 +137,46 @@ class PluginTest extends TestCase {
 
 		$this->assertNotContains( 'taseo_needs_backfill', $flagged );
 		$this->assertNotContains( 'taseo_needs_rewrite_flush', $flagged );
+	}
+
+	/**
+	 * The 1.1.0 upgrade needed a backfill because its new columns held values
+	 * that had to be derived for existing rows. The image URL overrides have
+	 * no derived value — absent means "not set", which is what NULL already
+	 * means — so a 1.1.0 to 1.2.0 upgrade must NOT trigger a full-catalog
+	 * resync. This test fails if someone widens the version_compare bound
+	 * along with the DB_VERSION bump.
+	 */
+	public function test_upgrade_from_1_1_0_does_not_flag_a_backfill(): void {
+		Functions\when( 'get_option' )->alias(
+			static fn( $name, $default = false ) => 'taseo_db_version' === $name ? '1.1.0' : $default
+		);
+
+		$flagged = array();
+
+		Functions\when( 'update_option' )->alias(
+			static function ( $name, $value ) use ( &$flagged ): bool {
+				$flagged[ $name ] = $value;
+
+				return true;
+			}
+		);
+
+		$this->invoke_maybe_flag_upgrade_backfill();
+
+		$this->assertArrayNotHasKey( Installer::NEEDS_BACKFILL_OPTION, $flagged );
+	}
+
+	/**
+	 * Reflection helper for private methods: PluginTest constructs Plugin via
+	 * Plugin::get_instance() rather than storing an instance property, so the
+	 * helper fetches the singleton the same way.
+	 *
+	 * @return void
+	 */
+	private function invoke_maybe_flag_upgrade_backfill(): void {
+		$method = new \ReflectionMethod( Plugin::class, 'maybe_flag_upgrade_backfill' );
+		$method->setAccessible( true );
+		$method->invoke( Plugin::get_instance() );
 	}
 }

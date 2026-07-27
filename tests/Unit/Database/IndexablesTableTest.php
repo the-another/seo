@@ -91,12 +91,32 @@ class IndexablesTableTest extends TestCase {
 	}
 
 	public function test_db_version_bumped_for_sitemap_column(): void {
-		$this->assertSame( '1.1.0', IndexablesTable::DB_VERSION );
+		$this->assertTrue(
+			version_compare( IndexablesTable::DB_VERSION, '1.1.0', '>=' ),
+			'DB_VERSION regressed below the sitemap column bump.'
+		);
 	}
 
 	public function test_get_installed_version_defaults_to_zero(): void {
 		Functions\expect( 'get_option' )->once()->with( 'taseo_db_version', '0' )->andReturn( '0' );
 
 		$this->assertSame( '0', IndexablesTable::get_installed_version() );
+	}
+
+	public function test_schema_declares_the_image_url_override_columns(): void {
+		global $wpdb;
+		$wpdb->shouldReceive( 'get_charset_collate' )->andReturn( 'DEFAULT CHARACTER SET utf8mb4' );
+
+		$schema = IndexablesTable::get_schema();
+
+		// TEXT NULL, matching permalink and canonical_url in this same table.
+		// dbDelta is exacting about type spelling, so the type is asserted,
+		// not merely the column name.
+		$this->assertStringContainsString( 'og_image_url TEXT NULL', $schema );
+		$this->assertStringContainsString( 'twitter_image_url TEXT NULL', $schema );
+	}
+
+	public function test_db_version_is_bumped_for_the_new_columns(): void {
+		$this->assertSame( '1.2.0', IndexablesTable::DB_VERSION );
 	}
 }

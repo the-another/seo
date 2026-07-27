@@ -35,9 +35,11 @@ class IndexableRepository {
 		'og_title',
 		'og_description',
 		'og_image_id',
+		'og_image_url',
 		'twitter_title',
 		'twitter_description',
 		'twitter_image_id',
+		'twitter_image_url',
 		'breadcrumb_title',
 		'schema_disabled',
 	);
