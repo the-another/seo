@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Admin;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
@@ -127,6 +128,7 @@ class SettingsPage {
 	 * @param SitemapFileWriter     $sitemap_writer     Sitemap writer (writability probe).
 	 * @param SitemapSweeper        $sitemap_sweeper    Sitemap sweeper (regenerate action).
 	 * @param TemplateVariables     $template_variables Template variables registry (per-row pills).
+	 * @param CustomPages           $custom_pages       Plugin-registered custom pages.
 	 */
 	public function __construct(
 		private readonly Settings $settings,
@@ -134,7 +136,8 @@ class SettingsPage {
 		private readonly SitemapFileRepository $sitemap_files,
 		private readonly SitemapFileWriter $sitemap_writer,
 		private readonly SitemapSweeper $sitemap_sweeper,
-		private readonly TemplateVariables $template_variables
+		private readonly TemplateVariables $template_variables,
+		private readonly CustomPages $custom_pages
 	) {
 	}
 
@@ -554,6 +557,80 @@ class SettingsPage {
 		}
 
 		echo '</table>';
+
+		echo '<hr />';
+
+		echo '<h2>' . esc_html__( 'Custom pages', 'the-another-seo' ) . '</h2>';
+
+		$custom_pages = $this->custom_pages->all();
+
+		if ( array() === $custom_pages ) {
+			$this->render_custom_pages_empty_state();
+
+			return;
+		}
+
+		echo '<table class="form-table">';
+
+		foreach ( $custom_pages as $key => $page_label ) {
+			$row_key = 'custom_page:' . $key;
+
+			printf(
+				'<tr><th scope="row">%1$s<p class="description"><code>%2$s</code></p></th><td>
+					<fieldset>
+						<legend class="screen-reader-text"><span>%1$s</span></legend>
+						<label for="taseo-title-%3$s">%4$s</label><br />
+						<input type="text" id="taseo-title-%3$s" name="taseo_settings[title_templates][%2$s]" value="%5$s" class="%6$s" data-taseo-template-input /><br />
+						<label for="taseo-desc-%3$s">%7$s</label><br />
+						<input type="text" id="taseo-desc-%3$s" name="taseo_settings[description_templates][%2$s]" value="%8$s" class="%9$s" data-taseo-template-input />
+					</fieldset>',
+				esc_html( $this->template_row_label( 'custom_page', $key ) ),
+				esc_attr( $row_key ),
+				esc_attr( 'custom-page-' . $key ),
+				esc_html__( 'Title template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_title_template( 'custom_page', $key ) ),
+				esc_attr( $this->template_input_class( 'title_templates', $row_key ) ),
+				esc_html__( 'Meta description template', 'the-another-seo' ),
+				esc_attr( $this->settings->get_description_template( 'custom_page', $key ) ),
+				esc_attr( $this->template_input_class( 'description_templates', $row_key ) )
+			);
+			$this->render_variable_pills( 'custom_page', $key );
+			echo '</td></tr>';
+		}
+
+		echo '</table>';
+	}
+
+	/**
+	 * Explain how to register a custom page, when none are.
+	 *
+	 * Both filters are shown deliberately. Registering a row without also
+	 * claiming a request produces template fields that save, redisplay, and
+	 * never render — the exact mistake this text exists to prevent.
+	 *
+	 * @return void
+	 */
+	private function render_custom_pages_empty_state(): void {
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'No custom pages are registered. Another plugin can add one — a checkout screen, an account area, any page this plugin cannot know about — by registering it and then claiming the request it appears on. Both steps are needed: a registered page with no claimed request gets template fields that never render.', 'the-another-seo' )
+		);
+
+		$snippet = "add_filter( 'taseo_custom_pages', function ( \$pages ) {\n"
+			. "    \$pages['checkout'] = __( 'Checkout', 'my-plugin' );\n"
+			. "    return \$pages;\n"
+			. "} );\n\n"
+			. "add_filter( 'taseo_custom_page_context', function ( \$context ) {\n"
+			. "    if ( function_exists( 'is_checkout' ) && is_checkout() ) {\n"
+			. "        return array(\n"
+			. "            'subtype' => 'checkout',\n"
+			. "            'vars'    => array( 'title' => __( 'Checkout', 'my-plugin' ) ),\n"
+			. "        );\n"
+			. "    }\n\n"
+			. "    return \$context;\n"
+			. '} );';
+
+		printf( '<pre><code>%s</code></pre>', esc_html( $snippet ) );
 	}
 
 	/**
@@ -635,6 +712,10 @@ class SettingsPage {
 			$taxonomy = get_taxonomy( $object_subtype );
 
 			return isset( $taxonomy->labels->name ) ? (string) $taxonomy->labels->name : $object_subtype;
+		}
+
+		if ( 'custom_page' === $object_type ) {
+			return $this->custom_pages->all()[ $object_subtype ] ?? $object_subtype;
 		}
 
 		$system_labels = array(

@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
@@ -28,6 +29,7 @@ class SettingsPageTest extends TestCase {
 	private $sitemap_writer;
 	private $sitemap_sweeper;
 	private TemplateVariables $template_variables;
+	private $custom_pages;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -65,13 +67,17 @@ class SettingsPageTest extends TestCase {
 		$this->sitemap_sweeper    = Mockery::mock( SitemapSweeper::class );
 		$this->template_variables = new TemplateVariables();
 
+		$this->custom_pages = Mockery::mock( CustomPages::class );
+		$this->custom_pages->shouldReceive( 'all' )->andReturn( array() )->byDefault();
+
 		$this->page = new SettingsPage(
 			$this->settings,
 			$this->backfill,
 			$this->sitemap_files,
 			$this->sitemap_writer,
 			$this->sitemap_sweeper,
-			$this->template_variables
+			$this->template_variables,
+			$this->custom_pages
 		);
 	}
 
@@ -832,14 +838,17 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'Leave a field empty to use the default', $html );
 	}
 
-	public function test_templates_tab_splits_into_three_titled_sections(): void {
+	public function test_templates_tab_splits_into_four_titled_sections(): void {
 		$_GET['tab'] = 'templates';
 		$html        = $this->render_page();
 
 		$this->assertStringContainsString( '<h2>Post types</h2>', $html );
 		$this->assertStringContainsString( '<h2>Taxonomies</h2>', $html );
 		$this->assertStringContainsString( '<h2>System pages</h2>', $html );
-		$this->assertSame( 2, substr_count( $html, '<hr />' ), 'separators sit between the three sections, not after the last' );
+		$this->assertStringContainsString( '<h2>Custom pages</h2>', $html );
+		$this->assertSame( 3, substr_count( $html, '<hr />' ), 'separators sit between the four sections, not after the last' );
+		// Custom pages is empty by default here, so its section renders the
+		// empty state rather than a fourth table.
 		$this->assertSame( 3, substr_count( $html, '<table class="form-table">' ) );
 	}
 
@@ -883,6 +892,55 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'data-taseo-template-var="%%excerpt%%"', $html );
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%date%%"', $html );
 		$this->assertStringNotContainsString( 'data-taseo-template-var="%%primary_category%%"', $html );
+	}
+
+	public function test_a_registered_custom_page_renders_a_row(): void {
+		$_GET['tab'] = 'templates';
+		$this->custom_pages->shouldReceive( 'all' )->andReturn( array( 'checkout' => 'Checkout' ) );
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[title_templates][custom_page:checkout]"',
+			$html
+		);
+		$this->assertStringContainsString(
+			'name="taseo_settings[description_templates][custom_page:checkout]"',
+			$html
+		);
+	}
+
+	public function test_a_custom_page_row_shows_its_label_and_its_key(): void {
+		$_GET['tab'] = 'templates';
+		$this->custom_pages->shouldReceive( 'all' )->andReturn( array( 'checkout' => 'Checkout' ) );
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( '>Checkout<', $html );
+		$this->assertStringContainsString( '<code>custom_page:checkout</code>', $html );
+	}
+
+	/**
+	 * Registering a row without claiming a request produces a template that
+	 * never renders, so the empty state has to name both filters — that is
+	 * the mistake it exists to prevent.
+	 */
+	public function test_the_empty_state_documents_both_filters(): void {
+		$_GET['tab'] = 'templates';
+		$this->custom_pages->shouldReceive( 'all' )->andReturn( array() );
+
+		$html = $this->render_page();
+
+		$this->assertStringContainsString( 'Custom pages', $html );
+		$this->assertStringContainsString( 'taseo_custom_pages', $html );
+		$this->assertStringContainsString( 'taseo_custom_page_context', $html );
+	}
+
+	public function test_the_empty_state_is_absent_once_a_page_is_registered(): void {
+		$_GET['tab'] = 'templates';
+		$this->custom_pages->shouldReceive( 'all' )->andReturn( array( 'checkout' => 'Checkout' ) );
+
+		$this->assertStringNotContainsString( 'taseo_custom_page_context', $this->render_page() );
 	}
 
 	/**
