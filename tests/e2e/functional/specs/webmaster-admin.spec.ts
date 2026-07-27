@@ -280,6 +280,109 @@ test.describe( 'webmaster admin settings', () => {
 				surface.locator( `[data-taseo-token="${ token }"]` )
 			).toHaveAttribute( 'contenteditable', 'false' );
 		}
+
+		// The surface borrows core's .components-text-control__input rather
+		// than shipping CSS, which only works if core's components stylesheet
+		// is actually on the page — a script dependency on wp-components does
+		// not bring the style handle with it. Assert the computed border, not
+		// the class attribute: nothing else on this screen styles a bare div,
+		// so a 1px #949494 border can only have come from that stylesheet.
+		await expect( surface ).toHaveClass( /components-text-control__input/ );
+		await expect( surface ).toHaveCSS( 'border-top-width', '1px' );
+		await expect( surface ).toHaveCSS(
+			'border-top-color',
+			'rgb(148, 148, 148)'
+		);
+	} );
+
+	test( 'clicking a field label puts the caret in its surface', async ( {
+		page,
+	} ) => {
+		await page.goto( TEMPLATES_TAB_URL );
+
+		// The server-rendered <label for> still points at the input the
+		// surface hides, and a label whose control is not rendered focuses
+		// nothing. Clicking it must still land in the field.
+		await page
+			.locator( 'label[for="taseo-title-post-post"]' )
+			.click( { force: true } );
+
+		await expect( templateSurface( page, POST_TITLE_INPUT ) ).toBeFocused();
+	} );
+
+	test( 'focusing a field without editing it never rewrites the stored template', async ( {
+		page,
+	} ) => {
+		// Seeded through the PLAIN input with the surface's script blocked, so
+		// the stored template holds a character the surface itself normalises:
+		// a non-breaking space. That matters — anything the surface can
+		// produce it can also reproduce, so a value it would round-trip
+		// byte-identically could never tell an inert no-edit path apart from
+		// one that silently rewrites. This one can, and a value like it is
+		// exactly what a paste into the old plain field left behind.
+		const stored = '%%title%%\u00A0Shop';
+		const target = 'taseo_settings[title_templates][system_page:404]';
+		const bundle = /dist\/settings\/index\.js/;
+
+		await page.route( bundle, ( route ) => route.abort() );
+		await page.goto( TEMPLATES_TAB_URL );
+
+		const plain = page.locator( `input[name="${ target }"]` );
+		const original = await plain.inputValue();
+
+		await plain.fill( stored );
+		await page.locator( '#submit' ).click( { force: true } );
+		expect(
+			await page.locator( `input[name="${ target }"]` ).inputValue()
+		).toBe( stored );
+
+		// Now with the surface mounted: focus it, walk the caret through it,
+		// click away. Not one character is typed into this field.
+		await page.unroute( bundle );
+		await page.goto( TEMPLATES_TAB_URL );
+
+		const input = page.locator( `input[name="${ target }"]` );
+		expect( await input.inputValue() ).toBe( stored );
+
+		await templateSurface( page, target ).click( { force: true } );
+		await page.keyboard.press( 'End' );
+		await page.keyboard.press( 'ArrowLeft' );
+		await page.keyboard.press( 'ArrowLeft' );
+		await page.keyboard.press( 'Home' );
+		await page
+			.getByRole( 'heading', { name: 'SEO — The Another' } )
+			.click( { force: true } );
+
+		expect( await input.inputValue() ).toBe( stored );
+
+		// The damage is invisible until something saves: the form posts every
+		// row, so a rewrite of a field nobody edited rides along with the next
+		// save of a different one.
+		const otherOriginal = await page
+			.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+			.inputValue();
+
+		await fillTemplate( page, POST_TITLE_INPUT, '%%title%% elsewhere' );
+		await page.locator( '#submit' ).click( { force: true } );
+		await expect( page ).toHaveURL( /tab=templates/ );
+
+		expect(
+			await page.locator( `input[name="${ target }"]` ).inputValue()
+		).toBe( stored );
+
+		// Put both rows back the way they were found.
+		await fillTemplate( page, POST_TITLE_INPUT, otherOriginal );
+		await page.route( bundle, ( route ) => route.abort() );
+		await page.locator( '#submit' ).click( { force: true } );
+		await page.locator( `input[name="${ target }"]` ).fill( original );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await expect( page.locator( `input[name="${ target }"]` ) ).toHaveValue(
+			original
+		);
+		await expect(
+			page.locator( `input[name="${ POST_TITLE_INPUT }"]` )
+		).toHaveValue( otherOriginal );
 	} );
 
 	test( 'a variable the row does not offer is marked invalid', async ( {

@@ -73,27 +73,32 @@ const ZWNBSP = '\uFEFF';
 const TOKEN_DELIMITER = '%%';
 
 /**
- * wp-admin styles text fields by element selector (input[type="text"] in
- * wp-admin/css/forms.css), which a contenteditable div can never match. These
- * declarations are that rule's own values, applied inline so the surface still
- * reads as a form field without this feature shipping a stylesheet or minting
- * a class that would need one.
+ * Core's own text-field class, and it is a bare class selector rather than an
+ * element one.
+ *
+ * wp-admin styles text fields by element (input[type="text"] in
+ * wp-admin/css/forms.css), which a contenteditable div can never match — but
+ * wp-includes/css/dist/components/style.css opens its rule with the bare
+ * `.components-text-control__input`, carrying the background, colour, padding,
+ * font size, box shadow, border radius and `1px solid #949494` border that
+ * make the surface read as a form field. SettingsPage::enqueue_assets()
+ * enqueues that stylesheet (core's, never ours), and an e2e assertion checks
+ * the surface's computed border rather than trusting that the class applied.
+ *
+ * @type {string}
+ */
+const SURFACE_CLASS = 'components-text-control__input';
+
+/**
+ * The one thing that rule cannot give a contenteditable: it fixes `height` at
+ * 32px, which would clip a template long enough to wrap. Everything else the
+ * surface needs comes from the class.
  *
  * @type {Object}
  */
 const SURFACE_STYLE = {
-	boxSizing: 'border-box',
-	width: '99%',
-	margin: '0 1px',
-	padding: '9px 12px',
-	minHeight: '40px',
-	border: '1px solid #949494',
-	borderRadius: '2px',
-	boxShadow: '0 0 0 transparent',
-	backgroundColor: '#fff',
-	color: '#1e1e1e',
-	fontSize: '14px',
-	lineHeight: '1.42857143',
+	height: 'auto',
+	minHeight: '32px',
 };
 
 registerFormatType( CHIP_FORMAT, {
@@ -382,15 +387,25 @@ function ownsRowPills( input ) {
 }
 
 /**
+ * The <label> the server bound to this input.
+ *
+ * @param {Element} input The template input.
+ * @return {Element|null} The label, when there is one.
+ */
+function labelElement( input ) {
+	return input.id
+		? input.ownerDocument.querySelector( `label[for="${ input.id }"]` )
+		: null;
+}
+
+/**
  * The accessible name for the surface, taken from the input's own label.
  *
  * @param {Element} input The template input.
  * @return {string} Label text.
  */
 function inputLabel( input ) {
-	const label = input.id
-		? input.ownerDocument.querySelector( `label[for="${ input.id }"]` )
-		: null;
+	const label = labelElement( input );
 
 	return label ? label.textContent.trim() : '';
 }
@@ -419,6 +434,14 @@ export default function TemplateField( { input } ) {
 		create( { html: initialHTML } )
 	);
 	const [ isFocused, setIsFocused ] = useState( false );
+
+	// The text the input's current value corresponds to. Focusing a field,
+	// walking the caret through it and clicking away are not edits, and must
+	// not touch the input: a rewrite there is picked up by the next Save of any
+	// row on the tab, which is how merely opening the tab could end up editing
+	// an administrator's stored template. Everything below that could write
+	// compares against this first.
+	const lastTextRef = useRef( record.text );
 
 	// Hiding here rather than at mount time is deliberate: an effect only runs
 	// after this component has actually rendered, so a surface that failed to
@@ -450,18 +473,34 @@ export default function TemplateField( { input } ) {
 	}
 
 	/**
-	 * Record a value and write its template text into the input.
+	 * Take in what the surface currently holds.
+	 *
+	 * The record is always adopted — Autocomplete reads its start/end, and a
+	 * caret that moved without the text changing still has to reach it — but
+	 * the input is written only when the content actually changed. The handlers
+	 * that call this include focus, keyup and mouseup, none of which is a
+	 * mutation; without that gate, clicking into a field and clicking away
+	 * would reserialise its value, and the next Save of any row on the tab
+	 * would persist that rewrite.
 	 *
 	 * A complete %%variable%% typed by hand and sitting immediately before the
 	 * caret is turned into its chip on the spot, so a hand-typed variable ends
 	 * up as the same atomic thing a pill click or the autocomplete produces
 	 * rather than staying raw text until the next page load. The pattern is
-	 * TemplateResolver's own, anchored at the caret.
+	 * TemplateResolver's own, anchored at the caret. It too is reached only
+	 * after the text has changed, so nothing can transform a stored template
+	 * that is merely being looked at.
 	 *
 	 * @param {Object} value Rich-text value.
 	 * @return {void}
 	 */
 	function store( value ) {
+		setRecord( value );
+
+		if ( value.text === lastTextRef.current ) {
+			return;
+		}
+
 		const caret = value.start;
 		const typed =
 			'number' === typeof caret
@@ -490,7 +529,7 @@ export default function TemplateField( { input } ) {
 			return;
 		}
 
-		setRecord( value );
+		lastTextRef.current = value.text;
 		input.value = serializeSegments( valueToSegments( value ) );
 	}
 
@@ -506,6 +545,7 @@ export default function TemplateField( { input } ) {
 
 		surface.current.innerHTML = segmentsToHTML( segments, labels );
 		setRecord( value );
+		lastTextRef.current = value.text;
 		input.value = serializeSegments( segments );
 		placeCaret( surface.current, value.start );
 	}
@@ -528,9 +568,33 @@ export default function TemplateField( { input } ) {
 		applyValue( insert( record, valueToInsert, start, end ) );
 	}
 
+	// The server renders <label for="taseo-title-…"> pointing at the input this
+	// component hides, and a label whose control is not rendered focuses
+	// nothing when clicked. Give it back the behaviour it had before the
+	// surface existed: clicking the label puts the caret in the field.
+	useEffect( () => {
+		const element = labelElement( input );
+
+		if ( ! element ) {
+			return undefined;
+		}
+
+		const onClick = () => placeCaret( surface.current, Infinity );
+
+		element.addEventListener( 'click', onClick );
+
+		return () => element.removeEventListener( 'click', onClick );
+	}, [ input ] );
+
 	// Clicking one of this row's variable pills inserts that variable, the
 	// same targeting rule the field has always used: the last input in the row
 	// to have been focused, or the row's first input when none has been.
+	//
+	// Deliberately no dependency array. The listener inserts at `record`'s
+	// caret, so it has to close over the CURRENT record; re-subscribing on
+	// every render is what keeps it current. Adding `[]` here would freeze it
+	// on the mount-time record and insert at the wrong offset — or duplicate
+	// the whole field's text, since a never-focused record has no start.
 	useEffect( () => {
 		const row = input.closest( 'tr' );
 
@@ -612,6 +676,7 @@ export default function TemplateField( { input } ) {
 					aria-owns={ listBoxId }
 					aria-activedescendant={ activeId }
 					data-taseo-template-surface={ input.name }
+					className={ SURFACE_CLASS }
 					style={ SURFACE_STYLE }
 					onKeyDown={ ( event ) => {
 						onKeyDown( event );
