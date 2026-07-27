@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 0.1.0
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,20 @@ Chunked sitemap XML files are written to `wp-content/uploads/taseo-sitemaps/` an
 No. WooCommerce is optional — when present, products get `og:type=product`, price/availability tags, and Product schema.
 
 == Changelog ==
+
+
+= 0.2.0 - 2026-07-27 =
+* Add: Site verification meta tags for Google Search Console, Bing Webmaster Tools, Yandex, Yahoo, and Meta domain verification, printed on the front page only.
+* Add: Verification files (`google<token>.html`, `BingSiteAuth.xml`, `yandex_<token>.html`) served with byte-exact bodies and nothing written to disk.
+* Add: GA4, Google Tag Manager, and Meta Pixel snippets, all configured on a new Webmaster Tools settings tab.
+* Add: Titles & Templates now offers only the variables that actually resolve for each content type, as clickable pills and a `%%` autocomplete, and rejects a template using one that cannot resolve there.
+* Add: Variables show as labelled chips inside the template fields instead of raw `%%token%%` text; the stored value is unchanged.
+* Add: Image fields are chosen through the WordPress media library instead of a hand-typed attachment ID, each with an optional image URL that overrides the chosen attachment.
+* Add: Other plugins can register pages of their own for templating, and claim the request those pages appear on, using `add_filter()`.
+* Add: Section navigation across the Titles & Templates tab.
+* Add: Filters for verification tags, tracking IDs, consent gates, template variables, and image overrides.
+* Fix: Saving a title or meta description template containing %%date%% silently corrupted it, storing %te%% instead.
+* Fix: Saving settings returned you to the General tab instead of the tab you were on.
 
 = 0.1.0 =
 * Initial release: indexable table with background backfill, templated titles/meta, Open Graph and Twitter Cards, Schema.org JSON-LD graph, breadcrumbs block, chunked static sitemaps with live root index.
