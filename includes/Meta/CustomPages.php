@@ -68,6 +68,10 @@ class CustomPages {
 				continue;
 			}
 
+			if ( ! is_scalar( $label ) ) {
+				continue;
+			}
+
 			$label = (string) $label;
 
 			$clean[ $key ] = '' !== $label ? $label : $key;

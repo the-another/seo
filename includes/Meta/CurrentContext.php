@@ -174,7 +174,7 @@ class CurrentContext {
 		 */
 		$declaration = apply_filters( 'taseo_custom_page_context', null );
 
-		if ( ! is_array( $declaration ) || ! isset( $declaration['subtype'] ) ) {
+		if ( ! is_array( $declaration ) || ! isset( $declaration['subtype'] ) || ! is_scalar( $declaration['subtype'] ) ) {
 			return null;
 		}
 

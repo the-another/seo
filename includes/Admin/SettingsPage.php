@@ -721,8 +721,8 @@ class SettingsPage {
 	 * screen and its error messages cannot describe the same row
 	 * differently.
 	 *
-	 * @param string $object_type    'post', 'term', or 'system_page'.
-	 * @param string $object_subtype Post type, taxonomy, or system page key.
+	 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
+	 * @param string $object_subtype Post type, taxonomy, system page key, or custom page key.
 	 * @return string Human-readable label.
 	 */
 	private function template_row_label( string $object_type, string $object_subtype ): string {

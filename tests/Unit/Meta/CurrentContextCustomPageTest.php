@@ -163,4 +163,37 @@ class CurrentContextCustomPageTest extends TestCase {
 	public function test_no_filter_leaves_resolution_unchanged(): void {
 		$this->assertNull( $this->resolve() );
 	}
+
+	/**
+	 * has() is stubbed to return true unconditionally, so the only thing
+	 * standing between this declaration and the (string) cast in
+	 * resolve_custom_page() is the is_scalar() guard itself. Without that
+	 * guard, casting an object to string throws an uncaught Error on every
+	 * front-end request instead of being ignored like every other malformed
+	 * declaration.
+	 */
+	public function test_an_object_subtype_is_ignored(): void {
+		$this->custom_pages->shouldReceive( 'has' )->andReturn( true );
+
+		Filters\expectApplied( 'taseo_custom_page_context' )->andReturn(
+			array( 'subtype' => new \stdClass() )
+		);
+
+		$this->assertNull( $this->resolve() );
+	}
+
+	/**
+	 * Same guard, an array subtype this time — the shape a plugin might
+	 * plausibly hand back given the filter is named ..._context, which
+	 * invites returning richer data than a plain string.
+	 */
+	public function test_an_array_subtype_is_ignored(): void {
+		$this->custom_pages->shouldReceive( 'has' )->andReturn( true );
+
+		Filters\expectApplied( 'taseo_custom_page_context' )->andReturn(
+			array( 'subtype' => array( 'nested' => true ) )
+		);
+
+		$this->assertNull( $this->resolve() );
+	}
 }

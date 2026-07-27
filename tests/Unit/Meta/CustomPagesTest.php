@@ -82,6 +82,23 @@ class CustomPagesTest extends TestCase {
 		$this->assertSame( array( 'checkout' => 'checkout' ), $this->pages->all() );
 	}
 
+	/**
+	 * A label is cast to string for display on the settings screen. Without
+	 * an is_scalar() guard, an object label fatals that screen instead of
+	 * being skipped like an entry with an invalid key already is.
+	 */
+	public function test_a_non_scalar_label_is_skipped_not_cast(): void {
+		Filters\expectApplied( 'taseo_custom_pages' )->andReturn(
+			array(
+				'checkout' => 'Checkout',
+				'object'   => new \stdClass(),
+				'array'    => array( 'nested' => true ),
+			)
+		);
+
+		$this->assertSame( array( 'checkout' => 'Checkout' ), $this->pages->all() );
+	}
+
 	public function test_has_is_true_only_for_a_registered_key(): void {
 		Filters\expectApplied( 'taseo_custom_pages' )->andReturn( array( 'checkout' => 'Checkout' ) );
 

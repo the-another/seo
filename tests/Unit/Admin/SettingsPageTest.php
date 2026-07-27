@@ -1543,6 +1543,11 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertStringContainsString( 'class="subsubsub"', $html );
 		$this->assertStringContainsString( 'class="clear"', $html );
-		$this->assertStringNotContainsString( 'class="taseo', $html );
+
+		// A plain assertStringNotContainsString( 'class="taseo', $html ) only
+		// catches a class attribute BEGINNING with taseo — 'class="button
+		// taseo-x"' would slip through. Match a taseo-prefixed class token
+		// anywhere inside any class attribute instead.
+		$this->assertDoesNotMatchRegularExpression( '/class="[^"]*\btaseo[^"]*"/', $html );
 	}
 }

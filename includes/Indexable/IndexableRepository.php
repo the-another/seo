@@ -47,9 +47,9 @@ class IndexableRepository {
 	/**
 	 * Insert the row or update its synced columns only.
 	 *
-	 * @param string $object_type    'post', 'term', or 'system_page'.
-	 * @param string $object_subtype Post type / taxonomy / system page key.
-	 * @param int    $object_id      Post or term ID; 0 for system pages.
+	 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
+	 * @param string $object_subtype Post type / taxonomy / system page key / custom page key.
+	 * @param int    $object_id      Post or term ID; 0 for system pages and custom pages.
 	 * @param array  $fields         permalink?, is_indexable?, last_modified?.
 	 * @return void
 	 */
@@ -86,9 +86,9 @@ class IndexableRepository {
 		 *
 		 * @since 1.0.0
 		 *
-		 * @param string $object_type    'post', 'term', or 'system_page'.
-		 * @param string $object_subtype Post type / taxonomy / system page key.
-		 * @param int    $object_id      Post or term ID; 0 for system pages.
+		 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
+		 * @param string $object_subtype Post type / taxonomy / system page key / custom page key.
+		 * @param int    $object_id      Post or term ID; 0 for system pages and custom pages.
 		 */
 		do_action( 'taseo_indexable_synced', $object_type, $object_subtype, $object_id );
 	}

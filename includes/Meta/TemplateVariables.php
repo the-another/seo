@@ -50,8 +50,8 @@ class TemplateVariables {
 	/**
 	 * Variables available for a given context.
 	 *
-	 * @param string $object_type    'post', 'term', or 'system_page'.
-	 * @param string $object_subtype Post type, taxonomy, or system page key.
+	 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
+	 * @param string $object_subtype Post type, taxonomy, system page key, or custom page key.
 	 * @return array<string, string> Slug => label.
 	 */
 	public function get_for( string $object_type, string $object_subtype ): array {
@@ -96,8 +96,8 @@ class TemplateVariables {
 		 * @since 1.0.0
 		 *
 		 * @param array<string, string> $variables      Slug => label.
-		 * @param string                $object_type    'post'|'term'|'system_page'.
-		 * @param string                $object_subtype Post type, taxonomy, or system page key.
+		 * @param string                $object_type    'post'|'term'|'system_page'|'custom_page'.
+		 * @param string                $object_subtype Post type, taxonomy, system page key, or custom page key.
 		 */
 		$filtered = apply_filters( 'taseo_template_variables', $variables, $object_type, $object_subtype );
 
