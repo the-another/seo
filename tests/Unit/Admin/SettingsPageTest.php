@@ -111,7 +111,7 @@ class SettingsPageTest extends TestCase {
 		$clean = $this->page->sanitize_settings(
 			array(
 				'default_social_image_url' => 'https://cdn.example.com/social.jpg',
-				'site_logo_url'             => 'https://cdn.example.com/logo.png',
+				'site_logo_url'            => 'https://cdn.example.com/logo.png',
 			),
 			'social'
 		);

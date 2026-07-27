@@ -128,11 +128,6 @@ class MetaboxTest extends TestCase {
 		$this->metabox->handle_save_term( 44, 99, 'product_cat' );
 	}
 
-	public function test_image_url_overrides_are_registered_as_url_fields(): void {
-		$this->assertSame( 'url', Metabox::FIELDS['og_image_url'] );
-		$this->assertSame( 'url', Metabox::FIELDS['twitter_image_url'] );
-	}
-
 	public function test_sanitize_runs_image_url_overrides_through_esc_url_raw(): void {
 		$seen = array();
 

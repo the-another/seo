@@ -27,7 +27,7 @@ class Metabox {
 	 *
 	 * @var array<string, string>
 	 */
-	public const FIELDS = array(
+	private const FIELDS = array(
 		'title'               => 'text',
 		'description'         => 'textarea',
 		'canonical_url'       => 'url',
