@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TheAnother\Plugin\SEO\Tests\Social;
 
 use Brain\Monkey;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -33,6 +34,7 @@ class SocialOutputTest extends TestCase {
 		$this->settings->shouldReceive( 'is_open_graph_enabled' )->andReturn( true )->byDefault();
 		$this->settings->shouldReceive( 'is_twitter_enabled' )->andReturn( true )->byDefault();
 		$this->settings->shouldReceive( 'get_default_social_image_id' )->andReturn( 0 )->byDefault();
+		$this->settings->shouldReceive( 'get_default_social_image_url' )->andReturn( '' )->byDefault();
 		$this->settings->shouldReceive( 'get_facebook_app_id' )->andReturn( '' )->byDefault();
 		$this->settings->shouldReceive( 'get_twitter_site' )->andReturn( '' )->byDefault();
 
@@ -61,6 +63,15 @@ class SocialOutputTest extends TestCase {
 			'title_template'       => '%%title%% %%sep%% %%sitename%%',
 			'description_template' => '%%excerpt%%',
 		);
+	}
+
+	private function render_social( array $row ): string {
+		$this->context->shouldReceive( 'resolve' )->andReturn( $this->page_context( $row ) );
+
+		ob_start();
+		$this->social->print_tags();
+
+		return (string) ob_get_clean();
 	}
 
 	public function test_prints_open_graph_and_twitter_tags_from_resolved_meta(): void {
@@ -201,5 +212,92 @@ class SocialOutputTest extends TestCase {
 		$html = ob_get_clean();
 
 		$this->assertStringContainsString( 'og:image" content="https://example.com/default.jpg"', $html );
+	}
+
+	public function test_a_row_image_url_beats_the_row_attachment(): void {
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/attachment.jpg' );
+
+		$html = $this->render_social(
+			array(
+				'og_image_url' => 'https://cdn.example.com/override.jpg',
+				'og_image_id'  => 42,
+			)
+		);
+
+		$this->assertStringContainsString( 'https://cdn.example.com/override.jpg', $html );
+		$this->assertStringNotContainsString( 'https://example.com/attachment.jpg', $html );
+	}
+
+	public function test_the_sitewide_url_is_used_when_the_row_has_nothing(): void {
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( false );
+		$this->settings->shouldReceive( 'get_default_social_image_url' )->andReturn( 'https://cdn.example.com/site.jpg' );
+
+		$html = $this->render_social( array() );
+
+		$this->assertStringContainsString( 'https://cdn.example.com/site.jpg', $html );
+	}
+
+	/**
+	 * The filter is applied last, so add_filter is always the final word.
+	 */
+	public function test_the_og_image_filter_wins_over_every_stored_value(): void {
+		Filters\expectApplied( 'taseo_og_image_url' )->andReturn( 'https://filtered.example.com/og.jpg' );
+
+		$html = $this->render_social( array( 'og_image_url' => 'https://cdn.example.com/override.jpg' ) );
+
+		$this->assertStringContainsString( 'https://filtered.example.com/og.jpg', $html );
+	}
+
+	public function test_an_empty_filter_return_suppresses_the_og_tag(): void {
+		Filters\expectApplied( 'taseo_og_image_url' )->once()->andReturn( '' );
+
+		$html = $this->render_social( array( 'og_image_url' => 'https://cdn.example.com/override.jpg' ) );
+
+		$this->assertStringNotContainsString( 'og:image', $html );
+	}
+
+	/**
+	 * Twitter falls back to the OG image, and the value it inherits has
+	 * already been through taseo_og_image_url. So a plugin that rewrites the
+	 * OG image moves the Twitter image with it unless Twitter is set
+	 * separately — an ordering rule, pinned here rather than left to
+	 * inference.
+	 */
+	public function test_twitter_inherits_the_filtered_og_url(): void {
+		Filters\expectApplied( 'taseo_og_image_url' )->andReturn( 'https://filtered.example.com/og.jpg' );
+
+		$html = $this->render_social( array() );
+
+		$this->assertStringContainsString(
+			'<meta name="twitter:image" content="https://filtered.example.com/og.jpg" />',
+			$html
+		);
+	}
+
+	/**
+	 * A filter returning null must not emit content="" or fatal; the (string)
+	 * cast turns it into '', which suppresses the tag like any other empty
+	 * result.
+	 */
+	public function test_a_filter_returning_null_suppresses_the_tag(): void {
+		Filters\expectApplied( 'taseo_og_image_url' )->once()->andReturn( null );
+
+		$html = $this->render_social( array( 'og_image_url' => 'https://cdn.example.com/override.jpg' ) );
+
+		$this->assertStringNotContainsString( 'og:image', $html );
+	}
+
+	public function test_a_row_twitter_url_beats_the_og_fallback(): void {
+		$html = $this->render_social(
+			array(
+				'og_image_url'      => 'https://cdn.example.com/og.jpg',
+				'twitter_image_url' => 'https://cdn.example.com/tw.jpg',
+			)
+		);
+
+		$this->assertStringContainsString(
+			'<meta name="twitter:image" content="https://cdn.example.com/tw.jpg" />',
+			$html
+		);
 	}
 }

@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Social;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\ImageResolver;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -137,11 +138,17 @@ class SocialOutput {
 			echo '<meta name="twitter:description" content="' . esc_attr( $tw_description ) . '" />' . "\n";
 		}
 
-		$tw_image = ! empty( $ctx['row']['twitter_image_id'] )
-			? (string) wp_get_attachment_image_url( (int) $ctx['row']['twitter_image_id'], 'full' )
-			: $image_url;
+		$tw_image = ImageResolver::first(
+			array(
+				(string) ( $ctx['row']['twitter_image_url'] ?? '' ),
+				ImageResolver::attachment_url( (int) ( $ctx['row']['twitter_image_id'] ?? 0 ) ),
+				$image_url,
+			)
+		);
 
-		if ( '' !== $tw_image && false !== $tw_image ) {
+		$tw_image = (string) apply_filters( 'taseo_twitter_image_url', $tw_image, $ctx );
+
+		if ( '' !== $tw_image ) {
 			echo '<meta name="twitter:image" content="' . esc_url( $tw_image ) . '" />' . "\n";
 		}
 
@@ -153,23 +160,26 @@ class SocialOutput {
 	}
 
 	/**
-	 * Image: per-object OG override → site default → ''.
+	 * Image: row URL → row attachment → site URL → site attachment → ''.
+	 *
+	 * Within a level the explicit URL wins; a more specific level beats a
+	 * less specific one. The filter runs last, so add_filter is the final
+	 * word and can point this anywhere — returning '' suppresses the tag.
 	 *
 	 * @param array<string, mixed> $ctx Context.
 	 * @return string URL or ''.
 	 */
 	private function resolve_image_url( array $ctx ): string {
-		$image_id = ! empty( $ctx['row']['og_image_id'] )
-			? (int) $ctx['row']['og_image_id']
-			: $this->settings->get_default_social_image_id();
+		$url = ImageResolver::first(
+			array(
+				(string) ( $ctx['row']['og_image_url'] ?? '' ),
+				ImageResolver::attachment_url( (int) ( $ctx['row']['og_image_id'] ?? 0 ) ),
+				$this->settings->get_default_social_image_url(),
+				ImageResolver::attachment_url( $this->settings->get_default_social_image_id() ),
+			)
+		);
 
-		if ( 0 === $image_id ) {
-			return '';
-		}
-
-		$url = wp_get_attachment_image_url( $image_id, 'full' );
-
-		return is_string( $url ) ? $url : '';
+		return (string) apply_filters( 'taseo_og_image_url', $url, $ctx );
 	}
 
 	/**

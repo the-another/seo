@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TheAnother\Plugin\SEO\Tests\Schema;
 
 use Brain\Monkey;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -36,6 +37,7 @@ class SchemaGraphTest extends TestCase {
 		$this->settings->shouldReceive( 'get_site_represents' )->andReturn( 'organization' )->byDefault();
 		$this->settings->shouldReceive( 'get_site_represents_name' )->andReturn( 'Acme Auctions' )->byDefault();
 		$this->settings->shouldReceive( 'get_site_logo_id' )->andReturn( 0 )->byDefault();
+		$this->settings->shouldReceive( 'get_site_logo_url' )->andReturn( '' )->byDefault();
 		$this->settings->shouldReceive( 'get_same_as_urls' )->andReturn( array() )->byDefault();
 		$this->settings->shouldReceive( 'get_schema_type' )->andReturn( 'WebPage' )->byDefault();
 
@@ -69,6 +71,26 @@ class SchemaGraphTest extends TestCase {
 			'title_template'       => '%%title%%',
 			'description_template' => '%%excerpt%%',
 		);
+	}
+
+	private function build_graph(): array {
+		$this->context->shouldReceive( 'resolve' )->andReturn( $this->page_context() );
+
+		return $this->graph->build();
+	}
+
+	/**
+	 * @param array<int, array<string, mixed>> $graph Built graph.
+	 * @return array<string, mixed> The Organization or Person node.
+	 */
+	private function find_identity_node( array $graph ): array {
+		foreach ( $graph as $node ) {
+			if ( 'Organization' === $node['@type'] || 'Person' === $node['@type'] ) {
+				return $node;
+			}
+		}
+
+		$this->fail( 'No identity node in the graph.' );
 	}
 
 	public function test_graph_contains_website_identity_webpage_breadcrumb_nodes(): void {
@@ -211,5 +233,38 @@ class SchemaGraphTest extends TestCase {
 		}
 
 		$this->fail( 'No Product node found.' );
+	}
+
+	public function test_the_logo_url_beats_the_logo_attachment(): void {
+		Functions\when( 'wp_get_attachment_image_url' )->justReturn( 'https://example.com/attachment.png' );
+		$this->settings->shouldReceive( 'get_site_logo_url' )->andReturn( 'https://cdn.example.com/logo.png' );
+		$this->settings->shouldReceive( 'get_site_logo_id' )->andReturn( 42 );
+
+		$graph = $this->build_graph();
+
+		$this->assertSame( 'https://cdn.example.com/logo.png', $this->find_identity_node( $graph )['logo'] );
+	}
+
+	public function test_the_logo_filter_is_applied_last(): void {
+		Filters\expectApplied( 'taseo_logo_url' )->andReturn( 'https://filtered.example.com/logo.png' );
+		$this->settings->shouldReceive( 'get_site_logo_url' )->andReturn( 'https://cdn.example.com/logo.png' );
+		$this->settings->shouldReceive( 'get_site_logo_id' )->andReturn( 0 );
+
+		$graph = $this->build_graph();
+
+		$this->assertSame( 'https://filtered.example.com/logo.png', $this->find_identity_node( $graph )['logo'] );
+	}
+
+	/**
+	 * SchemaGraph omits the key entirely rather than emitting "logo": "".
+	 */
+	public function test_an_empty_filter_return_omits_the_logo_key(): void {
+		Filters\expectApplied( 'taseo_logo_url' )->once()->andReturn( '' );
+		$this->settings->shouldReceive( 'get_site_logo_url' )->andReturn( 'https://cdn.example.com/logo.png' );
+		$this->settings->shouldReceive( 'get_site_logo_id' )->andReturn( 0 );
+
+		$graph = $this->build_graph();
+
+		$this->assertArrayNotHasKey( 'logo', $this->find_identity_node( $graph ) );
 	}
 }

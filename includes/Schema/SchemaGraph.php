@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Schema;
 
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
+use TheAnother\Plugin\SEO\Meta\ImageResolver;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -110,14 +111,17 @@ class SchemaGraph {
 			'name'  => $this->settings->get_site_represents_name(),
 		);
 
-		$logo_id = $this->settings->get_site_logo_id();
+		$logo_url = ImageResolver::first(
+			array(
+				$this->settings->get_site_logo_url(),
+				ImageResolver::attachment_url( $this->settings->get_site_logo_id() ),
+			)
+		);
 
-		if ( $logo_id > 0 ) {
-			$logo_url = wp_get_attachment_image_url( $logo_id, 'full' );
+		$logo_url = (string) apply_filters( 'taseo_logo_url', $logo_url );
 
-			if ( is_string( $logo_url ) ) {
-				$node['logo'] = $logo_url;
-			}
+		if ( '' !== $logo_url ) {
+			$node['logo'] = $logo_url;
 		}
 
 		$same_as = $this->settings->get_same_as_urls();
