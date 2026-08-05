@@ -82,6 +82,7 @@ register_deactivation_hook(
 		// firing it (via any other AS-bundling plugin) with no listener.
 		if ( function_exists( 'as_unschedule_all_actions' ) ) {
 			as_unschedule_all_actions( Sitemap\SitemapSweeper::HOOK, array(), Sitemap\SitemapSweeper::GROUP );
+			as_unschedule_all_actions( Sitemap\SitemapAssignment::ASSIGN_FAMILY_HOOK, array(), Sitemap\SitemapAssignment::GROUP );
 		}
 
 		// Order matters: at this point our init-registered rewrite rules and

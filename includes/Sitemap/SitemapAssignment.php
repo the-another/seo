@@ -44,6 +44,27 @@ class SitemapAssignment {
 	private const SITEMAP_TYPES = array( 'post', 'term', 'custom_page' );
 
 	/**
+	 * Action Scheduler hook for the family reconciliation chain.
+	 *
+	 * @var string
+	 */
+	public const ASSIGN_FAMILY_HOOK = 'taseo_sitemap_assign_family';
+
+	/**
+	 * Action Scheduler group.
+	 *
+	 * @var string
+	 */
+	public const GROUP = 'taseo';
+
+	/**
+	 * Rows assigned per reconciliation job — bounds execution time.
+	 *
+	 * @var int
+	 */
+	public const ASSIGN_BATCH_SIZE = 200;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
@@ -66,6 +87,7 @@ class SitemapAssignment {
 	public function init( HookManager $hook_manager ): void {
 		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 3 );
 		$hook_manager->register_action( 'taseo_indexable_deleting', array( $this, 'handle_indexable_deleting' ), 10, 3 );
+		$hook_manager->register_action( self::ASSIGN_FAMILY_HOOK, array( $this, 'handle_assign_family_action' ) );
 	}
 
 	/**
@@ -260,5 +282,100 @@ class SitemapAssignment {
 		// phpcs:enable
 
 		return is_array( $row ) ? $row : null;
+	}
+
+	/**
+	 * Family toggled off: remove its files from circulation without touching
+	 * membership. generated_at = NULL hides the chunks from the root index
+	 * (the guard that hides never-swept chunks); missing files 404 the chunk
+	 * URLs on both serving paths. is_dirty = 1 queues the rebuild for
+	 * re-enable, while the sweep skips disabled families meanwhile. Bounded
+	 * by the family's chunk count, never its URL count.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function handle_family_disabled( string $family ): void {
+		foreach ( $this->files->get_chunks_for_subtype( $family ) as $chunk ) {
+			$this->storage->delete( $chunk );
+		}
+
+		$this->files->suspend_subtype_chunks( $family );
+	}
+
+	/**
+	 * Family toggled on: drain the (already dirty) chunks now, and assign
+	 * any rows pushed while the family was off. The reconciliation job is
+	 * required for correctness, not polish — assignment normally fires only
+	 * on sync events, so a low-churn family pushed once would otherwise
+	 * stay unassigned forever.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function handle_family_enabled( string $family ): void {
+		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+			return;
+		}
+
+		as_enqueue_async_action( SitemapSweeper::HOOK, array(), self::GROUP );
+		as_enqueue_async_action( self::ASSIGN_FAMILY_HOOK, array( 'family' => $family ), self::GROUP );
+	}
+
+	/**
+	 * Action Scheduler entry point (named-arg binding, like
+	 * IndexableBackfill::handle_batch_action).
+	 *
+	 * @param mixed $family Family key (named-arg binding), or legacy array args.
+	 * @return void
+	 */
+	public function handle_assign_family_action( $family = '' ): void {
+		if ( is_array( $family ) ) {
+			$family = $family['family'] ?? '';
+		}
+
+		$this->assign_family_batch( (string) $family );
+	}
+
+	/**
+	 * Assign one bounded batch of unassigned family rows, then self-chain
+	 * while a full batch was found (the SitemapSweeper::handle_sweep
+	 * pattern). No-ops if the family or the feature was disabled meanwhile.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function assign_family_batch( string $family ): void {
+		if ( '' === $family || ! $this->settings->is_sitemap_enabled() || ! $this->settings->is_sitemap_family_enabled( $family ) ) {
+			return;
+		}
+
+		global $wpdb;
+
+		$table = IndexablesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT id FROM {$table}
+				WHERE object_type = 'custom_page' AND object_subtype = %s AND is_indexable = 1 AND sitemap_file_id IS NULL
+				ORDER BY id ASC
+				LIMIT %d",
+				$family,
+				self::ASSIGN_BATCH_SIZE
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		$rows = is_array( $rows ) ? $rows : array();
+
+		foreach ( $rows as $row ) {
+			$this->assign( (int) $row['id'], $family );
+		}
+
+		if ( self::ASSIGN_BATCH_SIZE === count( $rows ) && function_exists( 'as_enqueue_async_action' ) ) {
+			as_enqueue_async_action( self::ASSIGN_FAMILY_HOOK, array( 'family' => $family ), self::GROUP );
+		}
 	}
 }

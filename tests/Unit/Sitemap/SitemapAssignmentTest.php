@@ -291,4 +291,97 @@ class SitemapAssignmentTest extends TestCase {
 		$this->assignment->handle_indexable_synced( 'system_page', 'search', 0 );
 		$this->assignment->handle_indexable_deleting( 'system_page', 'search', 0 );
 	}
+
+	public function test_family_disabled_deletes_files_and_suspends_chunks(): void {
+		$chunk_a = array( 'id' => '1', 'object_subtype' => 'vendor_store', 'chunk_number' => '1' );
+		$chunk_b = array( 'id' => '2', 'object_subtype' => 'vendor_store', 'chunk_number' => '2' );
+
+		$this->files->shouldReceive( 'get_chunks_for_subtype' )->once()->with( 'vendor_store' )->andReturn( array( $chunk_a, $chunk_b ) );
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk_a );
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk_b );
+		$this->files->shouldReceive( 'suspend_subtype_chunks' )->once()->with( 'vendor_store' );
+
+		$this->assignment->handle_family_disabled( 'vendor_store' );
+	}
+
+	public function test_family_enabled_enqueues_sweep_and_assign_jobs(): void {
+		$enqueued = array();
+		Monkey\Functions\when( 'as_enqueue_async_action' )->alias(
+			function ( string $hook, array $args = array(), string $group = '' ) use ( &$enqueued ): int {
+				$enqueued[] = array( $hook, $args, $group );
+				return 1;
+			}
+		);
+
+		$this->assignment->handle_family_enabled( 'vendor_store' );
+
+		$this->assertSame(
+			array(
+				array( 'taseo_sitemap_sweep', array(), 'taseo' ),
+				array( 'taseo_sitemap_assign_family', array( 'family' => 'vendor_store' ), 'taseo' ),
+			),
+			$enqueued
+		);
+	}
+
+	public function test_assign_family_batch_assigns_unassigned_rows_and_chains_on_full_batch(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->with( 'vendor_store' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
+
+		// A full batch of 200 IDs.
+		$ids = array();
+		for ( $i = 1; $i <= 200; $i++ ) {
+			$ids[] = array( 'id' => (string) $i );
+		}
+
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, "object_type = 'custom_page'" )
+						&& str_contains( $sql, 'sitemap_file_id IS NULL' )
+						&& str_contains( $sql, 'is_indexable = 1' )
+				),
+				'vendor_store',
+				200
+			)
+			->andReturn( 'BATCH_SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'BATCH_SQL', ARRAY_A )->andReturn( $ids );
+
+		// Every row goes through the claim loop.
+		$this->files->shouldReceive( 'find_lowest_open_chunk' )->times( 200 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'claim_slot' )->times( 200 )->andReturn( true );
+		$this->wpdb->shouldReceive( 'update' )->times( 200 );
+
+		$chained = false;
+		Monkey\Functions\when( 'as_enqueue_async_action' )->alias(
+			function () use ( &$chained ): int {
+				$chained = true;
+				return 1;
+			}
+		);
+
+		$this->assignment->assign_family_batch( 'vendor_store' );
+
+		$this->assertTrue( $chained );
+	}
+
+	public function test_assign_family_batch_noops_when_family_disabled(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->with( 'vendor_store' )->andReturn( false );
+
+		$this->wpdb->shouldNotReceive( 'get_results' );
+
+		$this->assignment->assign_family_batch( 'vendor_store' );
+	}
+
+	public function test_assign_family_action_unwraps_legacy_array_args(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
+
+		// Reaching the enabled check without erroring proves the unwrap.
+		$this->assignment->handle_assign_family_action( array( 'family' => 'vendor_store' ) );
+		$this->assignment->handle_assign_family_action( 'vendor_store' );
+		$this->addToAssertionCount( 1 );
+	}
 }
