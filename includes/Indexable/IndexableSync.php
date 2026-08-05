@@ -91,6 +91,8 @@ class IndexableSync {
 
 		$is_indexable = 'publish' === $post->post_status && is_post_type_viewable( $post->post_type );
 
+		$thumbnail = get_the_post_thumbnail_url( $post_id, 'full' );
+
 		$this->repository->upsert_synced_fields(
 			'post',
 			$post->post_type,
@@ -99,6 +101,7 @@ class IndexableSync {
 				'permalink'     => (string) get_permalink( $post_id ),
 				'is_indexable'  => $is_indexable,
 				'last_modified' => $post->post_modified_gmt,
+				'images'        => false === $thumbnail ? array() : array( (string) $thumbnail ),
 			)
 		);
 	}

@@ -61,6 +61,7 @@ class IndexableSyncTest extends TestCase {
 		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
 		Functions\when( 'is_post_type_viewable' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/product/widget/' );
+		Functions\when( 'get_the_post_thumbnail_url' )->justReturn( false );
 		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post', 'product' ) );
 
 		$this->repository->shouldReceive( 'upsert_synced_fields' )
@@ -73,6 +74,7 @@ class IndexableSyncTest extends TestCase {
 					'permalink'     => 'https://example.com/product/widget/',
 					'is_indexable'  => true,
 					'last_modified' => '2026-07-02 10:00:00',
+					'images'        => array(),
 				)
 			);
 
@@ -87,11 +89,12 @@ class IndexableSyncTest extends TestCase {
 		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
 		Functions\when( 'is_post_type_viewable' )->justReturn( true );
 		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/?p=88123' );
+		Functions\when( 'get_the_post_thumbnail_url' )->justReturn( false );
 		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'product' ) );
 
 		$this->repository->shouldReceive( 'upsert_synced_fields' )
 			->once()
-			->with( 'post', 'product', 88123, Mockery::on( fn( array $f ): bool => false === $f['is_indexable'] ) );
+			->with( 'post', 'product', 88123, Mockery::on( fn( array $f ): bool => false === $f['is_indexable'] && isset( $f['images'] ) ) );
 
 		$this->sync->sync_post( 88123 );
 	}
@@ -182,5 +185,55 @@ class IndexableSyncTest extends TestCase {
 		$this->sync->handle_permalink_structure_changed();
 
 		$this->assertCount( 1, $this->rebuild_calls );
+	}
+
+	public function test_sync_post_passes_featured_image_as_base(): void {
+		$post = $this->make_post( 88123 );
+
+		Functions\when( 'get_post' )->justReturn( $post );
+		Functions\when( 'wp_is_post_revision' )->justReturn( false );
+		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
+		Functions\when( 'is_post_type_viewable' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/product/widget/' );
+		Functions\when( 'get_the_post_thumbnail_url' )->justReturn( 'https://example.com/thumb.jpg' );
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post', 'product' ) );
+
+		$this->repository->shouldReceive( 'upsert_synced_fields' )
+			->once()
+			->with(
+				'post',
+				'product',
+				88123,
+				Mockery::on(
+					fn( array $fields ): bool => array( 'https://example.com/thumb.jpg' ) === $fields['images']
+				)
+			);
+
+		$this->sync->sync_post( 88123 );
+	}
+
+	public function test_sync_post_passes_empty_images_without_thumbnail(): void {
+		$post = $this->make_post( 88123 );
+
+		Functions\when( 'get_post' )->justReturn( $post );
+		Functions\when( 'wp_is_post_revision' )->justReturn( false );
+		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
+		Functions\when( 'is_post_type_viewable' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/product/widget/' );
+		Functions\when( 'get_the_post_thumbnail_url' )->justReturn( false );
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post', 'product' ) );
+
+		$this->repository->shouldReceive( 'upsert_synced_fields' )
+			->once()
+			->with(
+				'post',
+				'product',
+				88123,
+				Mockery::on(
+					fn( array $fields ): bool => array() === $fields['images']
+				)
+			);
+
+		$this->sync->sync_post( 88123 );
 	}
 }
