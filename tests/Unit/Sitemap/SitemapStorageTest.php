@@ -80,6 +80,26 @@ class SitemapStorageTest extends TestCase {
 		$this->assertSame( array(), $deleted );
 	}
 
+	public function test_delete_unlinks_existing_file(): void {
+		$dir = sys_get_temp_dir() . '/taseo-storage-test-uploads';
+
+		if ( ! is_dir( $dir . '/taseo-sitemaps' ) ) {
+			mkdir( $dir . '/taseo-sitemaps', 0777, true );
+		}
+
+		touch( $dir . '/taseo-sitemaps/product-sitemap-3.xml' );
+
+		$this->stub_uploads( $dir );
+
+		Monkey\Functions\expect( 'wp_delete_file' )
+			->once()
+			->with( $dir . '/taseo-sitemaps/product-sitemap-3.xml' );
+
+		( new SitemapStorage() )->delete( array( 'object_subtype' => 'product', 'chunk_number' => 3 ) );
+
+		unlink( $dir . '/taseo-sitemaps/product-sitemap-3.xml' );
+	}
+
 	public function test_stream_returns_false_for_missing_file(): void {
 		$this->stub_uploads( '/srv/uploads' );
 
@@ -91,6 +111,16 @@ class SitemapStorageTest extends TestCase {
 	public function test_write_fails_when_mkdir_fails(): void {
 		$this->stub_uploads( '/srv/uploads' );
 		Monkey\Functions\when( 'wp_mkdir_p' )->justReturn( false );
+
+		$this->assertFalse(
+			( new SitemapStorage() )->write( array( 'object_subtype' => 'post', 'chunk_number' => 1 ), '<xml/>' )
+		);
+	}
+
+	public function test_write_fails_when_filesystem_init_fails(): void {
+		$this->stub_uploads( '/srv/uploads' );
+		Monkey\Functions\when( 'wp_mkdir_p' )->justReturn( true );
+		Monkey\Functions\when( 'WP_Filesystem' )->justReturn( false );
 
 		$this->assertFalse(
 			( new SitemapStorage() )->write( array( 'object_subtype' => 'post', 'chunk_number' => 1 ), '<xml/>' )
