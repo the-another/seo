@@ -15,6 +15,8 @@ use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFamilies;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
@@ -30,6 +32,8 @@ class SettingsPageTest extends TestCase {
 	private $sitemap_sweeper;
 	private TemplateVariables $template_variables;
 	private $custom_pages;
+	private $sitemap_families;
+	private $sitemap_assignment;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -70,6 +74,13 @@ class SettingsPageTest extends TestCase {
 		$this->custom_pages = Mockery::mock( CustomPages::class );
 		$this->custom_pages->shouldReceive( 'all' )->andReturn( array() )->byDefault();
 
+		$this->sitemap_families   = Mockery::mock( SitemapFamilies::class );
+		$this->sitemap_assignment = Mockery::mock( SitemapAssignment::class );
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn( array() )->byDefault();
+		// handle_save() always reads this before update() regardless of tab;
+		// only the sitemap-toggle tests below care about its value.
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
+
 		$this->page = new SettingsPage(
 			$this->settings,
 			$this->backfill,
@@ -77,7 +88,9 @@ class SettingsPageTest extends TestCase {
 			$this->sitemap_storage,
 			$this->sitemap_sweeper,
 			$this->template_variables,
-			$this->custom_pages
+			$this->custom_pages,
+			$this->sitemap_families,
+			$this->sitemap_assignment
 		);
 	}
 
@@ -320,6 +333,89 @@ class SettingsPageTest extends TestCase {
 
 		$this->assertArrayHasKey( 'sitemap_enabled', $clean );
 		$this->assertFalse( $clean['sitemap_enabled'] );
+	}
+
+	public function test_sanitize_sitemap_tab_derives_disabled_families_from_checkboxes(): void {
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn(
+			array(
+				'vendor_store'        => 'Vendor stores',
+				'auctioneer_location' => 'Auctioneer locations',
+				'vendor_items'        => 'Vendor items',
+			)
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'sitemap_enabled'  => '1',
+				'sitemap_families' => array( 'vendor_store' ),
+			),
+			'sitemap'
+		);
+
+		$this->assertSame( array( 'auctioneer_location', 'vendor_items' ), $clean['sitemap_disabled_families'] );
+	}
+
+	public function test_sanitize_sitemap_tab_prunes_unregistered_keys(): void {
+		// A previously stored 'ghost_family' from a deactivated provider is
+		// absent from the registry, so it cannot appear in the derived list.
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn( array( 'vendor_store' => 'Vendor stores' ) );
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'sitemap_enabled'  => '1',
+				'sitemap_families' => array(),
+			),
+			'sitemap'
+		);
+
+		$this->assertSame( array( 'vendor_store' ), $clean['sitemap_disabled_families'] );
+	}
+
+	public function test_sanitize_other_tabs_do_not_touch_disabled_families(): void {
+		$clean = $this->page->sanitize_settings( array( 'separator' => '|' ), 'general' );
+
+		$this->assertArrayNotHasKey( 'sitemap_disabled_families', $clean );
+	}
+
+	public function test_save_calls_toggle_transitions_for_changed_families(): void {
+		// Arrange the existing valid-save stubs this file already uses, with
+		// $_POST['tab'] = 'sitemap' and $_POST['taseo_settings'] carrying
+		// sitemap_families = ['vendor_store'] while the registry holds
+		// vendor_store + auctioneer_location and the STORED disabled list is
+		// ['vendor_store'] (so: vendor_store re-enabled, auctioneer_location
+		// newly disabled).
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'sitemap';
+		$_POST['taseo_settings']       = array(
+			'sitemap_enabled'  => '1',
+			'sitemap_families' => array( 'vendor_store' ),
+		);
+
+		Functions\expect( 'wp_verify_nonce' )->once()->andReturn( 1 );
+		Functions\expect( 'current_user_can' )->once()->with( 'manage_options' )->andReturn( true );
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\expect( 'admin_url' )->once()->andReturn( 'https://example.com/wp-admin/options-general.php?page=taseo&updated=1' );
+		Functions\expect( 'wp_safe_redirect' )->once();
+
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn(
+			array(
+				'vendor_store'        => 'Vendor stores',
+				'auctioneer_location' => 'Auctioneer locations',
+			)
+		);
+		// Settings mock: before update → ['vendor_store'], after → ['auctioneer_location'].
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )
+			->twice()
+			->andReturn( array( 'vendor_store' ), array( 'auctioneer_location' ) );
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->sitemap_assignment->shouldReceive( 'handle_family_disabled' )->once()->with( 'auctioneer_location' );
+		$this->sitemap_assignment->shouldReceive( 'handle_family_enabled' )->once()->with( 'vendor_store' );
+
+		$this->page->handle_save( false );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
 	}
 
 	public function test_handle_sitemap_regenerate_dispatches_full_regeneration(): void {

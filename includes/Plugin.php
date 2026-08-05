@@ -166,7 +166,9 @@ class Plugin {
 				$c->get( 'sitemap_storage' ),
 				$c->get( 'sitemap_sweeper' ),
 				$c->get( 'template_variables' ),
-				$c->get( 'custom_pages' )
+				$c->get( 'custom_pages' ),
+				$c->get( 'sitemap_families' ),
+				$c->get( 'sitemap_assignment' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
