@@ -21,7 +21,7 @@ class IndexablesTable {
 	 *
 	 * @var string
 	 */
-	public const DB_VERSION = '1.2.0';
+	public const DB_VERSION = '1.3.0';
 
 	/**
 	 * Version option name.
@@ -77,6 +77,7 @@ class IndexablesTable {
 			is_indexable TINYINT(1) NOT NULL DEFAULT 1,
 			sitemap_file_id BIGINT UNSIGNED NULL,
 			last_modified DATETIME NULL,
+			sitemap_images TEXT NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 			PRIMARY KEY  (id),
