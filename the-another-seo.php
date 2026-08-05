@@ -62,6 +62,10 @@ if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
 	require_once THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/autoload.php';
 }
 
+if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'includes/sitemap-functions.php' ) ) {
+	require_once THE_ANOTHER_SEO_PLUGIN_DIR . 'includes/sitemap-functions.php';
+}
+
 // Action Scheduler self-deduplicates across bundling plugins; it must be
 // required directly from the plugin main file, at include time.
 if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/woocommerce/action-scheduler/action-scheduler.php' ) ) {

@@ -74,6 +74,8 @@ class PluginTest extends TestCase {
 			'sitemap_assignment',
 			'sitemap_sweeper',
 			'sitemap_server',
+			'sitemap_families',
+			'sitemap_external_urls',
 			'verification_output',
 			'verification_file_server',
 			'analytics_output',

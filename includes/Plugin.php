@@ -27,7 +27,9 @@ use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\ExternalUrls;
 use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFamilies;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
@@ -196,6 +198,16 @@ class Plugin {
 				$c->get( 'sitemap_file_repository' ),
 				$c->get( 'sitemap_storage' ),
 				$c->get( 'settings' )
+			)
+		);
+		$c->register( 'sitemap_families', fn() => new SitemapFamilies() );
+		$c->register(
+			'sitemap_external_urls',
+			fn( Container $c ) => new ExternalUrls(
+				$c->get( 'sitemap_families' ),
+				$c->get( 'indexable_repository' ),
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_storage' )
 			)
 		);
 		$c->register( 'blocks', fn() => new Blocks() );
