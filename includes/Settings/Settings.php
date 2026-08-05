@@ -352,6 +352,34 @@ class Settings {
 	}
 
 	/**
+	 * Family keys excluded from sitemap output.
+	 *
+	 * Stored as a disabled-list so absence means included — a newly
+	 * registered family is on without a migration or a save.
+	 *
+	 * @since 0.3.0
+	 *
+	 * @return array<int, string> Disabled family keys.
+	 */
+	public function get_disabled_sitemap_families(): array {
+		$stored = $this->get( 'sitemap_disabled_families', array() );
+
+		return is_array( $stored ) ? array_values( array_map( 'strval', $stored ) ) : array();
+	}
+
+	/**
+	 * Whether one external URL family is included in sitemap output.
+	 *
+	 * @since 0.3.0
+	 *
+	 * @param string $family Family key.
+	 * @return bool Included.
+	 */
+	public function is_sitemap_family_enabled( string $family ): bool {
+		return ! in_array( $family, $this->get_disabled_sitemap_families(), true );
+	}
+
+	/**
 	 * Verification meta-tag code for one service.
 	 *
 	 * @param string $engine Engine slug.

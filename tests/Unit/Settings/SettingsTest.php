@@ -274,4 +274,31 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 'https://cdn.example.com/social.jpg', $settings->get_default_social_image_url() );
 		$this->assertSame( 'https://cdn.example.com/logo.png', $settings->get_site_logo_url() );
 	}
+
+	public function test_disabled_sitemap_families_default_to_empty(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( array(), ( new Settings() )->get_disabled_sitemap_families() );
+		$this->assertTrue( ( new Settings() )->is_sitemap_family_enabled( 'vendor_store' ) );
+	}
+
+	public function test_disabled_sitemap_families_reads_stored_list(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array( 'sitemap_disabled_families' => array( 'vendor_store' ) )
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( array( 'vendor_store' ), $settings->get_disabled_sitemap_families() );
+		$this->assertFalse( $settings->is_sitemap_family_enabled( 'vendor_store' ) );
+		$this->assertTrue( $settings->is_sitemap_family_enabled( 'auctioneer_location' ) );
+	}
+
+	public function test_disabled_sitemap_families_tolerates_garbage(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array( 'sitemap_disabled_families' => 'not-an-array' )
+		);
+
+		$this->assertSame( array(), ( new Settings() )->get_disabled_sitemap_families() );
+	}
 }
