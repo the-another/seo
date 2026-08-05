@@ -316,9 +316,14 @@ class SitemapFileRepository {
 	/**
 	 * Operational summary for the settings status panel.
 	 *
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip in the
+	 *                            dirty count (disabled families) — their
+	 *                            chunks are suspended, permanently dirty,
+	 *                            and would otherwise show as a count that
+	 *                            never drains.
 	 * @return array{subtypes: array<string, array{chunks: int, links: int}>, dirty: int, last_generated: ?string} Summary.
 	 */
-	public function get_status_summary(): array {
+	public function get_status_summary( array $excluded_subtypes = array() ): array {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
@@ -344,7 +349,7 @@ class SitemapFileRepository {
 
 		return array(
 			'subtypes'       => $subtypes,
-			'dirty'          => $this->count_dirty(),
+			'dirty'          => $this->count_dirty( $excluded_subtypes ),
 			'last_generated' => is_string( $last_generated ) && '' !== $last_generated ? $last_generated : null,
 		);
 	}

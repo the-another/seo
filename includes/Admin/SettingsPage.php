@@ -856,7 +856,10 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_sitemap_tab(): void {
-		$status = $this->sitemap_files->get_status_summary();
+		// A disabled family's chunks are suspended (permanently dirty via
+		// SitemapFileRepository::suspend_subtype_chunks()), so without this
+		// exclusion the dirty count would include a figure that never drains.
+		$status = $this->sitemap_files->get_status_summary( $this->settings->get_disabled_sitemap_families() );
 
 		echo '<table class="form-table">';
 		printf(

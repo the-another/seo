@@ -48,7 +48,10 @@ class ExternalUrls {
 	 * @param int    $id     Provider-chosen stable identifier, unique within
 	 *                       the family, > 0.
 	 * @param array  $args   permalink (required, absolute, this site's host),
-	 *                       last_modified? (GMT Y-m-d H:i:s), images?
+	 *                       last_modified? (exact GMT 'Y-m-d H:i:s'; a
+	 *                       malformed value is ignored rather than rejecting
+	 *                       the whole push, and the repository's own
+	 *                       gmdate()-now default is stored instead), images?
 	 *                       (absolute URLs), is_indexable? (default true).
 	 * @return bool True when the row was written.
 	 */
@@ -71,7 +74,7 @@ class ExternalUrls {
 			'images'       => isset( $args['images'] ) && is_array( $args['images'] ) ? $args['images'] : array(),
 		);
 
-		if ( isset( $args['last_modified'] ) && is_string( $args['last_modified'] ) && '' !== $args['last_modified'] ) {
+		if ( isset( $args['last_modified'] ) && is_string( $args['last_modified'] ) && $this->is_valid_last_modified( $args['last_modified'] ) ) {
 			$fields['last_modified'] = $args['last_modified'];
 		}
 
@@ -108,10 +111,29 @@ class ExternalUrls {
 	 * deactivation request is exactly the mass-operation shape the per-row
 	 * path exists to avoid.
 	 *
+	 * Rejects a key that collides with any currently registered post type or
+	 * taxonomy name (ALL registered, not just public — mirroring
+	 * SitemapFamilies::all()'s registration-side check), even though
+	 * registration is not otherwise required here. The chunk registry and
+	 * its files are keyed by subtype alone, so a provider that mistakenly
+	 * passes its own CPT name (taseo_sitemap_delete_family( 'product' ))
+	 * would otherwise delete that post type's chunk rows and files while
+	 * leaving thousands of post rows with dangling sitemap_file_id
+	 * pointers. A legitimate family key can never collide, because
+	 * registration already rejects those names — so this can only catch a
+	 * mistaken caller, never a real family.
+	 *
 	 * @param string $family Family key.
 	 * @return void
 	 */
 	public function delete_family( string $family ): void {
+		$post_types = get_post_types();
+		$taxonomies = get_taxonomies();
+
+		if ( isset( $post_types[ $family ] ) || isset( $taxonomies[ $family ] ) ) {
+			return;
+		}
+
 		global $wpdb;
 
 		$chunks = $this->files->get_chunks_for_subtype( $family );
@@ -159,5 +181,31 @@ class ExternalUrls {
 
 		return is_string( $url_host ) && is_string( $home_host )
 			&& strtolower( $url_host ) === strtolower( $home_host );
+	}
+
+	/**
+	 * Whether a value is a literal 'Y-m-d H:i:s' DATETIME shape naming a
+	 * real calendar date and time.
+	 *
+	 * The last_modified column is a strict-mode DATETIME: an ISO-8601 value
+	 * (a trailing 'T'/'Z'/timezone offset) or an impossible date such as
+	 * '2024-02-30' would fail that INSERT while sync_url() had already
+	 * returned true, violating its "True when the row was written"
+	 * contract. The regex alone accepts the correct shape with an
+	 * impossible date (strtotime() normalizes '2024-02-30' to March 1st
+	 * rather than failing), so the round-trip through strtotime()/gmdate()
+	 * catches that case too.
+	 *
+	 * @param string $value Candidate value.
+	 * @return bool Valid.
+	 */
+	private function is_valid_last_modified( string $value ): bool {
+		if ( 1 !== preg_match( '/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $value ) ) {
+			return false;
+		}
+
+		$timestamp = strtotime( $value . ' UTC' );
+
+		return false !== $timestamp && gmdate( 'Y-m-d H:i:s', $timestamp ) === $value;
 	}
 }

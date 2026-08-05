@@ -313,4 +313,31 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->assertSame( 2, $summary['dirty'] );
 		$this->assertSame( '2026-07-03 09:00:00', $summary['last_generated'] );
 	}
+
+	public function test_get_status_summary_forwards_excluded_subtypes_to_count_dirty(): void {
+		$this->wpdb->shouldReceive( 'get_results' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'GROUP BY object_subtype' ) ), ARRAY_A )
+			->andReturn( array() );
+
+		// count_dirty()'s excluded-subtypes branch: a NOT IN clause built from
+		// the disabled families passed through, not the no-args simple query.
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'COUNT(*)' ) && str_contains( $sql, 'NOT IN (%s)' ) ),
+				array( 'vendor_store' )
+			)
+			->andReturn( 'COUNT_SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->with( 'COUNT_SQL' )->andReturn( '1' );
+
+		$this->wpdb->shouldReceive( 'get_var' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'MAX(generated_at)' ) ) )
+			->andReturn( null );
+
+		$summary = $this->files->get_status_summary( array( 'vendor_store' ) );
+
+		$this->assertSame( 1, $summary['dirty'] );
+	}
 }

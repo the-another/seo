@@ -418,6 +418,56 @@ class SettingsPageTest extends TestCase {
 		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
 	}
 
+	/**
+	 * Render the full tabbed page with the sitemap tab active and return the
+	 * output. render_sitemap_tab() is private, so this drives it the way the
+	 * real admin screen does: through render_page()'s tab dispatch.
+	 *
+	 * @return string Rendered HTML.
+	 */
+	private function render_sitemap_html(): string {
+		$this->stub_render_functions();
+		Functions\when( 'checked' )->justReturn( '' );
+		Functions\when( 'wp_nonce_url' )->returnArg();
+
+		$_GET['tab'] = 'sitemap';
+
+		ob_start();
+		$this->page->render_page();
+		$html = (string) ob_get_clean();
+
+		unset( $_GET['tab'] );
+
+		return $html;
+	}
+
+	/**
+	 * The disabled-families forwarding the status panel needs: a disabled
+	 * family's suspended chunks are permanently dirty, so count_dirty()
+	 * (and thus the "Files awaiting regeneration" figure) must exclude them
+	 * rather than show a count that can never drain.
+	 */
+	public function test_sitemap_tab_forwards_disabled_families_to_the_status_summary(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array( 'vendor_store' ) );
+
+		$this->sitemap_files->shouldReceive( 'get_status_summary' )
+			->once()
+			->with( array( 'vendor_store' ) )
+			->andReturn(
+				array(
+					'subtypes'       => array(),
+					'dirty'          => 3,
+					'last_generated' => null,
+				)
+			);
+
+		$html = $this->render_sitemap_html();
+
+		$this->assertStringContainsString( '<strong>3</strong>', $html );
+	}
+
 	public function test_handle_sitemap_regenerate_dispatches_full_regeneration(): void {
 		$_POST['taseo_settings_nonce'] = 'nonce';
 

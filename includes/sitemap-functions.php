@@ -37,9 +37,11 @@ if ( ! function_exists( 'taseo_sitemap_sync_url' ) ) {
 	 *
 	 * @param string $family Family key.
 	 * @param int    $id     Provider-chosen stable identifier, > 0.
-	 * @param array  $args   permalink (required), last_modified? (GMT
-	 *                       Y-m-d H:i:s), images? (absolute URLs, max 50),
-	 *                       is_indexable? (default true).
+	 * @param array  $args   permalink (required), last_modified? (exact
+	 *                       GMT 'Y-m-d H:i:s'; a malformed value is
+	 *                       ignored rather than rejecting the whole push),
+	 *                       images? (absolute URLs, max 50), is_indexable?
+	 *                       (default true).
 	 * @return bool True when the row was written.
 	 */
 	function taseo_sitemap_sync_url( string $family, int $id, array $args ): bool {
