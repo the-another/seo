@@ -36,6 +36,14 @@ class SitemapAssignment {
 	private const CLAIM_RETRIES = 5;
 
 	/**
+	 * Object types with sitemap membership. system_page is excluded on
+	 * purpose — the built-in system pages do not belong in a sitemap.
+	 *
+	 * @var array<int, string>
+	 */
+	private const SITEMAP_TYPES = array( 'post', 'term', 'custom_page' );
+
+	/**
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
@@ -69,7 +77,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id ): void {
-		if ( ! in_array( $object_type, array( 'post', 'term' ), true ) ) {
+		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
 
@@ -92,10 +100,10 @@ class SitemapAssignment {
 		}
 
 		if ( null === $chunk_id ) {
-			// New assignment is the only path gated on the toggle: releases
+			// New assignment is the only path gated on the toggles: releases
 			// and dirty-marking keep running while output is disabled, so
 			// re-enabling self-heals via the accumulated dirty flags.
-			if ( $this->settings->is_sitemap_enabled() ) {
+			if ( $this->settings->is_sitemap_enabled() && $this->is_family_allowed( $object_type, $object_subtype ) ) {
 				$this->assign( (int) $row['id'], $object_subtype );
 			}
 
@@ -116,7 +124,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function handle_indexable_deleting( string $object_type, string $object_subtype, int $object_id ): void {
-		if ( ! in_array( $object_type, array( 'post', 'term' ), true ) ) {
+		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
 
@@ -127,6 +135,18 @@ class SitemapAssignment {
 		}
 
 		$this->release( (int) $row['id'], (int) $row['sitemap_file_id'] );
+	}
+
+	/**
+	 * Family-toggle gate. Only custom_page subtypes are families; post and
+	 * term subtypes are never toggleable here.
+	 *
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Object subtype.
+	 * @return bool Assignment allowed.
+	 */
+	private function is_family_allowed( string $object_type, string $object_subtype ): bool {
+		return 'custom_page' !== $object_type || $this->settings->is_sitemap_family_enabled( $object_subtype );
 	}
 
 	/**

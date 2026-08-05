@@ -47,7 +47,7 @@ class SitemapAssignmentTest extends TestCase {
 	/**
 	 * Stub the indexable-row lookup handle_* methods start with.
 	 */
-	private function stub_indexable_row( ?array $row ): void {
+	private function stub_indexable_row( ?array $row, string $object_type = 'post', string $object_subtype = 'product', int $object_id = 88123 ): void {
 		$this->wpdb->shouldReceive( 'prepare' )
 			->once()
 			->with(
@@ -55,9 +55,9 @@ class SitemapAssignmentTest extends TestCase {
 					fn( string $sql ): bool => str_contains( $sql, 'SELECT id, is_indexable, sitemap_file_id' )
 						&& str_contains( $sql, 'FROM wp_taseo_indexables' )
 				),
-				'post',
-				'product',
-				88123
+				$object_type,
+				$object_subtype,
+				$object_id
 			)
 			->andReturn( 'FIND_SQL' );
 		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'FIND_SQL', ARRAY_A )->andReturn( $row );
@@ -250,5 +250,45 @@ class SitemapAssignmentTest extends TestCase {
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 412 );
 
 		$this->assignment->handle_indexable_deleting( 'post', 'product', 88123 );
+	}
+
+	public function test_custom_page_rows_are_assigned_when_family_enabled(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->with( 'vendor_store' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
+		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ), 'custom_page', 'vendor_store', 501 );
+
+		$this->files->shouldReceive( 'find_lowest_open_chunk' )->once()->with( 'vendor_store', 1000 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'claim_slot' )->once()->with( 3, 1000 )->andReturn( true );
+		$this->wpdb->shouldReceive( 'update' )->once();
+
+		$this->assignment->handle_indexable_synced( 'custom_page', 'vendor_store', 501 );
+	}
+
+	public function test_disabled_family_blocks_new_assignment(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->with( 'vendor_store' )->andReturn( false );
+		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ), 'custom_page', 'vendor_store', 501 );
+
+		$this->files->shouldNotReceive( 'find_lowest_open_chunk' );
+
+		$this->assignment->handle_indexable_synced( 'custom_page', 'vendor_store', 501 );
+	}
+
+	public function test_disabled_family_still_releases_on_unindexable(): void {
+		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '0', 'sitemap_file_id' => '3' ), 'custom_page', 'vendor_store', 501 );
+
+		$this->wpdb->shouldReceive( 'update' )->once(); // pointer cleared
+		$this->files->shouldReceive( 'release_slot' )->once()->with( 3 )->andReturn( 5 );
+
+		$this->assignment->handle_indexable_synced( 'custom_page', 'vendor_store', 501 );
+	}
+
+	public function test_system_page_rows_are_still_ignored(): void {
+		// No row lookup, no chunk work.
+		$this->wpdb->shouldNotReceive( 'get_row' );
+
+		$this->assignment->handle_indexable_synced( 'system_page', 'search', 0 );
+		$this->assignment->handle_indexable_deleting( 'system_page', 'search', 0 );
 	}
 }
