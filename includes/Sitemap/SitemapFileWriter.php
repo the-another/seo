@@ -67,7 +67,7 @@ class SitemapFileWriter {
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT permalink, last_modified FROM {$indexables} WHERE sitemap_file_id = %d AND is_indexable = 1 ORDER BY id ASC",
+				"SELECT permalink, last_modified, sitemap_images FROM {$indexables} WHERE sitemap_file_id = %d AND is_indexable = 1 ORDER BY id ASC",
 				(int) $chunk['id']
 			),
 			ARRAY_A
@@ -100,14 +100,18 @@ class SitemapFileWriter {
 	}
 
 	/**
-	 * Render the <urlset> document: <loc> + <lastmod> only, per spec.
+	 * Render the <urlset> document: <loc>, <lastmod>, and <image:image> entries.
 	 *
-	 * @param array<int, array<string, mixed>> $rows Member rows (permalink, last_modified).
+	 * The image namespace is declared unconditionally — an unused namespace
+	 * is valid XML, and declaring it only when a row has images would make
+	 * one chunk's header depend on the content of sibling rows.
+	 *
+	 * @param array<int, array<string, mixed>> $rows Member rows (permalink, last_modified, sitemap_images).
 	 * @return string XML document.
 	 */
 	private function render_urlset( array $rows ): string {
 		$xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-		$xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+		$xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">' . "\n";
 
 		foreach ( $rows as $row ) {
 			$loc = (string) ( $row['permalink'] ?? '' );
@@ -125,9 +129,34 @@ class SitemapFileWriter {
 				$xml .= "\t\t<lastmod>" . $lastmod . "</lastmod>\n";
 			}
 
+			foreach ( $this->decode_images( $row ) as $image_url ) {
+				$xml .= "\t\t<image:image><image:loc>" . esc_url( $image_url ) . "</image:loc></image:image>\n";
+			}
+
 			$xml .= "\t</url>\n";
 		}
 
 		return $xml . '</urlset>' . "\n";
+	}
+
+	/**
+	 * Stored JSON to a list of image URLs; malformed data renders as none,
+	 * never as an error.
+	 *
+	 * @param array<string, mixed> $row Member row.
+	 * @return array<int, string> URLs.
+	 */
+	private function decode_images( array $row ): array {
+		if ( empty( $row['sitemap_images'] ) || ! is_string( $row['sitemap_images'] ) ) {
+			return array();
+		}
+
+		$decoded = json_decode( $row['sitemap_images'], true );
+
+		if ( ! is_array( $decoded ) ) {
+			return array();
+		}
+
+		return array_values( array_filter( $decoded, 'is_string' ) );
 	}
 }

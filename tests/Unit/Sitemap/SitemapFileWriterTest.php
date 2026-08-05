@@ -32,6 +32,7 @@ class SitemapFileWriterTest extends TestCase {
 		$this->wpdb   = $wpdb;
 
 		Functions\when( 'esc_url' )->returnArg();
+		Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 
 		$this->files   = Mockery::mock( SitemapFileRepository::class );
 		$this->storage = Mockery::mock( SitemapStorage::class );
@@ -57,6 +58,7 @@ class SitemapFileWriterTest extends TestCase {
 			->with(
 				Mockery::on(
 					fn( string $sql ): bool => str_contains( $sql, 'FROM wp_taseo_indexables' )
+						&& str_contains( $sql, 'sitemap_images' )
 						&& str_contains( $sql, 'sitemap_file_id = %d' )
 						&& str_contains( $sql, 'is_indexable = 1' )
 						&& str_contains( $sql, 'ORDER BY id ASC' )
@@ -83,7 +85,7 @@ class SitemapFileWriterTest extends TestCase {
 		$this->assertTrue( $this->writer->rebuild( $chunk ) );
 
 		$this->assertStringContainsString( '<?xml version="1.0" encoding="UTF-8"?>', $captured );
-		$this->assertStringContainsString( '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">', $captured );
+		$this->assertStringContainsString( '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">', $captured );
 		$this->assertStringContainsString( '<loc>https://example.com/product/widget/</loc>', $captured );
 		$this->assertStringContainsString( '<lastmod>2026-07-02T10:00:00+00:00</lastmod>', $captured );
 		$this->assertSame( 2, substr_count( $captured, '<url>' ) );
@@ -121,5 +123,83 @@ class SitemapFileWriterTest extends TestCase {
 		$this->files->shouldNotReceive( 'update_after_rebuild' );
 
 		$this->assertFalse( $this->writer->rebuild( $chunk ) );
+	}
+
+	public function test_urlset_declares_image_namespace(): void {
+		$xml = $this->rebuild_capturing_xml( array() );
+
+		$this->assertStringContainsString( 'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"', $xml );
+	}
+
+	public function test_row_images_render_as_image_loc(): void {
+		$xml = $this->rebuild_capturing_xml(
+			array(
+				array(
+					'permalink'      => 'https://example.com/a/',
+					'last_modified'  => null,
+					'sitemap_images' => wp_json_encode( array( 'https://example.com/1.jpg', 'https://example.com/2.jpg' ) ),
+				),
+			)
+		);
+
+		$this->assertStringContainsString( '<image:image><image:loc>https://example.com/1.jpg</image:loc></image:image>', $xml );
+		$this->assertStringContainsString( '<image:image><image:loc>https://example.com/2.jpg</image:loc></image:image>', $xml );
+	}
+
+	public function test_malformed_images_json_renders_no_images(): void {
+		$xml = $this->rebuild_capturing_xml(
+			array(
+				array(
+					'permalink'      => 'https://example.com/a/',
+					'last_modified'  => null,
+					'sitemap_images' => '{not json',
+				),
+			)
+		);
+
+		$this->assertStringNotContainsString( '<image:image>', $xml );
+		$this->assertStringContainsString( '<loc>https://example.com/a/</loc>', $xml );
+	}
+
+	public function test_null_images_render_unchanged(): void {
+		$xml = $this->rebuild_capturing_xml(
+			array(
+				array(
+					'permalink'      => 'https://example.com/a/',
+					'last_modified'  => null,
+					'sitemap_images' => null,
+				),
+			)
+		);
+
+		$this->assertStringNotContainsString( '<image:image>', $xml );
+	}
+
+	/**
+	 * Stub the member-row query and chunk write, returning the XML handed to
+	 * SitemapStorage::write() for one rebuild() call.
+	 *
+	 * @param array<int, array<string, mixed>> $rows Member rows to return from the DB query.
+	 * @return string Captured XML.
+	 */
+	private function rebuild_capturing_xml( array $rows ): string {
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( $rows );
+
+		$captured = null;
+		$this->storage->shouldReceive( 'write' )
+			->once()
+			->andReturnUsing(
+				function ( array $chunk, string $xml ) use ( &$captured ): bool {
+					$captured = $xml;
+					return true;
+				}
+			);
+
+		$this->files->shouldReceive( 'update_after_rebuild' );
+
+		$this->writer->rebuild( array( 'id' => 1, 'object_subtype' => 'post', 'chunk_number' => 1 ) );
+
+		return $captured;
 	}
 }
