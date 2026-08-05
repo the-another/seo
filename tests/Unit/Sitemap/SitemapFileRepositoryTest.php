@@ -224,6 +224,69 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->files->update_after_rebuild( 7, '2026-07-02 10:00:00' );
 	}
 
+	public function test_get_dirty_chunks_excludes_subtypes(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'is_dirty = 1' )
+						&& str_contains( $sql, 'object_subtype NOT IN (%s,%s)' )
+						&& str_contains( $sql, 'LIMIT %d' )
+				),
+				'vendor_store',
+				'auctioneer_location',
+				20
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array() );
+
+		$this->files->get_dirty_chunks( 20, array( 'vendor_store', 'auctioneer_location' ) );
+	}
+
+	public function test_get_dirty_chunks_without_exclusions_keeps_simple_query(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'is_dirty = 1' ) && ! str_contains( $sql, 'NOT IN' )
+				),
+				20
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->andReturn( array() );
+
+		$this->files->get_dirty_chunks( 20 );
+	}
+
+	public function test_count_dirty_excludes_subtypes(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'COUNT(*)' ) && str_contains( $sql, 'NOT IN (%s)' ) ), array( 'vendor_store' ) )
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->with( 'SQL' )->andReturn( '2' );
+
+		$this->assertSame( 2, $this->files->count_dirty( array( 'vendor_store' ) ) );
+	}
+
+	public function test_suspend_subtype_chunks_nulls_generated_at_and_marks_dirty(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'SET generated_at = NULL, is_dirty = 1' ) && str_contains( $sql, 'object_subtype = %s' ) ), 'vendor_store' )
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+
+		$this->files->suspend_subtype_chunks( 'vendor_store' );
+	}
+
+	public function test_get_and_delete_chunks_for_subtype(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->twice()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array( array( 'id' => '1' ) ) );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+
+		$this->assertSame( array( array( 'id' => '1' ) ), $this->files->get_chunks_for_subtype( 'vendor_store' ) );
+		$this->files->delete_chunks_for_subtype( 'vendor_store' );
+	}
+
 	public function test_get_status_summary_shapes_per_subtype_counts(): void {
 		$this->wpdb->shouldReceive( 'get_results' )
 			->once()

@@ -219,19 +219,28 @@ class SitemapFileRepository {
 	/**
 	 * A bounded batch of chunks awaiting rebuild.
 	 *
-	 * @param int $limit Batch size.
+	 * @param int                $limit             Batch size.
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip (disabled families).
 	 * @return array<int, array<string, mixed>> Rows.
 	 */
-	public function get_dirty_chunks( int $limit ): array {
+	public function get_dirty_chunks( int $limit, array $excluded_subtypes = array() ): array {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
+		$sql   = "SELECT * FROM {$table} WHERE is_dirty = 1";
+		$args  = array();
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = $wpdb->get_results(
-			$wpdb->prepare( "SELECT * FROM {$table} WHERE is_dirty = 1 ORDER BY id ASC LIMIT %d", $limit ),
-			ARRAY_A
-		);
+		if ( array() !== $excluded_subtypes ) {
+			$placeholders = implode( ',', array_fill( 0, count( $excluded_subtypes ), '%s' ) );
+			$sql         .= " AND object_subtype NOT IN ({$placeholders})";
+			$args         = array_values( $excluded_subtypes );
+		}
+
+		$sql   .= ' ORDER BY id ASC LIMIT %d';
+		$args[] = $limit;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, ...$args ), ARRAY_A );
 		// phpcs:enable
 
 		return is_array( $rows ) ? $rows : array();
@@ -240,15 +249,29 @@ class SitemapFileRepository {
 	/**
 	 * How many chunks still await rebuild.
 	 *
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip (disabled families).
 	 * @return int Dirty count.
 	 */
-	public function count_dirty(): int {
+	public function count_dirty( array $excluded_subtypes = array() ): int {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1" );
+		if ( array() === $excluded_subtypes ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1" );
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $excluded_subtypes ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1 AND object_subtype NOT IN ({$placeholders})",
+				array_values( $excluded_subtypes )
+			)
+		);
+		// phpcs:enable
 	}
 
 	/**
@@ -324,5 +347,67 @@ class SitemapFileRepository {
 			'dirty'          => $this->count_dirty(),
 			'last_generated' => is_string( $last_generated ) && '' !== $last_generated ? $last_generated : null,
 		);
+	}
+
+	/**
+	 * Every chunk of one subtype.
+	 *
+	 * @param string $object_subtype Subtype / family key.
+	 * @return array<int, array<string, mixed>> Rows.
+	 */
+	public function get_chunks_for_subtype( string $object_subtype ): array {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = $wpdb->get_results(
+			$wpdb->prepare( "SELECT * FROM {$table} WHERE object_subtype = %s ORDER BY chunk_number ASC", $object_subtype ),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * Hide a family's chunks from the root index and queue their rebuild.
+	 *
+	 * Setting generated_at = NULL reuses the backfill-window guard in
+	 * SitemapServer::render_root_index(); is_dirty = 1 makes re-enabling
+	 * rebuild the files on the next sweep.
+	 *
+	 * @param string $object_subtype Family key.
+	 * @return void
+	 */
+	public function suspend_subtype_chunks( string $object_subtype ): void {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query(
+			$wpdb->prepare( "UPDATE {$table} SET generated_at = NULL, is_dirty = 1 WHERE object_subtype = %s", $object_subtype )
+		);
+		// phpcs:enable
+	}
+
+	/**
+	 * Drop every registry row of one subtype (bulk family removal — the
+	 * physical files are the caller's problem, via SitemapStorage).
+	 *
+	 * @param string $object_subtype Family key.
+	 * @return void
+	 */
+	public function delete_chunks_for_subtype( string $object_subtype ): void {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query(
+			$wpdb->prepare( "DELETE FROM {$table} WHERE object_subtype = %s", $object_subtype )
+		);
+		// phpcs:enable
 	}
 }
