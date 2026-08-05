@@ -45,12 +45,21 @@ class IndexableRepository {
 	);
 
 	/**
+	 * Maximum images stored per URL. Google's protocol allows 1,000; 50
+	 * bounds row size well under the TEXT column limit and covers any real
+	 * page.
+	 *
+	 * @var int
+	 */
+	public const SITEMAP_IMAGES_CAP = 50;
+
+	/**
 	 * Insert the row or update its synced columns only.
 	 *
 	 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
 	 * @param string $object_subtype Post type / taxonomy / system page key / custom page key.
 	 * @param int    $object_id      Post or term ID; 0 for system pages and custom pages.
-	 * @param array  $fields         permalink?, is_indexable?, last_modified?.
+	 * @param array  $fields         permalink?, is_indexable?, last_modified?, images?.
 	 * @return void
 	 */
 	public function upsert_synced_fields( string $object_type, string $object_subtype, int $object_id, array $fields ): void {
@@ -58,21 +67,61 @@ class IndexableRepository {
 
 		$table = IndexablesTable::get_table_name();
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared -- Custom table, prepared below.
-		$sql = $wpdb->prepare(
-			"INSERT INTO {$table}
-				(object_type, object_subtype, object_id, permalink, is_indexable, last_modified)
-			VALUES (%s, %s, %d, %s, %d, %s)
-			ON DUPLICATE KEY UPDATE
-				permalink = VALUES(permalink),
-				is_indexable = VALUES(is_indexable),
-				last_modified = VALUES(last_modified)",
+		/**
+		 * Filters the image URLs stored for a sitemap entry.
+		 *
+		 * Runs on every synced write — post/term sync, backfill, and the
+		 * push API — so one hook covers all sources. The base value is the
+		 * caller-supplied list: the featured image for posts, the `images`
+		 * argument for pushed URLs, empty for terms.
+		 *
+		 * @since 0.3.0
+		 *
+		 * @param array<int, string> $images         Absolute image URLs.
+		 * @param string             $object_type    'post', 'term', 'system_page', or 'custom_page'.
+		 * @param string             $object_subtype Post type / taxonomy / page key / family key.
+		 * @param int                $object_id      Post or term ID; family URL ID; 0 otherwise.
+		 */
+		$images = apply_filters(
+			'taseo_sitemap_images',
+			isset( $fields['images'] ) && is_array( $fields['images'] ) ? $fields['images'] : array(),
+			$object_type,
+			$object_subtype,
+			$object_id
+		);
+
+		$images      = $this->sanitize_sitemap_images( $images );
+		$images_json = array() === $images ? null : wp_json_encode( $images );
+
+		$args = array(
 			$object_type,
 			$object_subtype,
 			$object_id,
 			$fields['permalink'] ?? '',
 			empty( $fields['is_indexable'] ) ? 0 : 1,
-			$fields['last_modified'] ?? gmdate( 'Y-m-d H:i:s' )
+			$fields['last_modified'] ?? gmdate( 'Y-m-d H:i:s' ),
+		);
+
+		// wpdb::prepare() has no NULL placeholder, so an empty image list
+		// inlines the literal; VALUES(sitemap_images) carries either through
+		// the duplicate-key branch.
+		$images_placeholder = null === $images_json ? 'NULL' : '%s';
+
+		if ( null !== $images_json ) {
+			$args[] = $images_json;
+		}
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Custom table, prepared below; images placeholder is a literal 'NULL' or '%s', so the sniff can't see it as a 7th placeholder, and the spread args count varies with it.
+		$sql = $wpdb->prepare(
+			"INSERT INTO {$table}
+				(object_type, object_subtype, object_id, permalink, is_indexable, last_modified, sitemap_images)
+			VALUES (%s, %s, %d, %s, %d, %s, {$images_placeholder})
+			ON DUPLICATE KEY UPDATE
+				permalink = VALUES(permalink),
+				is_indexable = VALUES(is_indexable),
+				last_modified = VALUES(last_modified),
+				sitemap_images = VALUES(sitemap_images)",
+			...$args
 		);
 		$wpdb->query( $sql );
 		// phpcs:enable
@@ -249,5 +298,43 @@ class IndexableRepository {
 				'object_id'      => $object_id,
 			)
 		);
+	}
+
+	/**
+	 * Keep only absolute http(s) URLs, capped at SITEMAP_IMAGES_CAP.
+	 *
+	 * @param mixed $images Filter output; anything non-array counts as none.
+	 * @return array<int, string> Clean URLs.
+	 */
+	private function sanitize_sitemap_images( $images ): array {
+		if ( ! is_array( $images ) ) {
+			return array();
+		}
+
+		$clean = array();
+
+		foreach ( $images as $url ) {
+			if ( ! is_string( $url ) ) {
+				continue;
+			}
+
+			if ( ! str_starts_with( $url, 'http://' ) && ! str_starts_with( $url, 'https://' ) ) {
+				continue;
+			}
+
+			$url = esc_url_raw( $url, array( 'http', 'https' ) );
+
+			if ( '' === $url ) {
+				continue;
+			}
+
+			$clean[] = $url;
+
+			if ( self::SITEMAP_IMAGES_CAP === count( $clean ) ) {
+				break;
+			}
+		}
+
+		return $clean;
 	}
 }

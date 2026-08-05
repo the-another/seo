@@ -28,6 +28,9 @@ class IndexableRepositoryTest extends TestCase {
 		$this->wpdb   = $wpdb;
 
 		$this->repository = new IndexableRepository();
+
+		Monkey\Functions\when( 'esc_url_raw' )->returnArg();
+		Monkey\Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
 	}
 
 	protected function tearDown(): void {
@@ -69,6 +72,92 @@ class IndexableRepositoryTest extends TestCase {
 				'last_modified' => '2026-07-02 10:00:00',
 			)
 		);
+	}
+
+	public function test_upsert_stores_filtered_images_as_json(): void {
+		Monkey\Filters\expectApplied( 'taseo_sitemap_images' )
+			->once()
+			->with( array( 'https://example.com/a.jpg' ), 'post', 'product', 7 )
+			->andReturn( array( 'https://example.com/a.jpg', 'https://example.com/b.jpg' ) );
+
+		$captured = array();
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->andReturnUsing(
+				function ( string $sql, ...$args ) use ( &$captured ): string {
+					$captured = array( $sql, $args );
+					return 'SQL';
+				}
+			);
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7 );
+
+		$this->repository->upsert_synced_fields(
+			'post',
+			'product',
+			7,
+			array(
+				'permalink' => 'https://example.com/p/7/',
+				'images'    => array( 'https://example.com/a.jpg' ),
+			)
+		);
+
+		$this->assertStringContainsString( 'sitemap_images', $captured[0] );
+		$this->assertContains(
+			wp_json_encode( array( 'https://example.com/a.jpg', 'https://example.com/b.jpg' ) ),
+			$captured[1]
+		);
+	}
+
+	public function test_upsert_stores_sql_null_when_no_images(): void {
+		Monkey\Filters\expectApplied( 'taseo_sitemap_images' )->once()->andReturn( array() );
+
+		$captured_sql = '';
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->andReturnUsing(
+				function ( string $sql, ...$args ) use ( &$captured_sql ): string {
+					$captured_sql = $sql;
+					return 'SQL';
+				}
+			);
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once();
+
+		$this->repository->upsert_synced_fields( 'post', 'post', 1, array( 'permalink' => 'https://example.com/x/' ) );
+
+		$this->assertStringContainsString( 'NULL', $captured_sql );
+		$this->assertStringNotContainsString( "VALUES(sitemap_images)\n\t\t\tWHERE", $captured_sql );
+	}
+
+	public function test_images_are_capped_and_non_absolute_urls_dropped(): void {
+		$many = array();
+		for ( $i = 0; $i < 60; $i++ ) {
+			$many[] = 'https://example.com/img-' . $i . '.jpg';
+		}
+		$many[] = '/relative.jpg';
+		$many[] = 42;
+
+		Monkey\Filters\expectApplied( 'taseo_sitemap_images' )->once()->andReturn( $many );
+
+		$captured = array();
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->andReturnUsing(
+				function ( string $sql, ...$args ) use ( &$captured ): string {
+					$captured = $args;
+					return 'SQL';
+				}
+			);
+		$this->wpdb->shouldReceive( 'query' )->once();
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once();
+
+		$this->repository->upsert_synced_fields( 'post', 'post', 1, array( 'permalink' => 'https://example.com/x/' ) );
+
+		$json    = end( $captured );
+		$decoded = json_decode( (string) $json, true );
+		$this->assertCount( 50, $decoded );
+		$this->assertNotContains( '/relative.jpg', $decoded );
 	}
 
 	public function test_find_returns_row_as_assoc_array(): void {
