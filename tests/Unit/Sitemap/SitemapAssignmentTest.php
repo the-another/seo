@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
-use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 
 #[CoversClass( SitemapAssignment::class )]
 class SitemapAssignmentTest extends TestCase {
@@ -19,7 +19,7 @@ class SitemapAssignmentTest extends TestCase {
 
 	private $wpdb;
 	private $files;
-	private $writer;
+	private $storage;
 	private $settings;
 	private SitemapAssignment $assignment;
 
@@ -33,10 +33,10 @@ class SitemapAssignmentTest extends TestCase {
 		$this->wpdb   = $wpdb;
 
 		$this->files    = Mockery::mock( SitemapFileRepository::class );
-		$this->writer   = Mockery::mock( SitemapFileWriter::class );
+		$this->storage  = Mockery::mock( SitemapStorage::class );
 		$this->settings = Mockery::mock( Settings::class );
 
-		$this->assignment = new SitemapAssignment( $this->files, $this->writer, $this->settings );
+		$this->assignment = new SitemapAssignment( $this->files, $this->storage, $this->settings );
 	}
 
 	protected function tearDown(): void {
@@ -164,7 +164,7 @@ class SitemapAssignmentTest extends TestCase {
 			->with( 'wp_taseo_indexables', array( 'sitemap_file_id' => null ), array( 'id' => 9 ) );
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 412 );
 		$this->files->shouldNotReceive( 'delete_chunk' );
-		$this->writer->shouldNotReceive( 'delete_file' );
+		$this->storage->shouldNotReceive( 'delete' );
 
 		// Releases are never gated on the enabled toggle — counters must stay true.
 		$this->settings->shouldNotReceive( 'is_sitemap_enabled' );
@@ -181,7 +181,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
 		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
 		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( true );
-		$this->writer->shouldReceive( 'delete_file' )->once()->with( $chunk );
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
 	}
@@ -195,7 +195,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
 		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
 		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( false );
-		$this->writer->shouldNotReceive( 'delete_file' );
+		$this->storage->shouldNotReceive( 'delete' );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
 	}

@@ -39,12 +39,12 @@ class SitemapAssignment {
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
-	 * @param SitemapFileWriter     $writer   File writer (for immediate unlink at zero links).
+	 * @param SitemapStorage        $storage  Storage seam (for immediate unlink at zero links).
 	 * @param Settings              $settings Settings.
 	 */
 	public function __construct(
 		private readonly SitemapFileRepository $files,
-		private readonly SitemapFileWriter $writer,
+		private readonly SitemapStorage $storage,
 		private readonly Settings $settings
 	) {
 	}
@@ -192,7 +192,7 @@ class SitemapAssignment {
 		// delete_chunk() return false; skip the unlink so a live chunk's file
 		// is never removed out from under it.
 		if ( $this->files->delete_chunk( $chunk_id ) ) {
-			$this->writer->delete_file( $chunk );
+			$this->storage->delete( $chunk );
 		}
 	}
 

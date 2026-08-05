@@ -16,7 +16,7 @@ use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
-use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 
 #[CoversClass( SettingsPage::class )]
@@ -26,7 +26,7 @@ class SettingsPageTest extends TestCase {
 	private $settings;
 	private $backfill;
 	private $sitemap_files;
-	private $sitemap_writer;
+	private $sitemap_storage;
 	private $sitemap_sweeper;
 	private TemplateVariables $template_variables;
 	private $custom_pages;
@@ -63,7 +63,7 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'is_object_in_taxonomy' )->justReturn( true );
 
 		$this->sitemap_files      = Mockery::mock( SitemapFileRepository::class );
-		$this->sitemap_writer     = Mockery::mock( SitemapFileWriter::class );
+		$this->sitemap_storage    = Mockery::mock( SitemapStorage::class );
 		$this->sitemap_sweeper    = Mockery::mock( SitemapSweeper::class );
 		$this->template_variables = new TemplateVariables();
 
@@ -74,7 +74,7 @@ class SettingsPageTest extends TestCase {
 			$this->settings,
 			$this->backfill,
 			$this->sitemap_files,
-			$this->sitemap_writer,
+			$this->sitemap_storage,
 			$this->sitemap_sweeper,
 			$this->template_variables,
 			$this->custom_pages
@@ -356,7 +356,7 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'esc_html__' )->returnArg();
 
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->sitemap_writer->shouldReceive( 'is_writable' )->andReturn( false );
+		$this->sitemap_storage->shouldReceive( 'is_writable' )->andReturn( false );
 
 		ob_start();
 		$this->page->maybe_print_sitemap_storage_notice();
@@ -367,7 +367,7 @@ class SettingsPageTest extends TestCase {
 
 	public function test_sitemap_storage_notice_silent_when_writable(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->sitemap_writer->shouldReceive( 'is_writable' )->andReturn( true );
+		$this->sitemap_storage->shouldReceive( 'is_writable' )->andReturn( true );
 
 		ob_start();
 		$this->page->maybe_print_sitemap_storage_notice();

@@ -13,69 +13,25 @@ use TheAnother\Plugin\SEO\Database\IndexablesTable;
 /**
  * Class SitemapFileWriter
  *
- * Renders and writes one chunk's physical XML file. A file is always a pure
- * rendering of "indexable rows currently pointing at this chunk", so rebuilds
- * are idempotent — two processes racing on the same chunk produce a redundant
- * write, never corruption. The dirty flag is only cleared after a successful
- * write, so failures self-heal on the next sweep.
+ * Renders one chunk's <urlset> XML from the member query and hands it to
+ * SitemapStorage for the actual filesystem write. A file is always a pure
+ * rendering of "indexable rows currently pointing at this chunk", so
+ * rebuilds are idempotent — two processes racing on the same chunk produce a
+ * redundant write, never corruption. The dirty flag is only cleared after a
+ * successful write, so failures self-heal on the next sweep.
  */
 class SitemapFileWriter {
 
 	/**
-	 * Directory under uploads/ holding all chunk files.
-	 *
-	 * @var string
-	 */
-	public const DIRECTORY = 'taseo-sitemaps';
-
-	/**
 	 * Constructor.
 	 *
-	 * @param SitemapFileRepository $files Registry repository.
+	 * @param SitemapFileRepository $files   Registry repository.
+	 * @param SitemapStorage        $storage Storage seam.
 	 */
-	public function __construct( private readonly SitemapFileRepository $files ) {
-	}
-
-	/**
-	 * Absolute path of the sitemap directory.
-	 *
-	 * @return string Path without trailing slash.
-	 */
-	public function get_directory_path(): string {
-		$uploads = wp_upload_dir();
-
-		return trailingslashit( (string) $uploads['basedir'] ) . self::DIRECTORY;
-	}
-
-	/**
-	 * File name for a chunk: {subtype}-sitemap-{n}.xml.
-	 *
-	 * @param array<string, mixed> $chunk Registry row (object_subtype, chunk_number).
-	 * @return string File name.
-	 */
-	public function get_file_name( array $chunk ): string {
-		return sprintf( '%s-sitemap-%d.xml', (string) $chunk['object_subtype'], (int) $chunk['chunk_number'] );
-	}
-
-	/**
-	 * Absolute path of a chunk's file.
-	 *
-	 * @param array<string, mixed> $chunk Registry row.
-	 * @return string Path.
-	 */
-	public function get_file_path( array $chunk ): string {
-		return trailingslashit( $this->get_directory_path() ) . $this->get_file_name( $chunk );
-	}
-
-	/**
-	 * Whether sitemap files can be written at all.
-	 *
-	 * @return bool Uploads dir resolved and writable.
-	 */
-	public function is_writable(): bool {
-		$uploads = wp_upload_dir();
-
-		return empty( $uploads['error'] ) && wp_is_writable( (string) $uploads['basedir'] );
+	public function __construct(
+		private readonly SitemapFileRepository $files,
+		private readonly SitemapStorage $storage
+	) {
 	}
 
 	/**
@@ -126,11 +82,7 @@ class SitemapFileWriter {
 			array_filter( $rows, static fn( array $row ): bool => '' !== (string) ( $row['permalink'] ?? '' ) )
 		);
 
-		if ( ! wp_mkdir_p( $this->get_directory_path() ) ) {
-			return false;
-		}
-
-		if ( ! $this->write_file( $this->get_file_path( $chunk ), $this->render_urlset( $rows ) ) ) {
+		if ( ! $this->storage->write( $chunk, $this->render_urlset( $rows ) ) ) {
 			return false;
 		}
 
@@ -145,20 +97,6 @@ class SitemapFileWriter {
 		$this->files->update_after_rebuild( (int) $chunk['id'], $max_modified );
 
 		return true;
-	}
-
-	/**
-	 * Remove a chunk's physical file (chunk emptied and deleted).
-	 *
-	 * @param array<string, mixed> $chunk Registry row.
-	 * @return void
-	 */
-	public function delete_file( array $chunk ): void {
-		$path = $this->get_file_path( $chunk );
-
-		if ( file_exists( $path ) ) {
-			wp_delete_file( $path );
-		}
 	}
 
 	/**
@@ -191,26 +129,5 @@ class SitemapFileWriter {
 		}
 
 		return $xml . '</urlset>' . "\n";
-	}
-
-	/**
-	 * Write via the WP Filesystem API.
-	 *
-	 * @param string $path     Absolute file path.
-	 * @param string $contents File contents.
-	 * @return bool Success.
-	 */
-	private function write_file( string $path, string $contents ): bool {
-		global $wp_filesystem;
-
-		if ( ! function_exists( 'WP_Filesystem' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/file.php';
-		}
-
-		if ( ! WP_Filesystem() || ! $wp_filesystem ) {
-			return false;
-		}
-
-		return (bool) $wp_filesystem->put_contents( $path, $contents, defined( 'FS_CHMOD_FILE' ) ? FS_CHMOD_FILE : 0644 );
 	}
 }

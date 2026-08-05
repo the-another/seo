@@ -15,7 +15,7 @@ use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
-use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
@@ -125,7 +125,7 @@ class SettingsPage {
 	 * @param Settings              $settings           Settings.
 	 * @param IndexableBackfill     $backfill           Backfill.
 	 * @param SitemapFileRepository $sitemap_files      Sitemap registry (status panel).
-	 * @param SitemapFileWriter     $sitemap_writer     Sitemap writer (writability probe).
+	 * @param SitemapStorage        $sitemap_storage    Sitemap storage (writability probe).
 	 * @param SitemapSweeper        $sitemap_sweeper    Sitemap sweeper (regenerate action).
 	 * @param TemplateVariables     $template_variables Template variables registry (per-row pills).
 	 * @param CustomPages           $custom_pages       Plugin-registered custom pages.
@@ -134,7 +134,7 @@ class SettingsPage {
 		private readonly Settings $settings,
 		private readonly IndexableBackfill $backfill,
 		private readonly SitemapFileRepository $sitemap_files,
-		private readonly SitemapFileWriter $sitemap_writer,
+		private readonly SitemapStorage $sitemap_storage,
 		private readonly SitemapSweeper $sitemap_sweeper,
 		private readonly TemplateVariables $template_variables,
 		private readonly CustomPages $custom_pages
@@ -1070,7 +1070,7 @@ class SettingsPage {
 	 * @return void
 	 */
 	public function maybe_print_sitemap_storage_notice(): void {
-		if ( ! $this->settings->is_sitemap_enabled() || $this->sitemap_writer->is_writable() ) {
+		if ( ! $this->settings->is_sitemap_enabled() || $this->sitemap_storage->is_writable() ) {
 			return;
 		}
 

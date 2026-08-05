@@ -69,6 +69,7 @@ class PluginTest extends TestCase {
 			'settings_page',
 			'blocks',
 			'sitemap_file_repository',
+			'sitemap_storage',
 			'sitemap_file_writer',
 			'sitemap_assignment',
 			'sitemap_sweeper',

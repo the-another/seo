@@ -59,11 +59,13 @@ class SitemapSweeper {
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
 	 * @param SitemapFileWriter     $writer   File writer.
+	 * @param SitemapStorage        $storage  Storage seam (writability probe).
 	 * @param Settings              $settings Settings.
 	 */
 	public function __construct(
 		private readonly SitemapFileRepository $files,
 		private readonly SitemapFileWriter $writer,
+		private readonly SitemapStorage $storage,
 		private readonly Settings $settings
 	) {
 	}
@@ -129,7 +131,7 @@ class SitemapSweeper {
 			return;
 		}
 
-		if ( ! $this->writer->is_writable() ) {
+		if ( ! $this->storage->is_writable() ) {
 			// Environment problem (surfaced as an admin notice by the
 			// settings page) — bail without fataling or partially writing.
 			return;
