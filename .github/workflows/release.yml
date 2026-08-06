@@ -1,11 +1,15 @@
 name: Release Plugin
 
-# On every push to master: re-run the FULL gate (lint, unit, functional
-# e2e, Plugin Check — same scripts as ci.yml), then build the release zip,
-# tag v<version> (from package.json), and publish a GitHub Release with the
-# zip attached. Pushing without a version bump is a no-op publish: the full
-# gate still runs, but the existing-tag check skips the release steps with
-# a warning.
+# On every push to master: re-run the FULL gate (PHPCS, PHPUnit, JS unit,
+# functional e2e, Plugin Check — the same five jobs, same scripts, same
+# runner label as ci.yml), then build the release zip, tag v<version> (from
+# package.json), and publish a GitHub Release with the zip attached. Pushing
+# without a version bump is a no-op publish: the full gate still runs, but
+# the existing-tag check skips the release steps with a warning.
+#
+# The gate here must stay identical to ci.yml's — a job added there and not
+# here means a regression can reach a published release through a direct
+# master push. See ci.yml's header for the runner-label rationale.
 
 on:
   push:
@@ -23,10 +27,18 @@ concurrency:
 jobs:
   lint:
     name: PHPCS
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
@@ -36,10 +48,18 @@ jobs:
 
   unit:
     name: PHPUnit
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up toolchain
         run: sh scripts/setup/unit.sh
@@ -49,10 +69,18 @@ jobs:
 
   test-e2e:
     name: Functional E2E
-    runs-on: ubuntu-24.04
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh
@@ -60,22 +88,53 @@ jobs:
       - name: Run functional e2e suite
         run: sh scripts/tests/e2e.sh
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      # The Playwright config reports to stdout ('list') and writes failure
+      # artifacts to test-results/ — there is no playwright-report/ directory.
+      - name: Upload e2e video, traces, and tour screenshots
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: playwright-report-functional
           path: |
-            playwright-report/
             test-results/
+            artifacts/tour/
           retention-days: 7
 
-  check-plugin:
-    name: Plugin Check (PCP)
-    runs-on: ubuntu-24.04
+  test-js:
+    name: JS Unit
+    runs-on: depot-ubuntu-24.04-4
     steps:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
+
+      - name: Set up toolchain
+        run: sh scripts/setup/unit.sh
+
+      - name: Run Jest
+        run: npm ci && npm run test:unit:js
+
+  check-plugin:
+    name: Plugin Check (PCP)
+    runs-on: depot-ubuntu-24.04-4
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up e2e environment
         run: sh scripts/setup/e2e.sh
@@ -93,8 +152,8 @@ jobs:
 
   release:
     name: Build & Release
-    runs-on: ubuntu-24.04
-    needs: [lint, unit, test-e2e, check-plugin]
+    runs-on: depot-ubuntu-24.04-4
+    needs: [lint, unit, test-e2e, test-js, check-plugin]
 
     steps:
       - name: Checkout code
@@ -118,6 +177,15 @@ jobs:
           else
             echo "exists=false" >> $GITHUB_OUTPUT
           fi
+
+      # The runner image ships Node < 24, which would send scripts/setup/*.sh
+      # down their NodeSource fallback — and deb.nodesource.com/setup_24.x now
+      # returns 403. Providing Node here means that fallback is never reached.
+      - name: Set up Node
+        if: steps.tag_check.outputs.exists == 'false'
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 24
 
       - name: Set up toolchain
         if: steps.tag_check.outputs.exists == 'false'
