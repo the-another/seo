@@ -149,12 +149,38 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->assertSame( 0, $this->files->release_slot( 7 ) );
 	}
 
-	public function test_delete_chunk_removes_registry_row(): void {
+	public function test_get_by_subtype_and_number_finds_the_row(): void {
 		$this->wpdb->shouldReceive( 'prepare' )
 			->once()
 			->with(
 				Mockery::on(
-					fn( string $sql ): bool => str_contains( $sql, 'DELETE FROM wp_taseo_sitemap_files' )
+					fn( string $sql ): bool => str_contains( $sql, 'FROM wp_taseo_sitemap_files' )
+						&& str_contains( $sql, 'object_subtype = %s' )
+						&& str_contains( $sql, 'chunk_number = %d' )
+				),
+				'product',
+				3
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'SQL', ARRAY_A )->andReturn( array( 'id' => '7', 'link_count' => '0' ) );
+
+		$this->assertSame( array( 'id' => '7', 'link_count' => '0' ), $this->files->get_by_subtype_and_number( 'product', 3 ) );
+	}
+
+	public function test_get_by_subtype_and_number_returns_null_when_no_row(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'SQL', ARRAY_A )->andReturn( null );
+
+		$this->assertNull( $this->files->get_by_subtype_and_number( 'product', 999 ) );
+	}
+
+	public function test_tombstone_chunk_clears_generated_at_and_dirty_when_still_zero_links(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'UPDATE wp_taseo_sitemap_files' )
+						&& str_contains( $sql, 'SET generated_at = NULL, is_dirty = 0' )
 						&& str_contains( $sql, 'WHERE id = %d' )
 						&& str_contains( $sql, 'AND link_count = 0' )
 				),
@@ -163,14 +189,31 @@ class SitemapFileRepositoryTest extends TestCase {
 			->andReturn( 'SQL' );
 		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 1 );
 
-		$this->assertTrue( $this->files->delete_chunk( 7 ) );
+		$this->assertTrue( $this->files->tombstone_chunk( 7 ) );
 	}
 
-	public function test_delete_chunk_loses_race_when_chunk_was_reclaimed(): void {
+	public function test_tombstone_chunk_loses_race_when_chunk_was_reclaimed(): void {
 		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
 		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 0 );
 
-		$this->assertFalse( $this->files->delete_chunk( 7 ) );
+		$this->assertFalse( $this->files->tombstone_chunk( 7 ) );
+	}
+
+	public function test_tombstone_subtype_chunks_zeroes_every_row_of_a_subtype(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'UPDATE wp_taseo_sitemap_files' )
+						&& str_contains( $sql, 'SET link_count = 0, generated_at = NULL, is_dirty = 0' )
+						&& str_contains( $sql, 'WHERE object_subtype = %s' )
+				),
+				'vendor_store'
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+
+		$this->files->tombstone_subtype_chunks( 'vendor_store' );
 	}
 
 	public function test_mark_dirty_flags_one_chunk(): void {
@@ -224,10 +267,77 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->files->update_after_rebuild( 7, '2026-07-02 10:00:00' );
 	}
 
+	public function test_get_dirty_chunks_excludes_subtypes(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'is_dirty = 1' )
+						&& str_contains( $sql, 'object_subtype NOT IN (%s,%s)' )
+						&& str_contains( $sql, 'LIMIT %d' )
+				),
+				'vendor_store',
+				'auctioneer_location',
+				20
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array() );
+
+		$this->files->get_dirty_chunks( 20, array( 'vendor_store', 'auctioneer_location' ) );
+	}
+
+	public function test_get_dirty_chunks_without_exclusions_keeps_simple_query(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'is_dirty = 1' ) && ! str_contains( $sql, 'NOT IN' )
+				),
+				20
+			)
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->andReturn( array() );
+
+		$this->files->get_dirty_chunks( 20 );
+	}
+
+	public function test_count_dirty_excludes_subtypes(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'COUNT(*)' ) && str_contains( $sql, 'NOT IN (%s)' ) ), array( 'vendor_store' ) )
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->with( 'SQL' )->andReturn( '2' );
+
+		$this->assertSame( 2, $this->files->count_dirty( array( 'vendor_store' ) ) );
+	}
+
+	public function test_suspend_subtype_chunks_nulls_generated_at_and_marks_dirty(): void {
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'SET generated_at = NULL, is_dirty = 1' ) && str_contains( $sql, 'object_subtype = %s' ) ), 'vendor_store' )
+			->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
+
+		$this->files->suspend_subtype_chunks( 'vendor_store' );
+	}
+
+	public function test_get_chunks_for_subtype(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array( array( 'id' => '1' ) ) );
+
+		$this->assertSame( array( array( 'id' => '1' ) ), $this->files->get_chunks_for_subtype( 'vendor_store' ) );
+	}
+
 	public function test_get_status_summary_shapes_per_subtype_counts(): void {
 		$this->wpdb->shouldReceive( 'get_results' )
 			->once()
-			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'GROUP BY object_subtype' ) ), ARRAY_A )
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'GROUP BY object_subtype' )
+						&& str_contains( $sql, 'link_count > 0' )
+				),
+				ARRAY_A
+			)
 			->andReturn(
 				array(
 					array( 'object_subtype' => 'page', 'chunks' => '1', 'links' => '87' ),
@@ -249,5 +359,38 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->assertSame( array( 'chunks' => 4, 'links' => 3412 ), $summary['subtypes']['product'] );
 		$this->assertSame( 2, $summary['dirty'] );
 		$this->assertSame( '2026-07-03 09:00:00', $summary['last_generated'] );
+	}
+
+	public function test_get_status_summary_forwards_excluded_subtypes_to_count_dirty(): void {
+		$this->wpdb->shouldReceive( 'get_results' )
+			->once()
+			->with(
+				Mockery::on(
+					fn( string $sql ): bool => str_contains( $sql, 'GROUP BY object_subtype' )
+						&& str_contains( $sql, 'link_count > 0' )
+				),
+				ARRAY_A
+			)
+			->andReturn( array() );
+
+		// count_dirty()'s excluded-subtypes branch: a NOT IN clause built from
+		// the disabled families passed through, not the no-args simple query.
+		$this->wpdb->shouldReceive( 'prepare' )
+			->once()
+			->with(
+				Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'COUNT(*)' ) && str_contains( $sql, 'NOT IN (%s)' ) ),
+				array( 'vendor_store' )
+			)
+			->andReturn( 'COUNT_SQL' );
+		$this->wpdb->shouldReceive( 'get_var' )->once()->with( 'COUNT_SQL' )->andReturn( '1' );
+
+		$this->wpdb->shouldReceive( 'get_var' )
+			->once()
+			->with( Mockery::on( fn( string $sql ): bool => str_contains( $sql, 'MAX(generated_at)' ) ) )
+			->andReturn( null );
+
+		$summary = $this->files->get_status_summary( array( 'vendor_store' ) );
+
+		$this->assertSame( 1, $summary['dirty'] );
 	}
 }

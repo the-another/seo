@@ -42,6 +42,29 @@ class SitemapFileRepository {
 	}
 
 	/**
+	 * Fetch one registry row by its natural key, for the paths that only
+	 * know a subtype and chunk number (SitemapServer's chunk URL routing).
+	 *
+	 * @param string $object_subtype Post type or taxonomy slug.
+	 * @param int    $chunk_number   Chunk number.
+	 * @return array<string, mixed>|null Row or null.
+	 */
+	public function get_by_subtype_and_number( string $object_subtype, int $chunk_number ): ?array {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$row = $wpdb->get_row(
+			$wpdb->prepare( "SELECT * FROM {$table} WHERE object_subtype = %s AND chunk_number = %d", $object_subtype, $chunk_number ),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return is_array( $row ) ? $row : null;
+	}
+
+	/**
 	 * Lowest-numbered chunk for a subtype that still has room.
 	 *
 	 * @param string $object_subtype Post type or taxonomy slug.
@@ -161,28 +184,35 @@ class SitemapFileRepository {
 	}
 
 	/**
-	 * Delete a registry row (the physical file is the writer's problem).
+	 * Tombstone a registry row (the physical file is the caller's problem).
+	 *
+	 * Setting generated_at = NULL delists the chunk from the root index (the
+	 * same guard render_root_index() already uses for never-swept chunks);
+	 * is_dirty = 0 because a tombstoned chunk has nothing left to render —
+	 * the sweep would otherwise pick it up forever. The zero-link row itself
+	 * is kept, not deleted: it is the durable memory that this chunk existed,
+	 * which is what lets SitemapServer answer 410 instead of 404 for its URL.
 	 *
 	 * Conditioned on link_count = 0: a concurrent assign() can reclaim this
 	 * chunk (bump it back to 1 link) between the caller's zero-link read and
-	 * this delete. Without the guard we would delete a row a live object now
-	 * points at, orphaning it from the sitemap forever. With the guard, that
-	 * race just makes the delete affect zero rows — the claimer's chunk
-	 * survives, and the caller is expected to treat a false return as "leave
-	 * it alone", not as an error.
+	 * this tombstone. Without the guard we would blank out a live chunk's
+	 * generated_at, hiding it from the index. With the guard, that race just
+	 * makes the update affect zero rows — the claimer's chunk survives, and
+	 * the caller is expected to treat a false return as "leave it alone",
+	 * not as an error.
 	 *
 	 * @param int $chunk_id Chunk row ID.
-	 * @return bool True when the row was deleted, false when a concurrent
+	 * @return bool True when the row was tombstoned, false when a concurrent
 	 *              claim reclaimed the chunk first.
 	 */
-	public function delete_chunk( int $chunk_id ): bool {
+	public function tombstone_chunk( int $chunk_id ): bool {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
 
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$affected = $wpdb->query(
-			$wpdb->prepare( "DELETE FROM {$table} WHERE id = %d AND link_count = 0", $chunk_id )
+			$wpdb->prepare( "UPDATE {$table} SET generated_at = NULL, is_dirty = 0 WHERE id = %d AND link_count = 0", $chunk_id )
 		);
 		// phpcs:enable
 
@@ -219,19 +249,28 @@ class SitemapFileRepository {
 	/**
 	 * A bounded batch of chunks awaiting rebuild.
 	 *
-	 * @param int $limit Batch size.
+	 * @param int                $limit             Batch size.
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip (disabled families).
 	 * @return array<int, array<string, mixed>> Rows.
 	 */
-	public function get_dirty_chunks( int $limit ): array {
+	public function get_dirty_chunks( int $limit, array $excluded_subtypes = array() ): array {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
+		$sql   = "SELECT * FROM {$table} WHERE is_dirty = 1";
+		$args  = array();
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-		$rows = $wpdb->get_results(
-			$wpdb->prepare( "SELECT * FROM {$table} WHERE is_dirty = 1 ORDER BY id ASC LIMIT %d", $limit ),
-			ARRAY_A
-		);
+		if ( array() !== $excluded_subtypes ) {
+			$placeholders = implode( ',', array_fill( 0, count( $excluded_subtypes ), '%s' ) );
+			$sql         .= " AND object_subtype NOT IN ({$placeholders})";
+			$args         = array_values( $excluded_subtypes );
+		}
+
+		$sql   .= ' ORDER BY id ASC LIMIT %d';
+		$args[] = $limit;
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, ...$args ), ARRAY_A );
 		// phpcs:enable
 
 		return is_array( $rows ) ? $rows : array();
@@ -240,15 +279,29 @@ class SitemapFileRepository {
 	/**
 	 * How many chunks still await rebuild.
 	 *
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip (disabled families).
 	 * @return int Dirty count.
 	 */
-	public function count_dirty(): int {
+	public function count_dirty( array $excluded_subtypes = array() ): int {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
-		return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1" );
+		if ( array() === $excluded_subtypes ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
+			return (int) $wpdb->get_var( "SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1" );
+		}
+
+		$placeholders = implode( ',', array_fill( 0, count( $excluded_subtypes ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		return (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE is_dirty = 1 AND object_subtype NOT IN ({$placeholders})",
+				array_values( $excluded_subtypes )
+			)
+		);
+		// phpcs:enable
 	}
 
 	/**
@@ -293,17 +346,25 @@ class SitemapFileRepository {
 	/**
 	 * Operational summary for the settings status panel.
 	 *
+	 * @param array<int, string> $excluded_subtypes Subtypes to skip in the
+	 *                            dirty count (disabled families) — their
+	 *                            chunks are suspended, permanently dirty,
+	 *                            and would otherwise show as a count that
+	 *                            never drains.
 	 * @return array{subtypes: array<string, array{chunks: int, links: int}>, dirty: int, last_generated: ?string} Summary.
 	 */
-	public function get_status_summary(): array {
+	public function get_status_summary( array $excluded_subtypes = array() ): array {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
 
+		// Tombstones (link_count = 0) are excluded: they are inert registry
+		// rows kept only so their URL can answer 410, not files to report as
+		// part of a subtype's live chunk/link counts.
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared
 		$rows = $wpdb->get_results(
 			"SELECT object_subtype, COUNT(*) AS chunks, COALESCE(SUM(link_count), 0) AS links
-			FROM {$table} GROUP BY object_subtype ORDER BY object_subtype ASC",
+			FROM {$table} WHERE link_count > 0 GROUP BY object_subtype ORDER BY object_subtype ASC",
 			ARRAY_A
 		);
 
@@ -321,8 +382,75 @@ class SitemapFileRepository {
 
 		return array(
 			'subtypes'       => $subtypes,
-			'dirty'          => $this->count_dirty(),
+			'dirty'          => $this->count_dirty( $excluded_subtypes ),
 			'last_generated' => is_string( $last_generated ) && '' !== $last_generated ? $last_generated : null,
 		);
+	}
+
+	/**
+	 * Every chunk of one subtype.
+	 *
+	 * @param string $object_subtype Subtype / family key.
+	 * @return array<int, array<string, mixed>> Rows.
+	 */
+	public function get_chunks_for_subtype( string $object_subtype ): array {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = $wpdb->get_results(
+			$wpdb->prepare( "SELECT * FROM {$table} WHERE object_subtype = %s ORDER BY chunk_number ASC", $object_subtype ),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		return is_array( $rows ) ? $rows : array();
+	}
+
+	/**
+	 * Hide a family's chunks from the root index and queue their rebuild.
+	 *
+	 * Setting generated_at = NULL reuses the backfill-window guard in
+	 * SitemapServer::render_root_index(); is_dirty = 1 makes re-enabling
+	 * rebuild the files on the next sweep.
+	 *
+	 * @param string $object_subtype Family key.
+	 * @return void
+	 */
+	public function suspend_subtype_chunks( string $object_subtype ): void {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query(
+			$wpdb->prepare( "UPDATE {$table} SET generated_at = NULL, is_dirty = 1 WHERE object_subtype = %s", $object_subtype )
+		);
+		// phpcs:enable
+	}
+
+	/**
+	 * Tombstone every registry row of one subtype (bulk family removal — the
+	 * physical files are the caller's problem, via SitemapStorage).
+	 *
+	 * Unconditional, unlike tombstone_chunk(): a whole-family removal is not
+	 * racing an individual assign() the way a single release is — pointers
+	 * are cleared first by the caller (ExternalUrls::delete_family()), so
+	 * link_count is force-set to 0 here rather than merely checked.
+	 *
+	 * @param string $object_subtype Family key.
+	 * @return void
+	 */
+	public function tombstone_subtype_chunks( string $object_subtype ): void {
+		global $wpdb;
+
+		$table = SitemapFilesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$wpdb->query(
+			$wpdb->prepare( "UPDATE {$table} SET link_count = 0, generated_at = NULL, is_dirty = 0 WHERE object_subtype = %s", $object_subtype )
+		);
+		// phpcs:enable
 	}
 }

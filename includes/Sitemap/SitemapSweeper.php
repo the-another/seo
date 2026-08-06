@@ -59,11 +59,13 @@ class SitemapSweeper {
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
 	 * @param SitemapFileWriter     $writer   File writer.
+	 * @param SitemapStorage        $storage  Storage seam (writability probe).
 	 * @param Settings              $settings Settings.
 	 */
 	public function __construct(
 		private readonly SitemapFileRepository $files,
 		private readonly SitemapFileWriter $writer,
+		private readonly SitemapStorage $storage,
 		private readonly Settings $settings
 	) {
 	}
@@ -129,14 +131,15 @@ class SitemapSweeper {
 			return;
 		}
 
-		if ( ! $this->writer->is_writable() ) {
+		if ( ! $this->storage->is_writable() ) {
 			// Environment problem (surfaced as an admin notice by the
 			// settings page) — bail without fataling or partially writing.
 			return;
 		}
 
-		$dirty   = $this->files->get_dirty_chunks( self::BATCH_SIZE );
-		$rebuilt = 0;
+		$disabled = $this->settings->get_disabled_sitemap_families();
+		$dirty    = $this->files->get_dirty_chunks( self::BATCH_SIZE, $disabled );
+		$rebuilt  = 0;
 
 		foreach ( $dirty as $chunk ) {
 			if ( $this->writer->rebuild( $chunk ) ) {
@@ -148,7 +151,7 @@ class SitemapSweeper {
 		// backlog left. Failed rebuilds keep their dirty flag and wait for
 		// the recurring tick — chaining on failure would spin a hot loop
 		// against a broken filesystem.
-		if ( self::BATCH_SIZE === count( $dirty ) && self::BATCH_SIZE === $rebuilt && 0 < $this->files->count_dirty() ) {
+		if ( self::BATCH_SIZE === count( $dirty ) && self::BATCH_SIZE === $rebuilt && 0 < $this->files->count_dirty( $disabled ) ) {
 			as_enqueue_async_action( self::HOOK, array(), self::GROUP );
 		}
 	}

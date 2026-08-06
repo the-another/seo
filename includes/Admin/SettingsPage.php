@@ -14,8 +14,10 @@ use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFamilies;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
-use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
@@ -125,19 +127,23 @@ class SettingsPage {
 	 * @param Settings              $settings           Settings.
 	 * @param IndexableBackfill     $backfill           Backfill.
 	 * @param SitemapFileRepository $sitemap_files      Sitemap registry (status panel).
-	 * @param SitemapFileWriter     $sitemap_writer     Sitemap writer (writability probe).
+	 * @param SitemapStorage        $sitemap_storage    Sitemap storage (writability probe).
 	 * @param SitemapSweeper        $sitemap_sweeper    Sitemap sweeper (regenerate action).
 	 * @param TemplateVariables     $template_variables Template variables registry (per-row pills).
 	 * @param CustomPages           $custom_pages       Plugin-registered custom pages.
+	 * @param SitemapFamilies       $sitemap_families   External URL families registry.
+	 * @param SitemapAssignment     $sitemap_assignment Sitemap chunk assignment (family toggle transitions).
 	 */
 	public function __construct(
 		private readonly Settings $settings,
 		private readonly IndexableBackfill $backfill,
 		private readonly SitemapFileRepository $sitemap_files,
-		private readonly SitemapFileWriter $sitemap_writer,
+		private readonly SitemapStorage $sitemap_storage,
 		private readonly SitemapSweeper $sitemap_sweeper,
 		private readonly TemplateVariables $template_variables,
-		private readonly CustomPages $custom_pages
+		private readonly CustomPages $custom_pages,
+		private readonly SitemapFamilies $sitemap_families,
+		private readonly SitemapAssignment $sitemap_assignment
 	) {
 	}
 
@@ -850,7 +856,10 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_sitemap_tab(): void {
-		$status = $this->sitemap_files->get_status_summary();
+		// A disabled family's chunks are suspended (permanently dirty via
+		// SitemapFileRepository::suspend_subtype_chunks()), so without this
+		// exclusion the dirty count would include a figure that never drains.
+		$status = $this->sitemap_files->get_status_summary( $this->settings->get_disabled_sitemap_families() );
 
 		echo '<table class="form-table">';
 		printf(
@@ -866,6 +875,26 @@ class SettingsPage {
 			esc_html__( '(1–1000; applies to newly created files)', 'the-another-seo' )
 		);
 		echo '</table>';
+
+		$families = $this->sitemap_families->all();
+
+		if ( array() !== $families ) {
+			echo '<h2>' . esc_html__( 'External URL families', 'the-another-seo' ) . '</h2>';
+			echo '<p>' . esc_html__( 'URL sets registered by other plugins. Unchecked families are excluded from the sitemap.', 'the-another-seo' ) . '</p>';
+			echo '<table class="form-table">';
+
+			foreach ( $families as $key => $label ) {
+				printf(
+					'<tr><th scope="row">%1$s<br /><span style="font-weight: normal; color: #646970;">%2$s</span></th><td><label><input type="checkbox" name="taseo_settings[sitemap_families][]" value="%2$s" %3$s /> %4$s</label></td></tr>',
+					esc_html( $label ),
+					esc_attr( $key ),
+					checked( $this->settings->is_sitemap_family_enabled( $key ), true, false ),
+					esc_html__( 'Include in sitemap', 'the-another-seo' )
+				);
+			}
+
+			echo '</table>';
+		}
 
 		echo '<h2>' . esc_html__( 'Status', 'the-another-seo' ) . '</h2>';
 
@@ -995,7 +1024,21 @@ class SettingsPage {
 		$raw = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
 		$tab = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
 
+		$previously_disabled = $this->settings->get_disabled_sitemap_families();
+
 		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
+
+		if ( 'sitemap' === $tab ) {
+			$now_disabled = $this->settings->get_disabled_sitemap_families();
+
+			foreach ( array_diff( $now_disabled, $previously_disabled ) as $family ) {
+				$this->sitemap_assignment->handle_family_disabled( $family );
+			}
+
+			foreach ( array_diff( $previously_disabled, $now_disabled ) as $family ) {
+				$this->sitemap_assignment->handle_family_enabled( $family );
+			}
+		}
 
 		$errors = get_settings_errors();
 
@@ -1070,7 +1113,7 @@ class SettingsPage {
 	 * @return void
 	 */
 	public function maybe_print_sitemap_storage_notice(): void {
-		if ( ! $this->settings->is_sitemap_enabled() || $this->sitemap_writer->is_writable() ) {
+		if ( ! $this->settings->is_sitemap_enabled() || $this->sitemap_storage->is_writable() ) {
 			return;
 		}
 
@@ -1319,6 +1362,18 @@ class SettingsPage {
 
 		if ( 'sitemap' === $tab ) {
 			$clean['sitemap_enabled'] = ! empty( $raw['sitemap_enabled'] );
+
+			$checked = isset( $raw['sitemap_families'] ) && is_array( $raw['sitemap_families'] )
+				? array_map( 'sanitize_key', $raw['sitemap_families'] )
+				: array();
+
+			// Derived from the live registry, never from the posted keys
+			// alone: stale keys of vanished providers are pruned on every
+			// save, and a posted key outside the registry cannot land in
+			// the option.
+			$clean['sitemap_disabled_families'] = array_values(
+				array_diff( array_keys( $this->sitemap_families->all() ), $checked )
+			);
 		}
 
 		return $clean;

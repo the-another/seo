@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- Public sitemap push API: other plugins register URL families via the `taseo_sitemap_families` filter and push URLs with `taseo_sitemap_sync_url()` / `taseo_sitemap_delete_url()` / `taseo_sitemap_delete_family()`.
+- Per-family include/exclude toggles on the Sitemap settings tab, with safe disable (files removed, membership kept) and background re-enable reconciliation.
+- Image sitemap tags: featured images for posts by default, arbitrary images via the `taseo_sitemap_images` filter and the push API, rendered under the Google image namespace.
+- Emptied sitemap chunks are tombstoned: removed from the sitemap index and answering `410 Gone` on direct requests (URLs that never existed keep answering 404); a tombstoned chunk is reused and resurrected when its subtype gains URLs again.
+
+### Changed
+- All sitemap file I/O now flows through a single storage seam that resolves the uploads location per call, so stream-wrapper offloads (e.g. S3) relocate sitemap files transparently; Apache static-serve rules are suppressed when uploads are stream-wrapped.
+
 ## [0.2.0] - 2026-07-27
 
 ### Added

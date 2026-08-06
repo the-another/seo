@@ -59,12 +59,12 @@ class SitemapServer {
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
-	 * @param SitemapFileWriter     $writer   File writer (path/name helpers).
+	 * @param SitemapStorage        $storage  Storage seam (path/name helpers, existence, streaming).
 	 * @param Settings              $settings Settings.
 	 */
 	public function __construct(
 		private readonly SitemapFileRepository $files,
-		private readonly SitemapFileWriter $writer,
+		private readonly SitemapStorage $storage,
 		private readonly Settings $settings
 	) {
 	}
@@ -176,7 +176,7 @@ class SitemapServer {
 			}
 
 			$xml .= "\t<sitemap>\n";
-			$xml .= "\t\t<loc>" . esc_url( home_url( '/' . $this->writer->get_file_name( $chunk ) ) ) . "</loc>\n";
+			$xml .= "\t\t<loc>" . esc_url( home_url( '/' . $this->storage->get_file_name( $chunk ) ) ) . "</loc>\n";
 
 			$lastmod = SitemapFileWriter::format_lastmod(
 				isset( $chunk['last_modified'] ) ? (string) $chunk['last_modified'] : null
@@ -193,7 +193,16 @@ class SitemapServer {
 	}
 
 	/**
-	 * WP fallback for chunk URLs: stream the pre-built physical file.
+	 * WP fallback for chunk URLs: stream the pre-built physical file, or
+	 * report the file's absence with the status that matches why.
+	 *
+	 * Response matrix (the subtype/number guard aside):
+	 * - Physical file exists: 200, XML headers, streamed body.
+	 * - No file, registry row exists with link_count = 0: 410 — the chunk
+	 *   existed and was emptied (tombstoned).
+	 * - No file, registry row exists with link_count > 0, or no row at all:
+	 *   404 — either temporarily gone (disabled family, or claimed before
+	 *   the first sweep writes it) or this URL never existed.
 	 *
 	 * @return void
 	 */
@@ -201,24 +210,35 @@ class SitemapServer {
 		$subtype = sanitize_key( (string) get_query_var( 'taseo_sitemap_subtype' ) );
 		$number  = (int) get_query_var( 'taseo_sitemap_chunk' );
 
-		$path = $this->writer->get_file_path(
-			array(
-				'object_subtype' => $subtype,
-				'chunk_number'   => $number,
-			)
-		);
-
-		if ( '' === $subtype || $number < 1 || ! file_exists( $path ) ) {
+		if ( '' === $subtype || $number < 1 ) {
 			status_header( 404 );
 
 			return;
 		}
 
-		status_header( 200 );
-		$this->send_xml_headers();
+		$chunk = array(
+			'object_subtype' => $subtype,
+			'chunk_number'   => $number,
+		);
 
-		// Never generated here — only reads what the sweep already built.
-		readfile( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_readfile, WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown -- streaming a plugin-generated local static file is the designed fallback path.
+		if ( $this->storage->exists( $chunk ) ) {
+			status_header( 200 );
+			$this->send_xml_headers();
+			$this->storage->stream( $chunk );
+
+			return;
+		}
+
+		$row = $this->files->get_by_subtype_and_number( $subtype, $number );
+
+		if ( null !== $row && 0 === (int) $row['link_count'] ) {
+			// A tombstoned chunk: existed, was emptied, is not a document.
+			status_header( 410 );
+
+			return;
+		}
+
+		status_header( 404 );
 	}
 
 	/**
@@ -266,11 +286,18 @@ class SitemapServer {
 	 * serve_chunk() fallback. Non-Apache hosts simply never apply this
 	 * filter's output and always use the fallback.
 	 *
+	 * Stream-wrapped uploads (e.g. s3://…) suppress this block entirely: the
+	 * target path cannot exist on local disk, so an -f condition against it
+	 * is dead configuration. Every chunk request then falls through to the
+	 * WP fallback, which streams through the wrapper via SitemapStorage —
+	 * chunks always serve from the site origin regardless (the sitemaps.org
+	 * host-scoping rule; Bing enforces it even though Google is lenient).
+	 *
 	 * @param string $rules mod_rewrite block WP is about to write.
 	 * @return string Rules.
 	 */
 	public function prepend_apache_static_rules( string $rules ): string {
-		if ( ! $this->settings->is_sitemap_enabled() ) {
+		if ( ! $this->settings->is_sitemap_enabled() || $this->storage->is_stream_wrapped() ) {
 			return $rules;
 		}
 
@@ -281,7 +308,7 @@ class SitemapServer {
 			return $rules;
 		}
 
-		$directory = $base . '/' . SitemapFileWriter::DIRECTORY;
+		$directory = $base . '/' . SitemapStorage::DIRECTORY;
 
 		$snippet  = "# BEGIN The Another SEO sitemap files\n";
 		$snippet .= "<IfModule mod_rewrite.c>\n";

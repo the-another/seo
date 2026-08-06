@@ -62,6 +62,10 @@ if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/autoload.php' ) ) {
 	require_once THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/autoload.php';
 }
 
+if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'includes/sitemap-functions.php' ) ) {
+	require_once THE_ANOTHER_SEO_PLUGIN_DIR . 'includes/sitemap-functions.php';
+}
+
 // Action Scheduler self-deduplicates across bundling plugins; it must be
 // required directly from the plugin main file, at include time.
 if ( file_exists( THE_ANOTHER_SEO_PLUGIN_DIR . 'vendor/woocommerce/action-scheduler/action-scheduler.php' ) ) {
@@ -82,6 +86,7 @@ register_deactivation_hook(
 		// firing it (via any other AS-bundling plugin) with no listener.
 		if ( function_exists( 'as_unschedule_all_actions' ) ) {
 			as_unschedule_all_actions( Sitemap\SitemapSweeper::HOOK, array(), Sitemap\SitemapSweeper::GROUP );
+			as_unschedule_all_actions( Sitemap\SitemapAssignment::ASSIGN_FAMILY_HOOK, array(), Sitemap\SitemapAssignment::GROUP );
 		}
 
 		// Order matters: at this point our init-registered rewrite rules and

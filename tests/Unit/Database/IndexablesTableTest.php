@@ -117,6 +117,17 @@ class IndexablesTableTest extends TestCase {
 	}
 
 	public function test_db_version_is_bumped_for_the_new_columns(): void {
-		$this->assertSame( '1.2.0', IndexablesTable::DB_VERSION );
+		$this->assertSame( '1.3.0', IndexablesTable::DB_VERSION );
+	}
+
+	public function test_schema_contains_sitemap_images_column(): void {
+		global $wpdb;
+		$wpdb->shouldReceive( 'get_charset_collate' )->andReturn( 'DEFAULT CHARACTER SET utf8mb4' );
+
+		$this->assertStringContainsString( 'sitemap_images TEXT NULL', IndexablesTable::get_schema() );
+	}
+
+	public function test_db_version_is_bumped_for_sitemap_images(): void {
+		$this->assertSame( '1.3.0', IndexablesTable::DB_VERSION );
 	}
 }

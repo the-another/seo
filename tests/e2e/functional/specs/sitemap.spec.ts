@@ -169,4 +169,92 @@ test.describe( 'sitemap', () => {
 		const res = await request.get( '/wp-sitemap.xml' );
 		expect( res.status() ).not.toBe( 200 );
 	} );
+
+	test( 'externally pushed family appears in the index with image tags', async ( {
+		request,
+	} ) => {
+		const index = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( index ).toContain( 'e2e_family-sitemap-' );
+
+		const res = await request.get( '/e2e_family-sitemap-1.xml' );
+		expect( res.status() ).toBe( 200 );
+		const body = await res.text();
+		expect( body ).toContain( '/e2e-family-page/' );
+		expect( body ).toContain(
+			'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"'
+		);
+		expect( body ).toContain( '<image:loc>' );
+		expect( body ).toContain( 'e2e-image.jpg' );
+	} );
+
+	test( 'family toggle removes and restores the chunk', async ( {
+		admin,
+		page,
+		request,
+	} ) => {
+		const wpDir = findWpDir();
+		test.skip( null === wpDir, 'requires the e2e container' );
+
+		// Disable the family.
+		await admin.visitAdminPage( 'options-general.php', 'page=taseo&tab=sitemap' );
+		await page.uncheck( 'input[name="taseo_settings[sitemap_families][]"][value="e2e_family"]' );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		const disabledIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( disabledIndex ).not.toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 404 );
+
+		// Re-enable and drain the (async) rebuild the same way beforeAll does.
+		// force: true on both actions below: the first save above already
+		// drove a native form submission on this page, which is what
+		// webmaster-admin.spec.ts's saveWebmasterSettings() documents as
+		// wedging every later click-family action's actionability wait
+		// (check/uncheck included, not just #submit) for the rest of this
+		// page's life.
+		await admin.visitAdminPage( 'options-general.php', 'page=taseo&tab=sitemap' );
+		await page.check( 'input[name="taseo_settings[sitemap_families][]"][value="e2e_family"]', {
+			force: true,
+		} );
+		await page.locator( '#submit' ).click( { force: true } );
+
+		forceSitemapSweep( wpDir! );
+
+		const restoredIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( restoredIndex ).toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 200 );
+	} );
+
+	test( 'emptying a chunk tombstones it (410), and re-pushing resurrects it', async ( {
+		request,
+	} ) => {
+		const wpDir = findWpDir();
+		test.skip( null === wpDir, 'requires the e2e container' );
+
+		// Tombstoning happens inline off the taseo_indexable_deleting action —
+		// no sweep needed to observe the 410.
+		wpCli(
+			[ 'eval', "taseo_sitemap_delete_url( 'e2e_family', 1 );" ],
+			wpDir!
+		);
+
+		const emptiedIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( emptiedIndex ).not.toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 410 );
+
+		// Resurrect: re-pushing the same family/id reclaims the tombstoned
+		// chunk (find_lowest_open_chunk()'s ordinary claim path), and the
+		// sweep writes its file again.
+		wpCli(
+			[
+				'eval',
+				"taseo_sitemap_sync_url( 'e2e_family', 1, array( 'permalink' => home_url( '/e2e-family-page/' ) ) );",
+			],
+			wpDir!
+		);
+		forceSitemapSweep( wpDir! );
+
+		const resurrectedIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( resurrectedIndex ).toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 200 );
+	} );
 } );

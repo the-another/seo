@@ -13,6 +13,7 @@ use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 
 #[CoversClass( SitemapSweeper::class )]
@@ -21,6 +22,7 @@ class SitemapSweeperTest extends TestCase {
 
 	private $files;
 	private $writer;
+	private $storage;
 	private $settings;
 	private SitemapSweeper $sweeper;
 
@@ -30,9 +32,10 @@ class SitemapSweeperTest extends TestCase {
 
 		$this->files    = Mockery::mock( SitemapFileRepository::class );
 		$this->writer   = Mockery::mock( SitemapFileWriter::class );
+		$this->storage  = Mockery::mock( SitemapStorage::class );
 		$this->settings = Mockery::mock( Settings::class );
 
-		$this->sweeper = new SitemapSweeper( $this->files, $this->writer, $this->settings );
+		$this->sweeper = new SitemapSweeper( $this->files, $this->writer, $this->storage, $this->settings );
 	}
 
 	protected function tearDown(): void {
@@ -42,10 +45,11 @@ class SitemapSweeperTest extends TestCase {
 
 	public function test_handle_sweep_rebuilds_each_dirty_chunk_in_one_bounded_batch(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->writer->shouldReceive( 'is_writable' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() );
+		$this->storage->shouldReceive( 'is_writable' )->andReturn( true );
 
 		$chunks = array( array( 'id' => '1' ), array( 'id' => '2' ) );
-		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->with( SitemapSweeper::BATCH_SIZE )->andReturn( $chunks );
+		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->with( SitemapSweeper::BATCH_SIZE, array() )->andReturn( $chunks );
 		$this->writer->shouldReceive( 'rebuild' )->twice()->andReturn( true );
 
 		// Partial batch — backlog drained, no follow-up chain.
@@ -54,14 +58,28 @@ class SitemapSweeperTest extends TestCase {
 		$this->sweeper->handle_sweep();
 	}
 
+	public function test_sweep_passes_disabled_families_to_dirty_queries(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array( 'vendor_store' ) );
+		$this->storage->shouldReceive( 'is_writable' )->andReturn( true );
+
+		$this->files->shouldReceive( 'get_dirty_chunks' )
+			->once()
+			->with( SitemapSweeper::BATCH_SIZE, array( 'vendor_store' ) )
+			->andReturn( array() );
+
+		$this->sweeper->handle_sweep();
+	}
+
 	public function test_handle_sweep_chains_follow_up_when_backlog_remains(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->writer->shouldReceive( 'is_writable' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() );
+		$this->storage->shouldReceive( 'is_writable' )->andReturn( true );
 
 		$chunks = array_fill( 0, SitemapSweeper::BATCH_SIZE, array( 'id' => '1' ) );
-		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->andReturn( $chunks );
+		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->with( SitemapSweeper::BATCH_SIZE, array() )->andReturn( $chunks );
 		$this->writer->shouldReceive( 'rebuild' )->times( SitemapSweeper::BATCH_SIZE )->andReturn( true );
-		$this->files->shouldReceive( 'count_dirty' )->once()->andReturn( 3980 );
+		$this->files->shouldReceive( 'count_dirty' )->once()->with( array() )->andReturn( 3980 );
 
 		Functions\expect( 'as_enqueue_async_action' )
 			->once()
@@ -72,10 +90,11 @@ class SitemapSweeperTest extends TestCase {
 
 	public function test_handle_sweep_does_not_chain_on_failed_rebuilds(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->writer->shouldReceive( 'is_writable' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() );
+		$this->storage->shouldReceive( 'is_writable' )->andReturn( true );
 
 		$chunks = array_fill( 0, SitemapSweeper::BATCH_SIZE, array( 'id' => '1' ) );
-		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->andReturn( $chunks );
+		$this->files->shouldReceive( 'get_dirty_chunks' )->once()->with( SitemapSweeper::BATCH_SIZE, array() )->andReturn( $chunks );
 		$this->writer->shouldReceive( 'rebuild' )->times( SitemapSweeper::BATCH_SIZE )->andReturn( false );
 
 		// Failing writes must wait for the recurring tick, not spin a hot chain.
@@ -94,7 +113,7 @@ class SitemapSweeperTest extends TestCase {
 
 	public function test_handle_sweep_bails_when_uploads_not_writable(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
-		$this->writer->shouldReceive( 'is_writable' )->andReturn( false );
+		$this->storage->shouldReceive( 'is_writable' )->andReturn( false );
 
 		// Spec: never fatal, never partially write.
 		$this->files->shouldNotReceive( 'get_dirty_chunks' );

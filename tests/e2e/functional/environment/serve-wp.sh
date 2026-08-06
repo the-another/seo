@@ -50,6 +50,38 @@ add_filter(
 		return $pages;
 	}
 );
+
+add_filter(
+	'taseo_sitemap_families',
+	static function ( $families ) {
+		$families['e2e_family'] = 'E2E Family';
+
+		return $families;
+	}
+);
+
+// Push once, on init (the SEO plugin boots on plugins_loaded, so its API
+// functions exist by init). The option guard keeps re-runs idempotent.
+add_action(
+	'init',
+	static function () {
+		if ( ! function_exists( 'taseo_sitemap_sync_url' ) || get_option( 'taseo_e2e_family_pushed' ) ) {
+			return;
+		}
+
+		taseo_sitemap_sync_url(
+			'e2e_family',
+			1,
+			array(
+				'permalink' => home_url( '/e2e-family-page/' ),
+				'images'    => array( home_url( '/wp-content/e2e-image.jpg' ) ),
+			)
+		);
+
+		update_option( 'taseo_e2e_family_pushed', '1' );
+	},
+	20
+);
 PHP
 
 # Pretty permalinks: the sitemap rewrites (^sitemap\.xml$ and the chunk

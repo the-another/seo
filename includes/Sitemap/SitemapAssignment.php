@@ -36,15 +36,44 @@ class SitemapAssignment {
 	private const CLAIM_RETRIES = 5;
 
 	/**
+	 * Object types with sitemap membership. system_page is excluded on
+	 * purpose — the built-in system pages do not belong in a sitemap.
+	 *
+	 * @var array<int, string>
+	 */
+	private const SITEMAP_TYPES = array( 'post', 'term', 'custom_page' );
+
+	/**
+	 * Action Scheduler hook for the family reconciliation chain.
+	 *
+	 * @var string
+	 */
+	public const ASSIGN_FAMILY_HOOK = 'taseo_sitemap_assign_family';
+
+	/**
+	 * Action Scheduler group.
+	 *
+	 * @var string
+	 */
+	public const GROUP = 'taseo';
+
+	/**
+	 * Rows assigned per reconciliation job — bounds execution time.
+	 *
+	 * @var int
+	 */
+	public const ASSIGN_BATCH_SIZE = 200;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param SitemapFileRepository $files    Registry repository.
-	 * @param SitemapFileWriter     $writer   File writer (for immediate unlink at zero links).
+	 * @param SitemapStorage        $storage  Storage seam (for immediate unlink at zero links).
 	 * @param Settings              $settings Settings.
 	 */
 	public function __construct(
 		private readonly SitemapFileRepository $files,
-		private readonly SitemapFileWriter $writer,
+		private readonly SitemapStorage $storage,
 		private readonly Settings $settings
 	) {
 	}
@@ -58,6 +87,7 @@ class SitemapAssignment {
 	public function init( HookManager $hook_manager ): void {
 		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 3 );
 		$hook_manager->register_action( 'taseo_indexable_deleting', array( $this, 'handle_indexable_deleting' ), 10, 3 );
+		$hook_manager->register_action( self::ASSIGN_FAMILY_HOOK, array( $this, 'handle_assign_family_action' ) );
 	}
 
 	/**
@@ -69,7 +99,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id ): void {
-		if ( ! in_array( $object_type, array( 'post', 'term' ), true ) ) {
+		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
 
@@ -92,10 +122,10 @@ class SitemapAssignment {
 		}
 
 		if ( null === $chunk_id ) {
-			// New assignment is the only path gated on the toggle: releases
+			// New assignment is the only path gated on the toggles: releases
 			// and dirty-marking keep running while output is disabled, so
 			// re-enabling self-heals via the accumulated dirty flags.
-			if ( $this->settings->is_sitemap_enabled() ) {
+			if ( $this->settings->is_sitemap_enabled() && $this->is_family_allowed( $object_type, $object_subtype ) ) {
 				$this->assign( (int) $row['id'], $object_subtype );
 			}
 
@@ -116,7 +146,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function handle_indexable_deleting( string $object_type, string $object_subtype, int $object_id ): void {
-		if ( ! in_array( $object_type, array( 'post', 'term' ), true ) ) {
+		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
 
@@ -127,6 +157,18 @@ class SitemapAssignment {
 		}
 
 		$this->release( (int) $row['id'], (int) $row['sitemap_file_id'] );
+	}
+
+	/**
+	 * Family-toggle gate. Only custom_page subtypes are families; post and
+	 * term subtypes are never toggleable here.
+	 *
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Object subtype.
+	 * @return bool Assignment allowed.
+	 */
+	private function is_family_allowed( string $object_type, string $object_subtype ): bool {
+		return 'custom_page' !== $object_type || $this->settings->is_sitemap_family_enabled( $object_subtype );
 	}
 
 	/**
@@ -167,7 +209,8 @@ class SitemapAssignment {
 	}
 
 	/**
-	 * Give a slot back; delete the chunk (row + physical file) at zero links.
+	 * Give a slot back; tombstone the chunk (row kept, physical file
+	 * deleted) at zero links.
 	 *
 	 * @param int $indexable_id Indexable row ID.
 	 * @param int $chunk_id     Chunk row ID.
@@ -186,13 +229,14 @@ class SitemapAssignment {
 			return;
 		}
 
-		// Deletion is a cheap unlink — no need to wait for the sweep. The row
-		// delete is conditioned on link_count = 0, so a concurrent assign()
-		// that reclaimed this chunk between our zero-link read and now makes
-		// delete_chunk() return false; skip the unlink so a live chunk's file
-		// is never removed out from under it.
-		if ( $this->files->delete_chunk( $chunk_id ) ) {
-			$this->writer->delete_file( $chunk );
+		// Tombstone, don't delete: the zero-link row is the durable memory
+		// that this chunk existed, which is what lets its URL answer 410
+		// instead of 404. The conditional guard mirrors the old delete race
+		// handling — a concurrent assign() that reclaimed the chunk makes
+		// tombstone_chunk() return false, and a live chunk's file is never
+		// removed out from under it.
+		if ( $this->files->tombstone_chunk( $chunk_id ) ) {
+			$this->storage->delete( $chunk );
 		}
 	}
 
@@ -240,5 +284,100 @@ class SitemapAssignment {
 		// phpcs:enable
 
 		return is_array( $row ) ? $row : null;
+	}
+
+	/**
+	 * Family toggled off: remove its files from circulation without touching
+	 * membership. generated_at = NULL hides the chunks from the root index
+	 * (the guard that hides never-swept chunks); missing files 404 the chunk
+	 * URLs on both serving paths. is_dirty = 1 queues the rebuild for
+	 * re-enable, while the sweep skips disabled families meanwhile. Bounded
+	 * by the family's chunk count, never its URL count.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function handle_family_disabled( string $family ): void {
+		foreach ( $this->files->get_chunks_for_subtype( $family ) as $chunk ) {
+			$this->storage->delete( $chunk );
+		}
+
+		$this->files->suspend_subtype_chunks( $family );
+	}
+
+	/**
+	 * Family toggled on: drain the (already dirty) chunks now, and assign
+	 * any rows pushed while the family was off. The reconciliation job is
+	 * required for correctness, not polish — assignment normally fires only
+	 * on sync events, so a low-churn family pushed once would otherwise
+	 * stay unassigned forever.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function handle_family_enabled( string $family ): void {
+		if ( ! function_exists( 'as_enqueue_async_action' ) ) {
+			return;
+		}
+
+		as_enqueue_async_action( SitemapSweeper::HOOK, array(), self::GROUP );
+		as_enqueue_async_action( self::ASSIGN_FAMILY_HOOK, array( 'family' => $family ), self::GROUP );
+	}
+
+	/**
+	 * Action Scheduler entry point (named-arg binding, like
+	 * IndexableBackfill::handle_batch_action).
+	 *
+	 * @param mixed $family Family key (named-arg binding), or legacy array args.
+	 * @return void
+	 */
+	public function handle_assign_family_action( $family = '' ): void {
+		if ( is_array( $family ) ) {
+			$family = $family['family'] ?? '';
+		}
+
+		$this->assign_family_batch( (string) $family );
+	}
+
+	/**
+	 * Assign one bounded batch of unassigned family rows, then self-chain
+	 * while a full batch was found (the SitemapSweeper::handle_sweep
+	 * pattern). No-ops if the family or the feature was disabled meanwhile.
+	 *
+	 * @param string $family Family key.
+	 * @return void
+	 */
+	public function assign_family_batch( string $family ): void {
+		if ( '' === $family || ! $this->settings->is_sitemap_enabled() || ! $this->settings->is_sitemap_family_enabled( $family ) ) {
+			return;
+		}
+
+		global $wpdb;
+
+		$table = IndexablesTable::get_table_name();
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$rows = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT id FROM {$table}
+				WHERE object_type = 'custom_page' AND object_subtype = %s AND is_indexable = 1 AND sitemap_file_id IS NULL
+				ORDER BY id ASC
+				LIMIT %d",
+				$family,
+				self::ASSIGN_BATCH_SIZE
+			),
+			ARRAY_A
+		);
+		// phpcs:enable
+
+		$rows = is_array( $rows ) ? $rows : array();
+
+		foreach ( $rows as $row ) {
+			$this->assign( (int) $row['id'], $family );
+		}
+
+		if ( self::ASSIGN_BATCH_SIZE === count( $rows ) && function_exists( 'as_enqueue_async_action' ) ) {
+			as_enqueue_async_action( self::ASSIGN_FAMILY_HOOK, array( 'family' => $family ), self::GROUP );
+		}
 	}
 }

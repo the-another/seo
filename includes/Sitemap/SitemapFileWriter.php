@@ -13,69 +13,25 @@ use TheAnother\Plugin\SEO\Database\IndexablesTable;
 /**
  * Class SitemapFileWriter
  *
- * Renders and writes one chunk's physical XML file. A file is always a pure
- * rendering of "indexable rows currently pointing at this chunk", so rebuilds
- * are idempotent — two processes racing on the same chunk produce a redundant
- * write, never corruption. The dirty flag is only cleared after a successful
- * write, so failures self-heal on the next sweep.
+ * Renders one chunk's <urlset> XML from the member query and hands it to
+ * SitemapStorage for the actual filesystem write. A file is always a pure
+ * rendering of "indexable rows currently pointing at this chunk", so
+ * rebuilds are idempotent — two processes racing on the same chunk produce a
+ * redundant write, never corruption. The dirty flag is only cleared after a
+ * successful write, so failures self-heal on the next sweep.
  */
 class SitemapFileWriter {
 
 	/**
-	 * Directory under uploads/ holding all chunk files.
-	 *
-	 * @var string
-	 */
-	public const DIRECTORY = 'taseo-sitemaps';
-
-	/**
 	 * Constructor.
 	 *
-	 * @param SitemapFileRepository $files Registry repository.
+	 * @param SitemapFileRepository $files   Registry repository.
+	 * @param SitemapStorage        $storage Storage seam.
 	 */
-	public function __construct( private readonly SitemapFileRepository $files ) {
-	}
-
-	/**
-	 * Absolute path of the sitemap directory.
-	 *
-	 * @return string Path without trailing slash.
-	 */
-	public function get_directory_path(): string {
-		$uploads = wp_upload_dir();
-
-		return trailingslashit( (string) $uploads['basedir'] ) . self::DIRECTORY;
-	}
-
-	/**
-	 * File name for a chunk: {subtype}-sitemap-{n}.xml.
-	 *
-	 * @param array<string, mixed> $chunk Registry row (object_subtype, chunk_number).
-	 * @return string File name.
-	 */
-	public function get_file_name( array $chunk ): string {
-		return sprintf( '%s-sitemap-%d.xml', (string) $chunk['object_subtype'], (int) $chunk['chunk_number'] );
-	}
-
-	/**
-	 * Absolute path of a chunk's file.
-	 *
-	 * @param array<string, mixed> $chunk Registry row.
-	 * @return string Path.
-	 */
-	public function get_file_path( array $chunk ): string {
-		return trailingslashit( $this->get_directory_path() ) . $this->get_file_name( $chunk );
-	}
-
-	/**
-	 * Whether sitemap files can be written at all.
-	 *
-	 * @return bool Uploads dir resolved and writable.
-	 */
-	public function is_writable(): bool {
-		$uploads = wp_upload_dir();
-
-		return empty( $uploads['error'] ) && wp_is_writable( (string) $uploads['basedir'] );
+	public function __construct(
+		private readonly SitemapFileRepository $files,
+		private readonly SitemapStorage $storage
+	) {
 	}
 
 	/**
@@ -111,7 +67,7 @@ class SitemapFileWriter {
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT permalink, last_modified FROM {$indexables} WHERE sitemap_file_id = %d AND is_indexable = 1 ORDER BY id ASC",
+				"SELECT permalink, last_modified, sitemap_images FROM {$indexables} WHERE sitemap_file_id = %d AND is_indexable = 1 ORDER BY id ASC",
 				(int) $chunk['id']
 			),
 			ARRAY_A
@@ -126,11 +82,23 @@ class SitemapFileWriter {
 			array_filter( $rows, static fn( array $row ): bool => '' !== (string) ( $row['permalink'] ?? '' ) )
 		);
 
-		if ( ! wp_mkdir_p( $this->get_directory_path() ) ) {
-			return false;
+		if ( array() === $rows ) {
+			// Nothing to render: never write an empty urlset (the Apache path
+			// would serve it as a live 200). Remove the file and tombstone the
+			// row when it is genuinely empty; the fallback covers the racy
+			// case of a chunk whose slots are claimed but whose member rows
+			// are not yet visible — cleared of its dirty flag, it waits for
+			// the next real edit instead of hot-looping through the sweep.
+			$this->storage->delete( $chunk );
+
+			if ( ! $this->files->tombstone_chunk( (int) $chunk['id'] ) ) {
+				$this->files->update_after_rebuild( (int) $chunk['id'], null );
+			}
+
+			return true;
 		}
 
-		if ( ! $this->write_file( $this->get_file_path( $chunk ), $this->render_urlset( $rows ) ) ) {
+		if ( ! $this->storage->write( $chunk, $this->render_urlset( $rows ) ) ) {
 			return false;
 		}
 
@@ -148,28 +116,18 @@ class SitemapFileWriter {
 	}
 
 	/**
-	 * Remove a chunk's physical file (chunk emptied and deleted).
+	 * Render the <urlset> document: <loc>, <lastmod>, and <image:image> entries.
 	 *
-	 * @param array<string, mixed> $chunk Registry row.
-	 * @return void
-	 */
-	public function delete_file( array $chunk ): void {
-		$path = $this->get_file_path( $chunk );
-
-		if ( file_exists( $path ) ) {
-			wp_delete_file( $path );
-		}
-	}
-
-	/**
-	 * Render the <urlset> document: <loc> + <lastmod> only, per spec.
+	 * The image namespace is declared unconditionally — an unused namespace
+	 * is valid XML, and declaring it only when a row has images would make
+	 * one chunk's header depend on the content of sibling rows.
 	 *
-	 * @param array<int, array<string, mixed>> $rows Member rows (permalink, last_modified).
+	 * @param array<int, array<string, mixed>> $rows Member rows (permalink, last_modified, sitemap_images).
 	 * @return string XML document.
 	 */
 	private function render_urlset( array $rows ): string {
 		$xml  = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
-		$xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+		$xml .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">' . "\n";
 
 		foreach ( $rows as $row ) {
 			$loc = (string) ( $row['permalink'] ?? '' );
@@ -187,6 +145,10 @@ class SitemapFileWriter {
 				$xml .= "\t\t<lastmod>" . $lastmod . "</lastmod>\n";
 			}
 
+			foreach ( $this->decode_images( $row ) as $image_url ) {
+				$xml .= "\t\t<image:image><image:loc>" . esc_url( $image_url ) . "</image:loc></image:image>\n";
+			}
+
 			$xml .= "\t</url>\n";
 		}
 
@@ -194,23 +156,23 @@ class SitemapFileWriter {
 	}
 
 	/**
-	 * Write via the WP Filesystem API.
+	 * Stored JSON to a list of image URLs; malformed data renders as none,
+	 * never as an error.
 	 *
-	 * @param string $path     Absolute file path.
-	 * @param string $contents File contents.
-	 * @return bool Success.
+	 * @param array<string, mixed> $row Member row.
+	 * @return array<int, string> URLs.
 	 */
-	private function write_file( string $path, string $contents ): bool {
-		global $wp_filesystem;
-
-		if ( ! function_exists( 'WP_Filesystem' ) ) {
-			require_once ABSPATH . 'wp-admin/includes/file.php';
+	private function decode_images( array $row ): array {
+		if ( empty( $row['sitemap_images'] ) || ! is_string( $row['sitemap_images'] ) ) {
+			return array();
 		}
 
-		if ( ! WP_Filesystem() || ! $wp_filesystem ) {
-			return false;
+		$decoded = json_decode( $row['sitemap_images'], true );
+
+		if ( ! is_array( $decoded ) ) {
+			return array();
 		}
 
-		return (bool) $wp_filesystem->put_contents( $path, $contents, defined( 'FS_CHMOD_FILE' ) ? FS_CHMOD_FILE : 0644 );
+		return array_values( array_filter( $decoded, 'is_string' ) );
 	}
 }

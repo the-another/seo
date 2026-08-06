@@ -27,10 +27,13 @@ use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
 use TheAnother\Plugin\SEO\Settings\Settings;
+use TheAnother\Plugin\SEO\Sitemap\ExternalUrls;
 use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
+use TheAnother\Plugin\SEO\Sitemap\SitemapFamilies;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileRepository;
 use TheAnother\Plugin\SEO\Sitemap\SitemapFileWriter;
 use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
+use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
@@ -160,22 +163,25 @@ class Plugin {
 				$c->get( 'settings' ),
 				$c->get( 'indexable_backfill' ),
 				$c->get( 'sitemap_file_repository' ),
-				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'sitemap_storage' ),
 				$c->get( 'sitemap_sweeper' ),
 				$c->get( 'template_variables' ),
-				$c->get( 'custom_pages' )
+				$c->get( 'custom_pages' ),
+				$c->get( 'sitemap_families' ),
+				$c->get( 'sitemap_assignment' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
+		$c->register( 'sitemap_storage', fn() => new SitemapStorage() );
 		$c->register(
 			'sitemap_file_writer',
-			fn( Container $c ) => new SitemapFileWriter( $c->get( 'sitemap_file_repository' ) )
+			fn( Container $c ) => new SitemapFileWriter( $c->get( 'sitemap_file_repository' ), $c->get( 'sitemap_storage' ) )
 		);
 		$c->register(
 			'sitemap_assignment',
 			fn( Container $c ) => new SitemapAssignment(
 				$c->get( 'sitemap_file_repository' ),
-				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'sitemap_storage' ),
 				$c->get( 'settings' )
 			)
 		);
@@ -184,6 +190,7 @@ class Plugin {
 			fn( Container $c ) => new SitemapSweeper(
 				$c->get( 'sitemap_file_repository' ),
 				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'sitemap_storage' ),
 				$c->get( 'settings' )
 			)
 		);
@@ -191,8 +198,18 @@ class Plugin {
 			'sitemap_server',
 			fn( Container $c ) => new SitemapServer(
 				$c->get( 'sitemap_file_repository' ),
-				$c->get( 'sitemap_file_writer' ),
+				$c->get( 'sitemap_storage' ),
 				$c->get( 'settings' )
+			)
+		);
+		$c->register( 'sitemap_families', fn() => new SitemapFamilies() );
+		$c->register(
+			'sitemap_external_urls',
+			fn( Container $c ) => new ExternalUrls(
+				$c->get( 'sitemap_families' ),
+				$c->get( 'indexable_repository' ),
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_storage' )
 			)
 		);
 		$c->register( 'blocks', fn() => new Blocks() );
