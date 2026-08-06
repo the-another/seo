@@ -163,7 +163,7 @@ class SitemapAssignmentTest extends TestCase {
 			->once()
 			->with( 'wp_taseo_indexables', array( 'sitemap_file_id' => null ), array( 'id' => 9 ) );
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 412 );
-		$this->files->shouldNotReceive( 'delete_chunk' );
+		$this->files->shouldNotReceive( 'tombstone_chunk' );
 		$this->storage->shouldNotReceive( 'delete' );
 
 		// Releases are never gated on the enabled toggle — counters must stay true.
@@ -172,7 +172,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
 	}
 
-	public function test_chunk_deleted_and_file_unlinked_at_zero_links(): void {
+	public function test_chunk_tombstoned_and_file_deleted_at_zero_links(): void {
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '0', 'sitemap_file_id' => '7' ) );
 
 		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '7' );
@@ -180,13 +180,13 @@ class SitemapAssignmentTest extends TestCase {
 		$this->wpdb->shouldReceive( 'update' )->once();
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
 		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
-		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( true );
+		$this->files->shouldReceive( 'tombstone_chunk' )->once()->with( 7 )->andReturn( true );
 		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
 	}
 
-	public function test_reclaimed_chunk_is_not_deleted_or_unlinked(): void {
+	public function test_reclaimed_chunk_is_not_tombstoned_or_unlinked(): void {
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '0', 'sitemap_file_id' => '7' ) );
 
 		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '7' );
@@ -194,7 +194,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->wpdb->shouldReceive( 'update' )->once();
 		$this->files->shouldReceive( 'release_slot' )->once()->with( 7 )->andReturn( 0 );
 		$this->files->shouldReceive( 'get' )->once()->with( 7 )->andReturn( $chunk );
-		$this->files->shouldReceive( 'delete_chunk' )->once()->with( 7 )->andReturn( false );
+		$this->files->shouldReceive( 'tombstone_chunk' )->once()->with( 7 )->andReturn( false );
 		$this->storage->shouldNotReceive( 'delete' );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );

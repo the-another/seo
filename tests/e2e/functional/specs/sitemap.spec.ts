@@ -223,4 +223,38 @@ test.describe( 'sitemap', () => {
 		expect( restoredIndex ).toContain( 'e2e_family-sitemap-' );
 		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 200 );
 	} );
+
+	test( 'emptying a chunk tombstones it (410), and re-pushing resurrects it', async ( {
+		request,
+	} ) => {
+		const wpDir = findWpDir();
+		test.skip( null === wpDir, 'requires the e2e container' );
+
+		// Tombstoning happens inline off the taseo_indexable_deleting action —
+		// no sweep needed to observe the 410.
+		wpCli(
+			[ 'eval', "taseo_sitemap_delete_url( 'e2e_family', 1 );" ],
+			wpDir!
+		);
+
+		const emptiedIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( emptiedIndex ).not.toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 410 );
+
+		// Resurrect: re-pushing the same family/id reclaims the tombstoned
+		// chunk (find_lowest_open_chunk()'s ordinary claim path), and the
+		// sweep writes its file again.
+		wpCli(
+			[
+				'eval',
+				"taseo_sitemap_sync_url( 'e2e_family', 1, array( 'permalink' => home_url( '/e2e-family-page/' ) ) );",
+			],
+			wpDir!
+		);
+		forceSitemapSweep( wpDir! );
+
+		const resurrectedIndex = await ( await request.get( '/sitemap.xml' ) ).text();
+		expect( resurrectedIndex ).toContain( 'e2e_family-sitemap-' );
+		expect( ( await request.get( '/e2e_family-sitemap-1.xml' ) ).status() ).toBe( 200 );
+	} );
 } );

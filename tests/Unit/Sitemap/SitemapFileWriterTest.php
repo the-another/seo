@@ -116,17 +116,81 @@ class SitemapFileWriterTest extends TestCase {
 		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '3' );
 
 		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
-		$this->wpdb->shouldReceive( 'get_results' )->once()->andReturn( array() );
+		// A non-empty member row: an empty result here would hit the
+		// empty-members tombstone branch instead of ever calling write().
+		$this->wpdb->shouldReceive( 'get_results' )->once()->andReturn(
+			array(
+				array( 'permalink' => 'https://example.com/product/widget/', 'last_modified' => null ),
+			)
+		);
 
 		$this->storage->shouldReceive( 'write' )->once()->andReturn( false );
 
 		$this->files->shouldNotReceive( 'update_after_rebuild' );
+		$this->files->shouldNotReceive( 'tombstone_chunk' );
 
 		$this->assertFalse( $this->writer->rebuild( $chunk ) );
 	}
 
+	public function test_rebuild_empty_members_deletes_file_and_tombstones_row(): void {
+		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '3' );
+
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array() );
+
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
+		$this->files->shouldReceive( 'tombstone_chunk' )->once()->with( 7 )->andReturn( true );
+
+		$this->storage->shouldNotReceive( 'write' );
+		$this->files->shouldNotReceive( 'update_after_rebuild' );
+
+		$this->assertTrue( $this->writer->rebuild( $chunk ) );
+	}
+
+	public function test_rebuild_empty_members_falls_back_to_update_after_rebuild_when_tombstone_race_lost(): void {
+		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '3' );
+
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn( array() );
+
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
+		$this->files->shouldReceive( 'tombstone_chunk' )->once()->with( 7 )->andReturn( false );
+		$this->files->shouldReceive( 'update_after_rebuild' )->once()->with( 7, null );
+
+		$this->storage->shouldNotReceive( 'write' );
+
+		$this->assertTrue( $this->writer->rebuild( $chunk ) );
+	}
+
+	public function test_rebuild_rows_all_missing_permalink_is_treated_as_empty(): void {
+		// Members whose permalink filters out entirely hit the same branch
+		// as a genuinely empty DB result — the racy "claimed but not yet
+		// synced" window the docblock describes.
+		$chunk = array( 'id' => '7', 'object_subtype' => 'product', 'chunk_number' => '3' );
+
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'SQL', ARRAY_A )->andReturn(
+			array(
+				array( 'permalink' => '', 'last_modified' => '2026-07-01 00:00:00' ),
+			)
+		);
+
+		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
+		$this->files->shouldReceive( 'tombstone_chunk' )->once()->with( 7 )->andReturn( true );
+
+		$this->storage->shouldNotReceive( 'write' );
+
+		$this->assertTrue( $this->writer->rebuild( $chunk ) );
+	}
+
 	public function test_urlset_declares_image_namespace(): void {
-		$xml = $this->rebuild_capturing_xml( array() );
+		// A non-empty row: an empty set now hits the empty-members tombstone
+		// branch, which never renders or writes a urlset at all.
+		$xml = $this->rebuild_capturing_xml(
+			array(
+				array( 'permalink' => 'https://example.com/a/', 'last_modified' => null ),
+			)
+		);
 
 		$this->assertStringContainsString( 'xmlns:image="http://www.google.com/schemas/sitemap-image/1.1"', $xml );
 	}

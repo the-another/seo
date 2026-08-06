@@ -82,6 +82,22 @@ class SitemapFileWriter {
 			array_filter( $rows, static fn( array $row ): bool => '' !== (string) ( $row['permalink'] ?? '' ) )
 		);
 
+		if ( array() === $rows ) {
+			// Nothing to render: never write an empty urlset (the Apache path
+			// would serve it as a live 200). Remove the file and tombstone the
+			// row when it is genuinely empty; the fallback covers the racy
+			// case of a chunk whose slots are claimed but whose member rows
+			// are not yet visible — cleared of its dirty flag, it waits for
+			// the next real edit instead of hot-looping through the sweep.
+			$this->storage->delete( $chunk );
+
+			if ( ! $this->files->tombstone_chunk( (int) $chunk['id'] ) ) {
+				$this->files->update_after_rebuild( (int) $chunk['id'], null );
+			}
+
+			return true;
+		}
+
 		if ( ! $this->storage->write( $chunk, $this->render_urlset( $rows ) ) ) {
 			return false;
 		}

@@ -68,7 +68,11 @@ if ( ! function_exists( 'taseo_sitemap_delete_family' ) ) {
 	/**
 	 * Bulk-remove a whole family: rows, chunk registry rows, files. For
 	 * provider deactivation hooks; does not require the family to still be
-	 * registered.
+	 * registered. The chunk registry rows are tombstoned rather than
+	 * deleted, so after removal the family's chunk URLs answer `410 Gone`
+	 * (never-existed URLs still answer 404) — the inert zero-link registry
+	 * rows are the tombstones, reused and resurrected if the family gains
+	 * URLs again.
 	 *
 	 * @since 0.3.0
 	 *

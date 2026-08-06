@@ -204,7 +204,7 @@ class ExternalUrlsTest extends TestCase {
 			->andReturn( 'CLEAR_SQL' );
 		$wpdb->shouldReceive( 'query' )->once()->with( 'CLEAR_SQL' )->ordered();
 
-		$this->files->shouldReceive( 'delete_chunks_for_subtype' )->once()->with( 'vendor_store' );
+		$this->files->shouldReceive( 'tombstone_subtype_chunks' )->once()->with( 'vendor_store' );
 		$this->storage->shouldReceive( 'delete' )->once()->with( $chunk );
 
 		$wpdb->shouldReceive( 'prepare' )
@@ -223,7 +223,7 @@ class ExternalUrlsTest extends TestCase {
 		Monkey\Functions\when( 'get_post_types' )->justReturn( array( 'product' => 'product', 'post' => 'post' ) );
 
 		$this->files->shouldNotReceive( 'get_chunks_for_subtype' );
-		$this->files->shouldNotReceive( 'delete_chunks_for_subtype' );
+		$this->files->shouldNotReceive( 'tombstone_subtype_chunks' );
 		$this->storage->shouldNotReceive( 'delete' );
 		$wpdb->shouldNotReceive( 'prepare' );
 		$wpdb->shouldNotReceive( 'query' );
@@ -240,7 +240,7 @@ class ExternalUrlsTest extends TestCase {
 		Monkey\Functions\when( 'get_taxonomies' )->justReturn( array( 'category' => 'category' ) );
 
 		$this->files->shouldNotReceive( 'get_chunks_for_subtype' );
-		$this->files->shouldNotReceive( 'delete_chunks_for_subtype' );
+		$this->files->shouldNotReceive( 'tombstone_subtype_chunks' );
 		$this->storage->shouldNotReceive( 'delete' );
 		$wpdb->shouldNotReceive( 'prepare' );
 		$wpdb->shouldNotReceive( 'query' );

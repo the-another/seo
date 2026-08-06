@@ -137,7 +137,7 @@ class SitemapServerTest extends TestCase {
 		$this->assertSame( '<urlset>static</urlset>', $output );
 	}
 
-	public function test_maybe_serve_404s_missing_chunk_file(): void {
+	public function test_maybe_serve_404s_when_no_row_exists_for_missing_chunk_file(): void {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
 
 		Functions\when( 'get_query_var' )->alias(
@@ -151,8 +151,72 @@ class SitemapServerTest extends TestCase {
 		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
 		Functions\expect( 'status_header' )->once()->with( 404 );
 
-		$this->storage->shouldReceive( 'exists' )->once()->andReturn( false );
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 999 );
+
+		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( false );
 		$this->storage->shouldNotReceive( 'stream' );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 999 )->andReturn( null );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
+	public function test_maybe_serve_404s_when_row_has_links_but_no_file(): void {
+		// Temporarily gone: a disabled family, or a chunk claimed before the
+		// first sweep ever wrote its file — not a tombstone (link_count > 0).
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 404 );
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+
+		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( false );
+		$this->storage->shouldNotReceive( 'stream' );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )
+			->andReturn( array( 'id' => '3', 'link_count' => '412' ) );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
+	public function test_maybe_serve_410s_a_tombstoned_chunk(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		// Only 410 is an acceptable status_header() call here: Mockery errors
+		// on any call this expectation doesn't match, so a stray 200 (which
+		// would mean send_xml_headers()/header() ran first) fails the test.
+		Functions\expect( 'status_header' )->once()->with( 410 );
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+
+		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( false );
+		$this->storage->shouldNotReceive( 'stream' );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )
+			->andReturn( array( 'id' => '3', 'link_count' => '0' ) );
 
 		ob_start();
 		$this->server->maybe_serve( false );

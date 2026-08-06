@@ -100,16 +100,19 @@ class ExternalUrls {
 	}
 
 	/**
-	 * Bulk-remove a whole family: pointers, chunk registry rows, physical
-	 * files, indexable rows — in that order, so no row ever references a
-	 * deleted chunk.
+	 * Bulk-remove a whole family: pointers cleared, chunk registry rows
+	 * tombstoned, physical files deleted, indexable rows bulk-deleted — in
+	 * that order, so no row ever references a deleted chunk. Tombstoning
+	 * (not deleting) the chunk rows means the family's chunk URLs answer
+	 * `410 Gone` afterwards rather than 404 — the inert zero-link rows are
+	 * the tombstones, reused and resurrected if the family gains URLs again.
 	 *
 	 * Deliberately does not require the family to still be registered: this
 	 * runs from provider deactivation hooks, after the provider's filter may
-	 * be gone. Rows are deleted in bulk without per-row actions — the slots
-	 * are already released wholesale, and thousands of actions in one
-	 * deactivation request is exactly the mass-operation shape the per-row
-	 * path exists to avoid.
+	 * be gone. Rows are deleted/tombstoned in bulk without per-row actions —
+	 * the slots are already released wholesale, and thousands of actions in
+	 * one deactivation request is exactly the mass-operation shape the
+	 * per-row path exists to avoid.
 	 *
 	 * Rejects a key that collides with any currently registered post type or
 	 * taxonomy name (ALL registered, not just public — mirroring
@@ -149,7 +152,7 @@ class ExternalUrls {
 		);
 		// phpcs:enable
 
-		$this->files->delete_chunks_for_subtype( $family );
+		$this->files->tombstone_subtype_chunks( $family );
 
 		foreach ( $chunks as $chunk ) {
 			$this->storage->delete( $chunk );

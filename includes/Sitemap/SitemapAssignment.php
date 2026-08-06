@@ -209,7 +209,8 @@ class SitemapAssignment {
 	}
 
 	/**
-	 * Give a slot back; delete the chunk (row + physical file) at zero links.
+	 * Give a slot back; tombstone the chunk (row kept, physical file
+	 * deleted) at zero links.
 	 *
 	 * @param int $indexable_id Indexable row ID.
 	 * @param int $chunk_id     Chunk row ID.
@@ -228,12 +229,13 @@ class SitemapAssignment {
 			return;
 		}
 
-		// Deletion is a cheap unlink — no need to wait for the sweep. The row
-		// delete is conditioned on link_count = 0, so a concurrent assign()
-		// that reclaimed this chunk between our zero-link read and now makes
-		// delete_chunk() return false; skip the unlink so a live chunk's file
-		// is never removed out from under it.
-		if ( $this->files->delete_chunk( $chunk_id ) ) {
+		// Tombstone, don't delete: the zero-link row is the durable memory
+		// that this chunk existed, which is what lets its URL answer 410
+		// instead of 404. The conditional guard mirrors the old delete race
+		// handling — a concurrent assign() that reclaimed the chunk makes
+		// tombstone_chunk() return false, and a live chunk's file is never
+		// removed out from under it.
+		if ( $this->files->tombstone_chunk( $chunk_id ) ) {
 			$this->storage->delete( $chunk );
 		}
 	}
