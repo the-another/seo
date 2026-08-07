@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 0.2.0
+Stable tag: 0.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,6 +64,12 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 == Changelog ==
 
+= 0.3.0 - 2026-08-07 =
+* Add: Public sitemap push API — other plugins register URL families via the `taseo_sitemap_families` filter and push URLs with `taseo_sitemap_sync_url()`, `taseo_sitemap_delete_url()`, and `taseo_sitemap_delete_family()`.
+* Add: Per-family include/exclude toggles on the Sitemap settings tab, with safe disable (files removed, membership kept) and background re-enable reconciliation.
+* Add: Image sitemap tags — featured images for posts by default, arbitrary images via the `taseo_sitemap_images` filter and the push API, rendered under the Google image namespace.
+* Add: Emptied sitemap chunks are tombstoned — removed from the sitemap index and answering `410 Gone` on direct requests, while URLs that never existed keep answering 404. A tombstoned chunk is reused and resurrected when its subtype gains URLs again.
+* Refactor: All sitemap file I/O flows through a single storage seam that resolves the uploads location per call, so stream-wrapper offloads (e.g. S3) relocate sitemap files transparently; Apache static-serve rules are suppressed when uploads are stream-wrapped.
 
 = 0.2.0 - 2026-07-27 =
 * Add: Site verification meta tags for Google Search Console, Bing Webmaster Tools, Yandex, Yahoo, and Meta domain verification, printed on the front page only.
