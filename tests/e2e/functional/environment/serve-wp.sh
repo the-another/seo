@@ -84,6 +84,41 @@ add_action(
 );
 PHP
 
+# Keep Action Scheduler's queue OFF the HTTP path. Its claim step
+# (ActionScheduler_DBStore::claim_actions) issues the MySQL-only
+# `UPDATE ... JOIN (...) ... FOR UPDATE` documented at the drain loop below,
+# which the SQLite translator cannot parse — and over HTTP that failure is an
+# *uncaught* RuntimeException ("Unable to claim actions"), i.e. a PHP fatal
+# that kills the built-in server worker mid-transaction (BEGIN with no
+# matching COMMIT/ROLLBACK). Sibling requests then hit a wedged database and
+# WordPress serves them through dead_db() — an HTTP 503 — so a request from
+# whichever spec happens to be running fails, with the victim moving between
+# runs. Two independent HTTP entry points reach that queue, so both are shut:
+#
+#   1. ActionScheduler_AsyncRequest_QueueRunner — dispatched on `shutdown`
+#      (QueueRunner::hook_dispatch_async_request) as a loopback POST to
+#      admin-ajax.php after ANY request that leaves pending actions due.
+#      `allow()` ends in the filter below, which is the supported off switch.
+#   2. The `action_scheduler_run_queue` WP-Cron event, spawned by ordinary
+#      frontend requests — DISABLE_WP_CRON stops that.
+#
+# This removes only the *implicit* runners. Everything that must actually
+# execute is driven explicitly through WP-CLI — the drain loop below and
+# sitemap.spec.ts's forceSitemapSweep() — via `action-scheduler action run
+# <id>`, whose Run_Command calls the runner's process_action() per ID and so
+# never goes near claim_actions(). Determinism improves rather than suffers:
+# no action can now run at a moment no test asked for.
+wp config set DISABLE_WP_CRON true --raw --path="$WP_DIR" --allow-root
+cat > "$WP_DIR/wp-content/mu-plugins/taseo-e2e-no-async-queue.php" <<'PHP'
+<?php
+/**
+ * Plugin Name: TASEO e2e — no async Action Scheduler queue
+ * Description: Keeps Action Scheduler's queue runner off the HTTP path; see serve-wp.sh.
+ */
+
+add_filter( 'action_scheduler_allow_async_request_runner', '__return_false' );
+PHP
+
 # Pretty permalinks: the sitemap rewrites (^sitemap\.xml$ and the chunk
 # pattern) need real path URLs. A direct option write via wp-cli (unlike the
 # admin UI, it doesn't sanitize the structure based on server rewrite
