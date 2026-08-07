@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-07
+
 ### Added
 - Public sitemap push API: other plugins register URL families via the `taseo_sitemap_families` filter and push URLs with `taseo_sitemap_sync_url()` / `taseo_sitemap_delete_url()` / `taseo_sitemap_delete_family()`.
 - Per-family include/exclude toggles on the Sitemap settings tab, with safe disable (files removed, membership kept) and background re-enable reconciliation.
@@ -52,6 +54,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/the-another/seo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/the-another/seo/releases/tag/v0.1.0
