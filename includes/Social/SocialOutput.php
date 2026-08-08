@@ -189,7 +189,10 @@ class SocialOutput {
 	 * @return object|null Product or null.
 	 */
 	private function get_product( array $ctx ): ?object {
-		if ( 'product' !== $ctx['object_subtype'] || ! function_exists( 'wc_get_product' ) ) {
+		// Keyed off the post type, not the subtype: a marketplace can split
+		// `product` into auction/item subtypes, and those are still products
+		// as far as WooCommerce is concerned.
+		if ( 'product' !== ( $ctx['post_type'] ?? '' ) || ! function_exists( 'wc_get_product' ) ) {
 			return null;
 		}
 

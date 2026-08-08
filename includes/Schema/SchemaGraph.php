@@ -95,7 +95,26 @@ class SchemaGraph {
 			$graph[] = $main_entity;
 		}
 
-		return $graph;
+		/**
+		 * Filters the finished @graph node list.
+		 *
+		 * Applied last, so this is the final word on what the page emits.
+		 * One graph-level hook rather than one per node: an integration
+		 * adding an image to the main entity, an Organization node for a
+		 * vendor page, and an extra property elsewhere needs one filter
+		 * rather than three, and the individual node shapes stay internal.
+		 *
+		 * Returning a non-array leaves the graph untouched; returning an
+		 * empty array suppresses the JSON-LD block entirely.
+		 *
+		 * @since 0.4.0
+		 *
+		 * @param array<int, array<string, mixed>> $graph Nodes.
+		 * @param array<string, mixed>             $ctx   Resolved request context.
+		 */
+		$filtered = apply_filters( 'taseo_schema_graph', $graph, $ctx );
+
+		return is_array( $filtered ) ? $filtered : $graph;
 	}
 
 	/**
@@ -195,7 +214,10 @@ class SchemaGraph {
 			return $node;
 		}
 
-		if ( 'Product' === $type && function_exists( 'wc_get_product' ) ) {
+		// Keyed off the post type, not the subtype: a marketplace can split
+		// `product` into auction/item subtypes, each free to select the
+		// Product schema type, and all still resolvable through WooCommerce.
+		if ( 'Product' === $type && 'product' === ( $ctx['post_type'] ?? '' ) && function_exists( 'wc_get_product' ) ) {
 			$product = wc_get_product( (int) $ctx['object_id'] );
 
 			if ( ! $product ) {

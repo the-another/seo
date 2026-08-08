@@ -8,6 +8,8 @@
 
 namespace TheAnother\Plugin\SEO\Meta;
 
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
+
 /**
  * Class TemplateVariables
  *
@@ -22,6 +24,14 @@ namespace TheAnother\Plugin\SEO\Meta;
  * transcriptions rather than drifting apart again.
  */
 class TemplateVariables {
+
+	/**
+	 * Constructor.
+	 *
+	 * @param PostSubtypes $subtypes Post subtype registry.
+	 */
+	public function __construct( private readonly PostSubtypes $subtypes ) {
+	}
 
 	/**
 	 * Variables available in every context.
@@ -61,6 +71,12 @@ class TemplateVariables {
 			$variables['excerpt'] = __( 'Excerpt', 'the-another-seo' );
 			$variables['date']    = __( 'Publish date', 'the-another-seo' );
 
+			// CurrentContext::post_vars() probes the POST TYPE, and a subtype
+			// is not necessarily one — `aucteeno_auction` is a subtype of
+			// `product`. Resolving back to the owner keeps both probes below
+			// asking the same question the context asks.
+			$post_type = $this->subtypes->post_type_for( $object_subtype );
+
 			// Matches CurrentContext::post_vars()'s own taxonomy probe: this
 			// is a property of the SUBTYPE (is a post type registered for
 			// category/product_cat at all?), not of the individual object,
@@ -69,14 +85,15 @@ class TemplateVariables {
 			// registered for `category` by default, so get_the_terms()
 			// there can never resolve and the pill/autocomplete/validator
 			// must not offer this token for it.
-			if ( is_object_in_taxonomy( $object_subtype, 'product' === $object_subtype ? 'product_cat' : 'category' ) ) {
+			if ( '' !== $post_type
+				&& is_object_in_taxonomy( $post_type, 'product' === $post_type ? 'product_cat' : 'category' ) ) {
 				$variables['primary_category'] = __( 'Primary category', 'the-another-seo' );
 			}
 
 			// Matches CurrentContext::post_vars()'s own WooCommerce probe: a
 			// site without WooCommerce must not be offered variables that
 			// could never resolve.
-			if ( 'product' === $object_subtype && function_exists( 'wc_get_product' ) ) {
+			if ( 'product' === $post_type && function_exists( 'wc_get_product' ) ) {
 				$variables['price'] = __( 'Price', 'the-another-seo' );
 				$variables['sku']   = __( 'SKU', 'the-another-seo' );
 			}

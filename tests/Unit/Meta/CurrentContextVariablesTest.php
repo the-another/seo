@@ -10,6 +10,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
@@ -76,7 +77,7 @@ class CurrentContextVariablesTest extends TestCase {
 		$this->settings->shouldReceive( 'get_title_template' )->andReturn( '%%title%%' )->byDefault();
 		$this->settings->shouldReceive( 'get_description_template' )->andReturn( '%%excerpt%%' )->byDefault();
 
-		$this->registry = new TemplateVariables();
+		$this->registry = new TemplateVariables( new PostSubtypes() );
 	}
 
 	protected function tearDown(): void {
@@ -139,7 +140,7 @@ class CurrentContextVariablesTest extends TestCase {
 			Functions\when( 'wc_get_product' )->justReturn( $product );
 		}
 
-		$context = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
+		$context = ( new CurrentContext( $this->repository, $this->settings, new CustomPages(), new PostSubtypes() ) )->resolve();
 
 		return $context['vars'];
 	}
@@ -209,7 +210,7 @@ class CurrentContextVariablesTest extends TestCase {
 		Functions\when( 'is_category' )->justReturn( true );
 		Functions\when( 'get_queried_object' )->justReturn( $term );
 
-		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
+		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages(), new PostSubtypes() ) )->resolve();
 		$produced   = array_keys( $context['vars'] );
 		$advertised = array_keys( $this->registry->get_for( 'term', 'category' ) );
 
@@ -220,7 +221,7 @@ class CurrentContextVariablesTest extends TestCase {
 	public function test_system_page_variables_match_the_registry(): void {
 		Functions\when( 'is_404' )->justReturn( true );
 
-		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages() ) )->resolve();
+		$context    = ( new CurrentContext( $this->repository, $this->settings, new CustomPages(), new PostSubtypes() ) )->resolve();
 		$produced   = array_keys( $context['vars'] );
 		$advertised = array_keys( $this->registry->get_for( 'system_page', '404' ) );
 

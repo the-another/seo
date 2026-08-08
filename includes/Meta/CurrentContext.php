@@ -9,6 +9,7 @@
 namespace TheAnother\Plugin\SEO\Meta;
 
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use WP_Post;
 use WP_Term;
@@ -37,11 +38,13 @@ class CurrentContext {
 	 * @param IndexableRepository $repository   Repository.
 	 * @param Settings            $settings     Settings.
 	 * @param CustomPages         $custom_pages Custom page registry.
+	 * @param PostSubtypes        $subtypes     Post subtype registry.
 	 */
 	public function __construct(
 		private readonly IndexableRepository $repository,
 		private readonly Settings $settings,
-		private readonly CustomPages $custom_pages
+		private readonly CustomPages $custom_pages,
+		private readonly PostSubtypes $subtypes
 	) {
 	}
 
@@ -80,7 +83,14 @@ class CurrentContext {
 				return null;
 			}
 
-			return $this->build( 'post', $post->post_type, (int) $post->ID, $this->post_vars( $post ), (string) get_permalink( $post ) );
+			return $this->build(
+				'post',
+				$this->subtypes->resolve( $post ),
+				(int) $post->ID,
+				$this->post_vars( $post ),
+				(string) get_permalink( $post ),
+				$post->post_type
+			);
 		}
 
 		if ( is_tax() || is_category() || is_tag() ) {
@@ -207,13 +217,19 @@ class CurrentContext {
 	 * @param int                   $object_id      Object ID.
 	 * @param array<string, string> $vars           Template variables.
 	 * @param string                $permalink      Live permalink.
+	 * @param string                $post_type      Owning post type; '' for non-post contexts.
 	 * @return array<string, mixed> Context.
 	 */
-	private function build( string $object_type, string $object_subtype, int $object_id, array $vars, string $permalink ): array {
+	private function build( string $object_type, string $object_subtype, int $object_id, array $vars, string $permalink, string $post_type = '' ): array {
 		return array(
 			'object_type'          => $object_type,
 			'object_subtype'       => $object_subtype,
 			'object_id'            => $object_id,
+			// The subtype no longer implies the post type — a `product` post
+			// can resolve to `aucteeno_auction`. Consumers probing for
+			// WooCommerce (or any post-type-specific source) must read this
+			// rather than infer it from the subtype.
+			'post_type'            => $post_type,
 			'row'                  => $this->repository->find( $object_type, $object_subtype, $object_id ),
 			'vars'                 => $vars,
 			'permalink'            => $permalink,

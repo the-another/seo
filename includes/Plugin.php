@@ -19,6 +19,7 @@ use TheAnother\Plugin\SEO\Database\SitemapFilesTable;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
@@ -106,8 +107,9 @@ class Plugin {
 
 		$c->register( 'settings', fn() => new Settings() );
 		$c->register( 'custom_pages', fn() => new CustomPages() );
+		$c->register( 'post_subtypes', fn() => new PostSubtypes() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
-		$c->register( 'template_variables', fn() => new TemplateVariables() );
+		$c->register( 'template_variables', fn( Container $c ) => new TemplateVariables( $c->get( 'post_subtypes' ) ) );
 		$c->register( 'indexable_repository', fn() => new IndexableRepository() );
 		$c->register(
 			'indexable_backfill',
@@ -118,6 +120,7 @@ class Plugin {
 			fn( Container $c ) => new IndexableSync(
 				$c->get( 'indexable_repository' ),
 				$c->get( 'settings' ),
+				$c->get( 'post_subtypes' ),
 				function () use ( $c ): void {
 					$c->get( 'indexable_backfill' )->dispatch( 'permalink' );
 				}
@@ -125,7 +128,12 @@ class Plugin {
 		);
 		$c->register(
 			'current_context',
-			fn( Container $c ) => new CurrentContext( $c->get( 'indexable_repository' ), $c->get( 'settings' ), $c->get( 'custom_pages' ) )
+			fn( Container $c ) => new CurrentContext(
+				$c->get( 'indexable_repository' ),
+				$c->get( 'settings' ),
+				$c->get( 'custom_pages' ),
+				$c->get( 'post_subtypes' )
+			)
 		);
 		$c->register(
 			'meta_output',
@@ -168,7 +176,8 @@ class Plugin {
 				$c->get( 'template_variables' ),
 				$c->get( 'custom_pages' ),
 				$c->get( 'sitemap_families' ),
-				$c->get( 'sitemap_assignment' )
+				$c->get( 'sitemap_assignment' ),
+				$c->get( 'post_subtypes' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );

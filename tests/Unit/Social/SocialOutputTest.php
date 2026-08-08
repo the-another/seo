@@ -132,6 +132,7 @@ class SocialOutputTest extends TestCase {
 	public function test_product_context_upgrades_og_type_with_price(): void {
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'product';
+		$ctx['post_type']      = 'product';
 		$ctx['object_id']      = 88123;
 		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
 
@@ -167,6 +168,7 @@ class SocialOutputTest extends TestCase {
 	public function test_out_of_stock_product_reports_oos_availability(): void {
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'product';
+		$ctx['post_type']      = 'product';
 		$ctx['object_id']      = 88456;
 		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
 

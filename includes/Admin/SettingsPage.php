@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO\Admin;
 
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
@@ -133,6 +134,7 @@ class SettingsPage {
 	 * @param CustomPages           $custom_pages       Plugin-registered custom pages.
 	 * @param SitemapFamilies       $sitemap_families   External URL families registry.
 	 * @param SitemapAssignment     $sitemap_assignment Sitemap chunk assignment (family toggle transitions).
+	 * @param PostSubtypes          $post_subtypes      Post subtype registry (per-subtype rows).
 	 */
 	public function __construct(
 		private readonly Settings $settings,
@@ -143,7 +145,8 @@ class SettingsPage {
 		private readonly TemplateVariables $template_variables,
 		private readonly CustomPages $custom_pages,
 		private readonly SitemapFamilies $sitemap_families,
-		private readonly SitemapAssignment $sitemap_assignment
+		private readonly SitemapAssignment $sitemap_assignment,
+		private readonly PostSubtypes $post_subtypes
 	) {
 	}
 
@@ -403,15 +406,36 @@ class SettingsPage {
 				continue;
 			}
 
+			$subtypes = $this->post_subtypes->for_post_type( $type->name );
+
+			// The checkbox stays post-type level — it is the coarse gate the
+			// backfill query and the sync early-return both read. Schema type
+			// is per subtype, because that is the granularity the output
+			// actually resolves at.
 			printf(
-				'<p><label><input type="checkbox" name="taseo_settings[enabled_post_types][]" value="%1$s" %2$s /> %3$s</label>
-				%4$s <select name="taseo_settings[schema_types][%1$s]">%5$s</select></p>',
+				'<p><label><input type="checkbox" name="taseo_settings[enabled_post_types][]" value="%1$s" %2$s /> %3$s</label>',
 				esc_attr( $type->name ),
 				checked( in_array( $type->name, $enabled_types, true ), true, false ),
-				esc_html( $type->labels->name ),
-				esc_html__( 'Schema type:', 'the-another-seo' ),
-				$this->schema_type_options( $this->settings->get_schema_type( $type->name ) ) // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in helper.
+				esc_html( $type->labels->name )
 			);
+
+			// An unsplit post type has exactly one subtype — its own name — so
+			// this renders the single inline select it always did.
+			$indent = 1 === count( $subtypes ) ? '' : '<br /><span style="padding-left:2em">';
+
+			foreach ( $subtypes as $subtype => $subtype_label ) {
+				printf(
+					'%1$s %2$s %3$s <select name="taseo_settings[schema_types][%4$s]">%5$s</select>%6$s',
+					$indent, // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- literal markup.
+					'' === $indent ? '' : esc_html( $subtype_label ),
+					esc_html__( 'Schema type:', 'the-another-seo' ),
+					esc_attr( $subtype ),
+					$this->schema_type_options( $this->settings->get_schema_type( $subtype ) ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in helper.
+					'' === $indent ? '' : '</span>'
+				);
+			}
+
+			echo '</p>';
 		}
 
 		echo '<h2>' . esc_html__( 'Taxonomies', 'the-another-seo' ) . '</h2>';
@@ -428,6 +452,37 @@ class SettingsPage {
 				esc_html( $tax->labels->name )
 			);
 		}
+	}
+
+	/**
+	 * Every subtype key carrying a sitemap inclusion toggle.
+	 *
+	 * Post subtypes, taxonomies, and external families share one namespace
+	 * and one disabled-list, so the render and the save must agree on the
+	 * same set — a key the save cannot see would be pruned back to enabled
+	 * on the next save no matter what the admin unchecked.
+	 *
+	 * @return array<string, string> Key => label.
+	 */
+	private function toggleable_subtypes(): array {
+		return $this->post_subtypes->flatten( $this->settings->get_enabled_post_types() )
+			+ $this->taxonomy_labels()
+			+ $this->sitemap_families->all();
+	}
+
+	/**
+	 * Enabled taxonomies as key => label.
+	 *
+	 * @return array<string, string> Taxonomy => label.
+	 */
+	private function taxonomy_labels(): array {
+		$labels = array();
+
+		foreach ( $this->settings->get_enabled_taxonomies() as $taxonomy ) {
+			$labels[ $taxonomy ] = $this->template_row_label( 'term', (string) $taxonomy );
+		}
+
+		return $labels;
 	}
 
 	/**
@@ -479,8 +534,11 @@ class SettingsPage {
 		echo '<h2 id="taseo-post-types">' . esc_html__( 'Post types', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
-		foreach ( $this->settings->get_enabled_post_types() as $type ) {
-			$label   = $this->template_row_label( 'post', $type );
+		// One row per SUBTYPE, not per post type: a post type split into
+		// subtypes has a row each, and one that isn't has exactly one row
+		// keyed by its own name — which is the pre-subtype behaviour, so
+		// stored templates keep matching their rows without a migration.
+		foreach ( $this->post_subtypes->flatten( $this->settings->get_enabled_post_types() ) as $type => $label ) {
 			$row_key = 'post:' . $type;
 
 			printf(
@@ -720,6 +778,15 @@ class SettingsPage {
 	 */
 	private function template_row_label( string $object_type, string $object_subtype ): string {
 		if ( 'post' === $object_type ) {
+			// A declared subtype is not a post type, so its label comes from
+			// the registry. Everything else is a post type and keeps reading
+			// exactly as it always did.
+			if ( $this->post_subtypes->has( $object_subtype ) ) {
+				$owner = $this->post_subtypes->post_type_for( $object_subtype );
+
+				return $this->post_subtypes->for_post_type( $owner )[ $object_subtype ] ?? $object_subtype;
+			}
+
 			$object = get_post_type_object( $object_subtype );
 
 			return isset( $object->labels->name ) ? (string) $object->labels->name : $object_subtype;
@@ -876,19 +943,27 @@ class SettingsPage {
 		);
 		echo '</table>';
 
-		$families = $this->sitemap_families->all();
+		$groups = array(
+			__( 'Post types', 'the-another-seo' ) => $this->post_subtypes->flatten( $this->settings->get_enabled_post_types() ),
+			__( 'Taxonomies', 'the-another-seo' ) => $this->taxonomy_labels(),
+			__( 'External URL families', 'the-another-seo' ) => $this->sitemap_families->all(),
+		);
 
-		if ( array() !== $families ) {
-			echo '<h2>' . esc_html__( 'External URL families', 'the-another-seo' ) . '</h2>';
-			echo '<p>' . esc_html__( 'URL sets registered by other plugins. Unchecked families are excluded from the sitemap.', 'the-another-seo' ) . '</p>';
+		foreach ( $groups as $heading => $entries ) {
+			if ( array() === $entries ) {
+				continue;
+			}
+
+			echo '<h2>' . esc_html( (string) $heading ) . '</h2>';
+			echo '<p>' . esc_html__( 'Unchecked entries are excluded from the sitemap. Their indexable rows — and any per-object overrides on them — are kept, so re-checking restores the URLs.', 'the-another-seo' ) . '</p>';
 			echo '<table class="form-table">';
 
-			foreach ( $families as $key => $label ) {
+			foreach ( $entries as $key => $label ) {
 				printf(
 					'<tr><th scope="row">%1$s<br /><span style="font-weight: normal; color: #646970;">%2$s</span></th><td><label><input type="checkbox" name="taseo_settings[sitemap_families][]" value="%2$s" %3$s /> %4$s</label></td></tr>',
-					esc_html( $label ),
-					esc_attr( $key ),
-					checked( $this->settings->is_sitemap_family_enabled( $key ), true, false ),
+					esc_html( (string) $label ),
+					esc_attr( (string) $key ),
+					checked( $this->settings->is_sitemap_family_enabled( (string) $key ), true, false ),
 					esc_html__( 'Include in sitemap', 'the-another-seo' )
 				);
 			}
@@ -1372,7 +1447,7 @@ class SettingsPage {
 			// save, and a posted key outside the registry cannot land in
 			// the option.
 			$clean['sitemap_disabled_families'] = array_values(
-				array_diff( array_keys( $this->sitemap_families->all() ), $checked )
+				array_diff( array_keys( $this->toggleable_subtypes() ), $checked )
 			);
 		}
 

@@ -160,15 +160,21 @@ class SitemapAssignment {
 	}
 
 	/**
-	 * Family-toggle gate. Only custom_page subtypes are families; post and
-	 * term subtypes are never toggleable here.
+	 * Inclusion-toggle gate, applied to every sitemap-bearing object type.
+	 *
+	 * One disabled-list covers post subtypes, taxonomies, and custom-page
+	 * families alike: all three share the subtype namespace (chunk files and
+	 * the file registry are keyed by subtype alone, and both registries
+	 * reject keys that would collide), so a second list keyed the same way
+	 * would only be a second place for the same answer to drift.
 	 *
 	 * @param string $object_type    Object type.
 	 * @param string $object_subtype Object subtype.
 	 * @return bool Assignment allowed.
 	 */
 	private function is_family_allowed( string $object_type, string $object_subtype ): bool {
-		return 'custom_page' !== $object_type || $this->settings->is_sitemap_family_enabled( $object_subtype );
+		return in_array( $object_type, self::SITEMAP_TYPES, true )
+			&& $this->settings->is_sitemap_family_enabled( $object_subtype );
 	}
 
 	/**
@@ -354,17 +360,23 @@ class SitemapAssignment {
 
 		global $wpdb;
 
-		$table = IndexablesTable::get_table_name();
+		$table        = IndexablesTable::get_table_name();
+		$placeholders = implode( ',', array_fill( 0, count( self::SITEMAP_TYPES ), '%s' ) );
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		// Not narrowed to one object type: subtype keys are unique across
+		// post types, taxonomies, and families (both registries reject
+		// colliding keys), so the subtype alone identifies the rows. Keeping
+		// the query type-agnostic also means the scheduled action's argument
+		// shape never had to change, so jobs queued by an older build still
+		// reconcile correctly.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
 		$rows = $wpdb->get_results(
 			$wpdb->prepare(
 				"SELECT id FROM {$table}
-				WHERE object_type = 'custom_page' AND object_subtype = %s AND is_indexable = 1 AND sitemap_file_id IS NULL
+				WHERE object_type IN ({$placeholders}) AND object_subtype = %s AND is_indexable = 1 AND sitemap_file_id IS NULL
 				ORDER BY id ASC
 				LIMIT %d",
-				$family,
-				self::ASSIGN_BATCH_SIZE
+				array_merge( self::SITEMAP_TYPES, array( $family, self::ASSIGN_BATCH_SIZE ) )
 			),
 			ARRAY_A
 		);

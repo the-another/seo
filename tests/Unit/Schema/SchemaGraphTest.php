@@ -207,6 +207,7 @@ class SchemaGraphTest extends TestCase {
 
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'product';
+		$ctx['post_type']      = 'product';
 		$ctx['object_id']      = 88123;
 		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
 
@@ -266,5 +267,49 @@ class SchemaGraphTest extends TestCase {
 		$graph = $this->build_graph();
 
 		$this->assertArrayNotHasKey( 'logo', $this->find_identity_node( $graph ) );
+	}
+
+	public function test_the_graph_filter_sees_the_finished_node_list_and_has_the_last_word(): void {
+		$seen = null;
+
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturnUsing(
+			function ( array $graph, array $ctx ) use ( &$seen ): array {
+				$seen     = $graph;
+				$graph[]  = array(
+					'@type' => 'Organization',
+					'@id'   => $ctx['permalink'] . '#vendor',
+				);
+
+				return $graph;
+			}
+		);
+
+		$graph = $this->build_graph();
+
+		// The filter is applied last: what it received already carried every
+		// node the builder produces.
+		$this->assertNotNull( $seen );
+		$this->assertSame( $this->node_types( $seen ), $this->node_types( array_slice( $graph, 0, count( $seen ) ) ) );
+		$this->assertSame( 'Organization', end( $graph )['@type'] );
+		$this->assertSame( 'https://example.com/about/#vendor', end( $graph )['@id'] );
+	}
+
+	public function test_a_non_array_filter_return_leaves_the_graph_untouched(): void {
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturn( 'nonsense' );
+
+		$graph = $this->build_graph();
+
+		$this->assertNotEmpty( $graph );
+		$this->assertSame( 'WebSite', $graph[1]['@type'] );
+	}
+
+	/**
+	 * Node @type list, for comparing graph prefixes without asserting on every field.
+	 *
+	 * @param array<int, array<string, mixed>> $graph Nodes.
+	 * @return array<int, string> Types.
+	 */
+	private function node_types( array $graph ): array {
+		return array_map( static fn( array $node ): string => (string) $node['@type'], $graph );
 	}
 }
