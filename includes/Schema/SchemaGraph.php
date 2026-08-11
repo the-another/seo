@@ -162,7 +162,39 @@ class SchemaGraph {
 		 */
 		$filtered = apply_filters( 'taseo_schema_graph', $graph, $ctx );
 
-		return is_array( $filtered ) ? $filtered : $graph;
+		return $this->decode_entities( is_array( $filtered ) ? $filtered : $graph );
+	}
+
+	/**
+	 * Turn HTML entities back into the characters they stand for.
+	 *
+	 * JSON-LD values are text, not markup. WordPress hands us markup: the
+	 * `the_title` filter runs wptexturize(), so get_the_title() returns
+	 * "Jack Daniel&#8217;s" — correct inside <title> and a meta attribute,
+	 * and wrong here, where a consumer has no reason to HTML-decode and will
+	 * render the entity literally.
+	 *
+	 * Applied after the filter, so the "text, not markup" invariant holds for
+	 * whatever an integration contributed as well. Values are escaped for
+	 * JSON, not HTML, by wp_json_encode() at print time, and the payload is
+	 * emitted with JSON_HEX_TAG — so decoding here cannot let markup out.
+	 *
+	 * @param array<mixed> $value Graph or subtree.
+	 * @return array<mixed> Decoded subtree.
+	 */
+	private function decode_entities( array $value ): array {
+		foreach ( $value as $key => $item ) {
+			if ( is_array( $item ) ) {
+				$value[ $key ] = $this->decode_entities( $item );
+				continue;
+			}
+
+			if ( is_string( $item ) ) {
+				$value[ $key ] = html_entity_decode( $item, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			}
+		}
+
+		return $value;
 	}
 
 	/**

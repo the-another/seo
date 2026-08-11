@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - WooCommerce structured-data de-duplication: WooCommerce emits its own JSON-LD from the footer, so a product page carried two Product nodes and two BreadcrumbLists (and a theme rendering the summary twice produced two *identical* Products in one script). Its copies are now suppressed — but only for the nodes this plugin actually emitted on that request, so switching schema off for a subtype leaves WooCommerce's markup in place rather than stripping structured data and putting nothing in its place.
 - Sitemap include/exclude toggles now cover post subtypes and taxonomies alongside external URL families. Excluding one keeps its indexable rows and per-object overrides, so re-including restores the URLs.
 
+### Fixed
+- JSON-LD values are no longer HTML-encoded. WordPress's `the_title` filter runs `wptexturize()`, so titles reached the graph as `Jack Daniel&#8217;s` — correct inside `<title>` and a meta attribute, wrong in JSON-LD, where consumers render the entity literally. Decoding is applied after `taseo_schema_graph`, so the invariant holds for integrator-contributed nodes too. HTML output is unchanged.
+
 ### Changed
 - `get_schema_type()` takes an optional owning post type: only post types have schema-type defaults, so a subtype split out of one inherits its owner's. Without this, splitting `product` into auctions and items silently downgraded both from `Product` to `WebPage`.
 - The resolved context array carries `post_type` alongside `object_subtype`. Social and schema output probe WooCommerce through it, since a subtype no longer implies its post type.

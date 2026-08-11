@@ -304,6 +304,49 @@ class SchemaGraphTest extends TestCase {
 	}
 
 	/**
+	 * JSON-LD carries text, not markup. WordPress's the_title filter runs
+	 * wptexturize(), so titles arrive as "Jack Daniel&#8217;s" — right for
+	 * <title>, wrong here, where a consumer renders the entity literally.
+	 */
+	public function test_html_entities_are_decoded_in_node_values(): void {
+		$ctx                    = $this->page_context();
+		$ctx['vars']['title']   = 'A Jack Daniel&#8217;s Sign &#8220;Old No. 7&#8221;';
+		$ctx['vars']['excerpt'] = 'Pete&#039;s lot &amp; more';
+		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
+
+		$graph   = $this->graph->build();
+		$webpage = null;
+
+		foreach ( $graph as $node ) {
+			if ( 'WebPage' === $node['@type'] ) {
+				$webpage = $node;
+			}
+		}
+
+		$this->assertNotNull( $webpage );
+		$this->assertSame( 'A Jack Daniel’s Sign “Old No. 7”', $webpage['name'] );
+		$this->assertSame( "Pete's lot & more", $webpage['description'] );
+	}
+
+	/**
+	 * The invariant has to hold for integrator additions too, or a filter that
+	 * pulls a title from the same WordPress APIs reintroduces the problem.
+	 */
+	public function test_entities_are_decoded_in_filter_contributed_nodes(): void {
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturnUsing(
+			static function ( array $graph ): array {
+				$graph[] = array( '@type' => 'Organization', 'name' => 'Grafe &amp; Sons' );
+
+				return $graph;
+			}
+		);
+
+		$graph = $this->build_graph();
+
+		$this->assertSame( 'Grafe & Sons', end( $graph )['name'] );
+	}
+
+	/**
 	 * Node @type list, for comparing graph prefixes without asserting on every field.
 	 *
 	 * @param array<int, array<string, mixed>> $graph Nodes.
