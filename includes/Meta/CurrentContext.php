@@ -221,6 +221,36 @@ class CurrentContext {
 	 * @return array<string, mixed> Context.
 	 */
 	private function build( string $object_type, string $object_subtype, int $object_id, array $vars, string $permalink, string $post_type = '' ): array {
+		/**
+		 * Filters the values a template's %%variables%% expand to.
+		 *
+		 * The counterpart to `taseo_template_variables`, which declares which
+		 * variables a context OFFERS. Declaring one without supplying its
+		 * value here leaves a token the settings screen accepts and the
+		 * resolver expands to nothing, so a plugin adding a variable needs
+		 * both.
+		 *
+		 * Custom pages supply their own values through
+		 * `taseo_custom_page_context`; this covers post, term and system-page
+		 * contexts, which have no other way in.
+		 *
+		 * Keys not declared through `taseo_template_variables` are harmless —
+		 * no template can reference them, since the settings screen rejects
+		 * an undeclared token on save.
+		 *
+		 * @since 0.4.0
+		 *
+		 * @param array<string, string> $vars           Slug => value.
+		 * @param string                $object_type    'post', 'term', 'system_page', or 'custom_page'.
+		 * @param string                $object_subtype Subtype key.
+		 * @param int                   $object_id      Post or term ID; 0 otherwise.
+		 */
+		$filtered = apply_filters( 'taseo_template_variable_values', $vars, $object_type, $object_subtype, $object_id );
+
+		if ( is_array( $filtered ) ) {
+			$vars = array_map( 'strval', array_filter( $filtered, 'is_scalar' ) );
+		}
+
 		return array(
 			'object_type'          => $object_type,
 			'object_subtype'       => $object_subtype,

@@ -228,4 +228,43 @@ class CurrentContextVariablesTest extends TestCase {
 		$this->assertSame( array(), array_diff( $produced, $advertised ) );
 		$this->assertSame( array(), array_diff( $advertised, $produced ) );
 	}
+
+	/**
+	 * `taseo_template_variables` declares what a context offers; this is how
+	 * the offered token gets a value. Declaring without supplying leaves a
+	 * token the settings screen accepts and the resolver expands to nothing.
+	 */
+	public function test_the_values_filter_can_add_and_override_variables(): void {
+		Functions\when( 'is_404' )->justReturn( true );
+		Monkey\Filters\expectApplied( 'taseo_template_variable_values' )->once()->andReturnUsing(
+			static function ( array $vars, string $type, string $subtype ): array {
+				$vars['item_count'] = '347';
+				$vars['sitename']   = 'Overridden';
+
+				return $vars;
+			}
+		);
+
+		$vars = ( new CurrentContext( $this->repository, $this->settings, new CustomPages(), new PostSubtypes() ) )->resolve()['vars'];
+
+		$this->assertSame( '347', $vars['item_count'] );
+		$this->assertSame( 'Overridden', $vars['sitename'] );
+	}
+
+	public function test_the_values_filter_drops_non_scalars_and_survives_a_bad_return(): void {
+		Functions\when( 'is_404' )->justReturn( true );
+		Monkey\Filters\expectApplied( 'taseo_template_variable_values' )->once()->andReturnUsing(
+			static function ( array $vars ): array {
+				$vars['bad']  = array( 'not', 'scalar' );
+				$vars['good'] = 42;
+
+				return $vars;
+			}
+		);
+
+		$vars = ( new CurrentContext( $this->repository, $this->settings, new CustomPages(), new PostSubtypes() ) )->resolve()['vars'];
+
+		$this->assertArrayNotHasKey( 'bad', $vars );
+		$this->assertSame( '42', $vars['good'] );
+	}
 }
