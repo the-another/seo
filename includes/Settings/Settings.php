@@ -230,17 +230,27 @@ class Settings {
 	/**
 	 * Schema.org type for a subtype.
 	 *
-	 * @param string $object_subtype Post type or taxonomy name.
+	 * @param string $object_subtype Post type, taxonomy, or post subtype name.
+	 * @param string $inherits_from  Owning post type, whose default applies
+	 *                               when the subtype has none of its own.
 	 * @return string Schema type.
 	 */
-	public function get_schema_type( string $object_subtype ): string {
+	public function get_schema_type( string $object_subtype, string $inherits_from = '' ): string {
 		$stored = $this->get( 'schema_types', array() );
 
 		if ( is_array( $stored ) && ! empty( $stored[ $object_subtype ] ) ) {
 			return (string) $stored[ $object_subtype ];
 		}
 
-		return self::SCHEMA_TYPE_DEFAULTS[ $object_subtype ] ?? 'WebPage';
+		if ( isset( self::SCHEMA_TYPE_DEFAULTS[ $object_subtype ] ) ) {
+			return self::SCHEMA_TYPE_DEFAULTS[ $object_subtype ];
+		}
+
+		// A subtype is not in the defaults table — only post types are — so it
+		// inherits its owner's. Auctions and items split out of `product` are
+		// still products, and defaulting them to WebPage would quietly drop
+		// the Product markup the post type had before it was split.
+		return self::SCHEMA_TYPE_DEFAULTS[ $inherits_from ] ?? 'WebPage';
 	}
 
 	/**

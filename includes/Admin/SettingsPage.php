@@ -430,7 +430,7 @@ class SettingsPage {
 					'' === $indent ? '' : esc_html( $subtype_label ),
 					esc_html__( 'Schema type:', 'the-another-seo' ),
 					esc_attr( $subtype ),
-					$this->schema_type_options( $this->settings->get_schema_type( $subtype ) ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in helper.
+					$this->schema_type_options( $this->settings->get_schema_type( $subtype, $type->name ) ), // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- escaped in helper.
 					'' === $indent ? '' : '</span>'
 				);
 			}

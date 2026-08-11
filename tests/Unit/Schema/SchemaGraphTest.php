@@ -164,7 +164,7 @@ class SchemaGraphTest extends TestCase {
 	}
 
 	public function test_article_type_adds_article_node_as_main_entity(): void {
-		$this->settings->shouldReceive( 'get_schema_type' )->with( 'post' )->andReturn( 'Article' );
+		$this->settings->shouldReceive( 'get_schema_type' )->with( 'post', Mockery::any() )->andReturn( 'Article' );
 
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'post';
@@ -203,7 +203,7 @@ class SchemaGraphTest extends TestCase {
 	}
 
 	public function test_product_type_adds_product_node_with_offer(): void {
-		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product' )->andReturn( 'Product' );
+		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product', Mockery::any() )->andReturn( 'Product' );
 
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'product';

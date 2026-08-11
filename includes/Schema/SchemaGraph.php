@@ -31,6 +31,25 @@ class SchemaGraph {
 	 * @param BreadcrumbTrail $trail       Trail builder.
 	 * @param Settings        $settings    Settings.
 	 */
+	/**
+	 * Memoized node list (null = not yet built).
+	 *
+	 * The graph is printed in wp_head, but consumers that reconcile against
+	 * it — notably the WooCommerce de-duplication, which runs in the footer —
+	 * need to know what was emitted without paying to build it twice.
+	 *
+	 * @var array<int, array<string, mixed>>|null
+	 */
+	private ?array $built = null;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param CurrentContext  $context     Request context.
+	 * @param MetaOutput      $meta_output Resolved title/description source.
+	 * @param BreadcrumbTrail $trail       Trail builder.
+	 * @param Settings        $settings    Settings.
+	 */
 	public function __construct(
 		private readonly CurrentContext $context,
 		private readonly MetaOutput $meta_output,
@@ -45,6 +64,35 @@ class SchemaGraph {
 	 * @return array<int, array<string, mixed>> Nodes; empty when disabled/unmanaged.
 	 */
 	public function build(): array {
+		if ( null === $this->built ) {
+			$this->built = $this->do_build();
+		}
+
+		return $this->built;
+	}
+
+	/**
+	 * Whether the graph carries a node of one of the given types.
+	 *
+	 * @param array<int, string> $types Schema.org types.
+	 * @return bool True when at least one node matches.
+	 */
+	public function has_node_of_type( array $types ): bool {
+		foreach ( $this->build() as $node ) {
+			if ( isset( $node['@type'] ) && in_array( $node['@type'], $types, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Uncached build.
+	 *
+	 * @return array<int, array<string, mixed>> Nodes.
+	 */
+	private function do_build(): array {
 		$ctx = $this->context->resolve();
 
 		if ( null === $ctx || ! empty( $ctx['row']['schema_disabled'] ) ) {
@@ -189,7 +237,7 @@ class SchemaGraph {
 			return null;
 		}
 
-		$type      = $this->settings->get_schema_type( (string) $ctx['object_subtype'] );
+		$type      = $this->settings->get_schema_type( (string) $ctx['object_subtype'], (string) ( $ctx['post_type'] ?? '' ) );
 		$permalink = (string) $ctx['permalink'];
 
 		if ( 'Article' === $type ) {

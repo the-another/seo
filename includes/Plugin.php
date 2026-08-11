@@ -27,6 +27,7 @@ use TheAnother\Plugin\SEO\Meta\TemplateResolver;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 use TheAnother\Plugin\SEO\Schema\SchemaGraph;
 use TheAnother\Plugin\SEO\Schema\SchemaOutput;
+use TheAnother\Plugin\SEO\Schema\WooCommerceDeduplication;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Sitemap\ExternalUrls;
 use TheAnother\Plugin\SEO\Sitemap\SitemapAssignment;
@@ -162,6 +163,10 @@ class Plugin {
 		);
 		$c->register( 'schema_output', fn( Container $c ) => new SchemaOutput( $c->get( 'schema_graph' ) ) );
 		$c->register(
+			'woocommerce_deduplication',
+			fn( Container $c ) => new WooCommerceDeduplication( $c->get( 'schema_graph' ) )
+		);
+		$c->register(
 			'metabox',
 			fn( Container $c ) => new Metabox( $c->get( 'indexable_repository' ), $c->get( 'settings' ) )
 		);
@@ -253,6 +258,7 @@ class Plugin {
 		$this->container->get( 'meta_output' )->init( $hook_manager );
 		$this->container->get( 'social_output' )->init( $hook_manager );
 		$this->container->get( 'schema_output' )->init( $hook_manager );
+		$this->container->get( 'woocommerce_deduplication' )->init( $hook_manager );
 		$this->container->get( 'breadcrumb_renderer' )->init( $hook_manager );
 		$this->container->get( 'blocks' )->init( $hook_manager );
 		$this->container->get( 'sitemap_assignment' )->init( $hook_manager );

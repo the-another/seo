@@ -126,6 +126,33 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 'WebPage', ( new Settings() )->get_schema_type( 'post' ) );
 	}
 
+	/**
+	 * Only post types are in the defaults table, so a subtype split out of one
+	 * must inherit its owner's — otherwise splitting `product` into auctions
+	 * and items would silently downgrade both from Product to WebPage.
+	 */
+	public function test_a_subtype_inherits_its_owning_post_types_schema_default(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+		$settings = new Settings();
+
+		$this->assertSame( 'Product', $settings->get_schema_type( 'aucteeno_auction', 'product' ) );
+		$this->assertSame( 'Article', $settings->get_schema_type( 'editorial_note', 'post' ) );
+	}
+
+	public function test_a_stored_subtype_value_still_beats_the_inherited_default(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array( 'schema_types' => array( 'aucteeno_auction' => 'Article' ) )
+		);
+
+		$this->assertSame( 'Article', ( new Settings() )->get_schema_type( 'aucteeno_auction', 'product' ) );
+	}
+
+	public function test_an_unknown_owner_still_falls_back_to_webpage(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 'WebPage', ( new Settings() )->get_schema_type( 'whatever', 'no_such_type' ) );
+	}
+
 	public function test_social_toggles_default_on(): void {
 		Functions\when( 'get_option' )->justReturn( array() );
 		$settings = new Settings();
