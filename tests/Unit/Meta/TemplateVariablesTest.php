@@ -10,6 +10,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
 
 #[CoversClass( TemplateVariables::class )]
@@ -29,7 +30,7 @@ class TemplateVariablesTest extends TestCase {
 		// override this per-test.
 		Functions\when( 'is_object_in_taxonomy' )->justReturn( true );
 
-		$this->variables = new TemplateVariables();
+		$this->variables = new TemplateVariables( new PostSubtypes() );
 	}
 
 	protected function tearDown(): void {

@@ -36,6 +36,10 @@ class SitemapAssignmentTest extends TestCase {
 		$this->storage  = Mockery::mock( SitemapStorage::class );
 		$this->settings = Mockery::mock( Settings::class );
 
+		// The inclusion toggle now gates post and term subtypes too, not just
+		// families. Tests exercising the toggle itself override this.
+		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->andReturn( true )->byDefault();
+
 		$this->assignment = new SitemapAssignment( $this->files, $this->storage, $this->settings );
 	}
 
@@ -339,12 +343,11 @@ class SitemapAssignmentTest extends TestCase {
 			->once()
 			->with(
 				Mockery::on(
-					fn( string $sql ): bool => str_contains( $sql, "object_type = 'custom_page'" )
+					fn( string $sql ): bool => str_contains( $sql, 'object_type IN (%s,%s,%s)' )
 						&& str_contains( $sql, 'sitemap_file_id IS NULL' )
 						&& str_contains( $sql, 'is_indexable = 1' )
 				),
-				'vendor_store',
-				200
+				array( 'post', 'term', 'custom_page', 'vendor_store', 200 )
 			)
 			->andReturn( 'BATCH_SQL' );
 		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'BATCH_SQL', ARRAY_A )->andReturn( $ids );

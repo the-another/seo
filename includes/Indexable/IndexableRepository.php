@@ -126,6 +126,8 @@ class IndexableRepository {
 		$wpdb->query( $sql );
 		// phpcs:enable
 
+		$this->purge_stale_subtypes( $object_type, $object_subtype, $object_id );
+
 		/**
 		 * Fires after an indexable row's synced columns are written.
 		 *
@@ -140,6 +142,62 @@ class IndexableRepository {
 		 * @param int    $object_id      Post or term ID; 0 for system pages and custom pages.
 		 */
 		do_action( 'taseo_indexable_synced', $object_type, $object_subtype, $object_id );
+	}
+
+	/**
+	 * Drop rows for the same object left behind under a different subtype.
+	 *
+	 * The unique key is (object_type, object_subtype, object_id), so a post
+	 * whose subtype changes does not update its old row — it inserts a second
+	 * one. The stale row keeps is_indexable = 1 and keeps its chunk slot, so
+	 * the URL would be published from two sitemap files at once. Installing a
+	 * plugin that declares subtypes does exactly this, to every post of that
+	 * type, on the first rescan.
+	 *
+	 * Deleting through delete() rather than a bulk DELETE is deliberate: the
+	 * chunk slot is released by the `taseo_indexable_deleting` listener, and a
+	 * row removed behind its back would leak the slot and leave a permanently
+	 * over-counted chunk.
+	 *
+	 * Scoped to posts. A term cannot change taxonomy, and custom_page ids are
+	 * provider-chosen and collide across families by design — vendor_store:42
+	 * and vendor_items:42 are one vendor's two URLs, and purging by
+	 * (object_type, object_id) there would make each push delete the other.
+	 *
+	 * @param string $object_type    Object type.
+	 * @param string $object_subtype Subtype just written.
+	 * @param int    $object_id      Object ID.
+	 * @return void
+	 */
+	private function purge_stale_subtypes( string $object_type, string $object_subtype, int $object_id ): void {
+		if ( 'post' !== $object_type ) {
+			return;
+		}
+
+		global $wpdb;
+
+		$table = IndexablesTable::get_table_name();
+
+		// Served by the object_lookup_by_id key.
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$stale = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT object_subtype FROM {$table}
+				WHERE object_type = %s AND object_id = %d AND object_subtype != %s",
+				$object_type,
+				$object_id,
+				$object_subtype
+			)
+		);
+		// phpcs:enable
+
+		if ( ! is_array( $stale ) ) {
+			return;
+		}
+
+		foreach ( $stale as $subtype ) {
+			$this->delete( $object_type, (string) $subtype, $object_id );
+		}
 	}
 
 	/**

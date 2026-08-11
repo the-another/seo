@@ -31,6 +31,25 @@ class SchemaGraph {
 	 * @param BreadcrumbTrail $trail       Trail builder.
 	 * @param Settings        $settings    Settings.
 	 */
+	/**
+	 * Memoized node list (null = not yet built).
+	 *
+	 * The graph is printed in wp_head, but consumers that reconcile against
+	 * it — notably the WooCommerce de-duplication, which runs in the footer —
+	 * need to know what was emitted without paying to build it twice.
+	 *
+	 * @var array<int, array<string, mixed>>|null
+	 */
+	private ?array $built = null;
+
+	/**
+	 * Constructor.
+	 *
+	 * @param CurrentContext  $context     Request context.
+	 * @param MetaOutput      $meta_output Resolved title/description source.
+	 * @param BreadcrumbTrail $trail       Trail builder.
+	 * @param Settings        $settings    Settings.
+	 */
 	public function __construct(
 		private readonly CurrentContext $context,
 		private readonly MetaOutput $meta_output,
@@ -45,6 +64,35 @@ class SchemaGraph {
 	 * @return array<int, array<string, mixed>> Nodes; empty when disabled/unmanaged.
 	 */
 	public function build(): array {
+		if ( null === $this->built ) {
+			$this->built = $this->do_build();
+		}
+
+		return $this->built;
+	}
+
+	/**
+	 * Whether the graph carries a node of one of the given types.
+	 *
+	 * @param array<int, string> $types Schema.org types.
+	 * @return bool True when at least one node matches.
+	 */
+	public function has_node_of_type( array $types ): bool {
+		foreach ( $this->build() as $node ) {
+			if ( isset( $node['@type'] ) && in_array( $node['@type'], $types, true ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Uncached build.
+	 *
+	 * @return array<int, array<string, mixed>> Nodes.
+	 */
+	private function do_build(): array {
 		$ctx = $this->context->resolve();
 
 		if ( null === $ctx || ! empty( $ctx['row']['schema_disabled'] ) ) {
@@ -95,7 +143,58 @@ class SchemaGraph {
 			$graph[] = $main_entity;
 		}
 
-		return $graph;
+		/**
+		 * Filters the finished @graph node list.
+		 *
+		 * Applied last, so this is the final word on what the page emits.
+		 * One graph-level hook rather than one per node: an integration
+		 * adding an image to the main entity, an Organization node for a
+		 * vendor page, and an extra property elsewhere needs one filter
+		 * rather than three, and the individual node shapes stay internal.
+		 *
+		 * Returning a non-array leaves the graph untouched; returning an
+		 * empty array suppresses the JSON-LD block entirely.
+		 *
+		 * @since 0.4.0
+		 *
+		 * @param array<int, array<string, mixed>> $graph Nodes.
+		 * @param array<string, mixed>             $ctx   Resolved request context.
+		 */
+		$filtered = apply_filters( 'taseo_schema_graph', $graph, $ctx );
+
+		return $this->decode_entities( is_array( $filtered ) ? $filtered : $graph );
+	}
+
+	/**
+	 * Turn HTML entities back into the characters they stand for.
+	 *
+	 * JSON-LD values are text, not markup. WordPress hands us markup: the
+	 * `the_title` filter runs wptexturize(), so get_the_title() returns
+	 * "Jack Daniel&#8217;s" — correct inside <title> and a meta attribute,
+	 * and wrong here, where a consumer has no reason to HTML-decode and will
+	 * render the entity literally.
+	 *
+	 * Applied after the filter, so the "text, not markup" invariant holds for
+	 * whatever an integration contributed as well. Values are escaped for
+	 * JSON, not HTML, by wp_json_encode() at print time, and the payload is
+	 * emitted with JSON_HEX_TAG — so decoding here cannot let markup out.
+	 *
+	 * @param array<mixed> $value Graph or subtree.
+	 * @return array<mixed> Decoded subtree.
+	 */
+	private function decode_entities( array $value ): array {
+		foreach ( $value as $key => $item ) {
+			if ( is_array( $item ) ) {
+				$value[ $key ] = $this->decode_entities( $item );
+				continue;
+			}
+
+			if ( is_string( $item ) ) {
+				$value[ $key ] = html_entity_decode( $item, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+			}
+		}
+
+		return $value;
 	}
 
 	/**
@@ -170,7 +269,7 @@ class SchemaGraph {
 			return null;
 		}
 
-		$type      = $this->settings->get_schema_type( (string) $ctx['object_subtype'] );
+		$type      = $this->settings->get_schema_type( (string) $ctx['object_subtype'], (string) ( $ctx['post_type'] ?? '' ) );
 		$permalink = (string) $ctx['permalink'];
 
 		if ( 'Article' === $type ) {
@@ -195,7 +294,10 @@ class SchemaGraph {
 			return $node;
 		}
 
-		if ( 'Product' === $type && function_exists( 'wc_get_product' ) ) {
+		// Keyed off the post type, not the subtype: a marketplace can split
+		// `product` into auction/item subtypes, each free to select the
+		// Product schema type, and all still resolvable through WooCommerce.
+		if ( 'Product' === $type && 'product' === ( $ctx['post_type'] ?? '' ) && function_exists( 'wc_get_product' ) ) {
 			$product = wc_get_product( (int) $ctx['object_id'] );
 
 			if ( ! $product ) {

@@ -164,7 +164,7 @@ class SchemaGraphTest extends TestCase {
 	}
 
 	public function test_article_type_adds_article_node_as_main_entity(): void {
-		$this->settings->shouldReceive( 'get_schema_type' )->with( 'post' )->andReturn( 'Article' );
+		$this->settings->shouldReceive( 'get_schema_type' )->with( 'post', Mockery::any() )->andReturn( 'Article' );
 
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'post';
@@ -203,10 +203,11 @@ class SchemaGraphTest extends TestCase {
 	}
 
 	public function test_product_type_adds_product_node_with_offer(): void {
-		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product' )->andReturn( 'Product' );
+		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product', Mockery::any() )->andReturn( 'Product' );
 
 		$ctx                   = $this->page_context();
 		$ctx['object_subtype'] = 'product';
+		$ctx['post_type']      = 'product';
 		$ctx['object_id']      = 88123;
 		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
 
@@ -266,5 +267,92 @@ class SchemaGraphTest extends TestCase {
 		$graph = $this->build_graph();
 
 		$this->assertArrayNotHasKey( 'logo', $this->find_identity_node( $graph ) );
+	}
+
+	public function test_the_graph_filter_sees_the_finished_node_list_and_has_the_last_word(): void {
+		$seen = null;
+
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturnUsing(
+			function ( array $graph, array $ctx ) use ( &$seen ): array {
+				$seen     = $graph;
+				$graph[]  = array(
+					'@type' => 'Organization',
+					'@id'   => $ctx['permalink'] . '#vendor',
+				);
+
+				return $graph;
+			}
+		);
+
+		$graph = $this->build_graph();
+
+		// The filter is applied last: what it received already carried every
+		// node the builder produces.
+		$this->assertNotNull( $seen );
+		$this->assertSame( $this->node_types( $seen ), $this->node_types( array_slice( $graph, 0, count( $seen ) ) ) );
+		$this->assertSame( 'Organization', end( $graph )['@type'] );
+		$this->assertSame( 'https://example.com/about/#vendor', end( $graph )['@id'] );
+	}
+
+	public function test_a_non_array_filter_return_leaves_the_graph_untouched(): void {
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturn( 'nonsense' );
+
+		$graph = $this->build_graph();
+
+		$this->assertNotEmpty( $graph );
+		$this->assertSame( 'WebSite', $graph[1]['@type'] );
+	}
+
+	/**
+	 * JSON-LD carries text, not markup. WordPress's the_title filter runs
+	 * wptexturize(), so titles arrive as "Jack Daniel&#8217;s" — right for
+	 * <title>, wrong here, where a consumer renders the entity literally.
+	 */
+	public function test_html_entities_are_decoded_in_node_values(): void {
+		$ctx                    = $this->page_context();
+		$ctx['vars']['title']   = 'A Jack Daniel&#8217;s Sign &#8220;Old No. 7&#8221;';
+		$ctx['vars']['excerpt'] = 'Pete&#039;s lot &amp; more';
+		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
+
+		$graph   = $this->graph->build();
+		$webpage = null;
+
+		foreach ( $graph as $node ) {
+			if ( 'WebPage' === $node['@type'] ) {
+				$webpage = $node;
+			}
+		}
+
+		$this->assertNotNull( $webpage );
+		$this->assertSame( 'A Jack Daniel’s Sign “Old No. 7”', $webpage['name'] );
+		$this->assertSame( "Pete's lot & more", $webpage['description'] );
+	}
+
+	/**
+	 * The invariant has to hold for integrator additions too, or a filter that
+	 * pulls a title from the same WordPress APIs reintroduces the problem.
+	 */
+	public function test_entities_are_decoded_in_filter_contributed_nodes(): void {
+		Filters\expectApplied( 'taseo_schema_graph' )->once()->andReturnUsing(
+			static function ( array $graph ): array {
+				$graph[] = array( '@type' => 'Organization', 'name' => 'Grafe &amp; Sons' );
+
+				return $graph;
+			}
+		);
+
+		$graph = $this->build_graph();
+
+		$this->assertSame( 'Grafe & Sons', end( $graph )['name'] );
+	}
+
+	/**
+	 * Node @type list, for comparing graph prefixes without asserting on every field.
+	 *
+	 * @param array<int, array<string, mixed>> $graph Nodes.
+	 * @return array<int, string> Types.
+	 */
+	private function node_types( array $graph ): array {
+		return array_map( static fn( array $node ): string => (string) $node['@type'], $graph );
 	}
 }

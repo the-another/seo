@@ -8,6 +8,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-11
+
+### Added
+- Post subtypes: one post type can be split into several SEO subtypes via the `taseo_post_subtypes` (declare) and `taseo_post_subtype` (resolve) filters. Each subtype gets its own title/description templates, schema type, and sitemap family — so a marketplace storing auctions, catalogue items, and merchandise in a single `product` post type can treat them as three things instead of one. Anything a resolver does not claim stays in the post type's own bucket.
+- `taseo_schema_graph` filter over the finished `@graph` node list, applied last, for adding images, vendor `Organization` nodes, or any other node an integration owns.
+- `taseo_sync_post()`: public entry point for integrations whose writes bypass `save_post` (direct `$wpdb` importers), running the same code path as the `save_post` handler.
+- WooCommerce structured-data de-duplication: WooCommerce emits its own JSON-LD from the footer, so a product page carried two Product nodes and two BreadcrumbLists (and a theme rendering the summary twice produced two *identical* Products in one script). Its copies are now suppressed — but only for the nodes this plugin actually emitted on that request, so switching schema off for a subtype leaves WooCommerce's markup in place rather than stripping structured data and putting nothing in its place.
+- `taseo_template_variable_values` filter: the counterpart to `taseo_template_variables`, which only declares which tokens a context *offers*. Post, term and system-page contexts previously had no way for a plugin to supply a value, so a declared token expanded to nothing. Custom pages already had this through `taseo_custom_page_context`.
+- Sitemap include/exclude toggles now cover post subtypes and taxonomies alongside external URL families. Excluding one keeps its indexable rows and per-object overrides, so re-including restores the URLs.
+
+### Fixed
+- JSON-LD values are no longer HTML-encoded. WordPress's `the_title` filter runs `wptexturize()`, so titles reached the graph as `Jack Daniel&#8217;s` — correct inside `<title>` and a meta attribute, wrong in JSON-LD, where consumers render the entity literally. Decoding is applied after `taseo_schema_graph`, so the invariant holds for integrator-contributed nodes too. HTML output is unchanged.
+
+### Changed
+- `get_schema_type()` takes an optional owning post type: only post types have schema-type defaults, so a subtype split out of one inherits its owner's. Without this, splitting `product` into auctions and items silently downgraded both from `Product` to `WebPage`.
+- The resolved context array carries `post_type` alongside `object_subtype`. Social and schema output probe WooCommerce through it, since a subtype no longer implies its post type.
+
 ## [0.3.0] - 2026-08-07
 
 ### Added
@@ -54,7 +71,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/the-another/seo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/the-another/seo/releases/tag/v0.1.0

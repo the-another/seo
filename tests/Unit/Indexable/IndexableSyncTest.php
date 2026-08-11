@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace TheAnother\Plugin\SEO\Tests\Indexable;
 
 use Brain\Monkey;
+use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
@@ -11,6 +12,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
 #[CoversClass( IndexableSync::class )]
@@ -33,6 +35,7 @@ class IndexableSyncTest extends TestCase {
 		$this->sync = new IndexableSync(
 			$this->repository,
 			$this->settings,
+			new PostSubtypes(),
 			function (): void {
 				$this->rebuild_calls[] = true;
 			}
@@ -233,6 +236,57 @@ class IndexableSyncTest extends TestCase {
 					fn( array $fields ): bool => array() === $fields['images']
 				)
 			);
+
+		$this->sync->sync_post( 88123 );
+	}
+
+	/**
+	 * Register a product split and route every product to $subtype.
+	 */
+	private function split_products_into( string $subtype ): void {
+		Functions\when( 'get_post_types' )->justReturn( array( 'post' => 'post', 'product' => 'product' ) );
+		Functions\when( 'get_taxonomies' )->justReturn( array( 'category' => 'category' ) );
+		Filters\expectApplied( 'taseo_post_subtypes' )->andReturn(
+			array( 'product' => array( 'aucteeno_auction' => 'Auctions', 'aucteeno_item' => 'Items' ) )
+		);
+		Filters\expectApplied( 'taseo_post_subtype' )->andReturn( $subtype );
+	}
+
+	public function test_sync_post_writes_the_resolved_subtype_not_the_post_type(): void {
+		$post = $this->make_post( 88123 );
+
+		Functions\when( 'get_post' )->justReturn( $post );
+		Functions\when( 'wp_is_post_revision' )->justReturn( false );
+		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
+		Functions\when( 'is_post_type_viewable' )->justReturn( true );
+		Functions\when( 'get_permalink' )->justReturn( 'https://example.com/auction/spring-sale/' );
+		Functions\when( 'get_the_post_thumbnail_url' )->justReturn( false );
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'product' ) );
+		$this->split_products_into( 'aucteeno_auction' );
+
+		$this->repository->shouldReceive( 'upsert_synced_fields' )
+			->once()
+			->with( 'post', 'aucteeno_auction', 88123, Mockery::type( 'array' ) );
+
+		$this->sync->sync_post( 88123 );
+	}
+
+	public function test_delete_addresses_the_row_under_the_same_resolved_subtype(): void {
+		Functions\when( 'get_post' )->justReturn( $this->make_post( 88123 ) );
+		$this->split_products_into( 'aucteeno_item' );
+
+		$this->repository->shouldReceive( 'delete' )->once()->with( 'post', 'aucteeno_item', 88123 );
+
+		$this->sync->handle_before_delete_post( 88123 );
+	}
+
+	public function test_the_post_type_gate_still_applies_to_a_split_post_type(): void {
+		Functions\when( 'get_post' )->justReturn( $this->make_post( 88123 ) );
+		Functions\when( 'wp_is_post_revision' )->justReturn( false );
+		Functions\when( 'wp_is_post_autosave' )->justReturn( false );
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post' ) );
+
+		$this->repository->shouldNotReceive( 'upsert_synced_fields' );
 
 		$this->sync->sync_post( 88123 );
 	}

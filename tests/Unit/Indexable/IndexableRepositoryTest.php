@@ -31,6 +31,23 @@ class IndexableRepositoryTest extends TestCase {
 
 		Monkey\Functions\when( 'esc_url_raw' )->returnArg();
 		Monkey\Functions\when( 'wp_json_encode' )->alias( 'json_encode' );
+
+		// Every post upsert now also looks for rows left under a previous
+		// subtype. Default to "none", so tests that are not about the purge
+		// are unaffected by it.
+		$this->wpdb->shouldReceive( 'prepare' )
+			->with(
+				Mockery::on( static fn( string $sql ): bool => str_contains( $sql, 'SELECT object_subtype FROM' ) ),
+				Mockery::any(),
+				Mockery::any(),
+				Mockery::any()
+			)
+			->andReturn( 'PURGE_SQL' )
+			->byDefault();
+		// Permissive on the argument: several tests stub prepare() with a
+		// catch-all of their own, so the purge query does not always come
+		// back as PURGE_SQL. Tests that assert on the purge override this.
+		$this->wpdb->shouldReceive( 'get_col' )->andReturn( array() )->byDefault();
 	}
 
 	protected function tearDown(): void {
@@ -82,9 +99,12 @@ class IndexableRepositoryTest extends TestCase {
 
 		$captured = array();
 		$this->wpdb->shouldReceive( 'prepare' )
-			->once()
 			->andReturnUsing(
 				function ( string $sql, ...$args ) use ( &$captured ): string {
+					if ( ! str_contains( $sql, 'INSERT INTO' ) ) {
+						return 'PURGE_SQL'; // The stale-subtype probe.
+					}
+
 					$captured = array( $sql, $args );
 					return 'SQL';
 				}
@@ -114,9 +134,12 @@ class IndexableRepositoryTest extends TestCase {
 
 		$captured_sql = '';
 		$this->wpdb->shouldReceive( 'prepare' )
-			->once()
 			->andReturnUsing(
 				function ( string $sql, ...$args ) use ( &$captured_sql ): string {
+					if ( ! str_contains( $sql, 'INSERT INTO' ) ) {
+						return 'PURGE_SQL'; // The stale-subtype probe.
+					}
+
 					$captured_sql = $sql;
 					return 'SQL';
 				}
@@ -142,9 +165,12 @@ class IndexableRepositoryTest extends TestCase {
 
 		$captured = array();
 		$this->wpdb->shouldReceive( 'prepare' )
-			->once()
 			->andReturnUsing(
 				function ( string $sql, ...$args ) use ( &$captured ): string {
+					if ( ! str_contains( $sql, 'INSERT INTO' ) ) {
+						return 'PURGE_SQL'; // The stale-subtype probe.
+					}
+
 					$captured = $args;
 					return 'SQL';
 				}
@@ -277,7 +303,8 @@ class IndexableRepositoryTest extends TestCase {
 	}
 
 	public function test_upsert_synced_fields_fires_synced_action(): void {
-		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		// Twice: the upsert itself, then the stale-subtype probe.
+		$this->wpdb->shouldReceive( 'prepare' )->twice()->andReturn( 'SQL' );
 		$this->wpdb->shouldReceive( 'query' )->once();
 
 		Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 88123 );
@@ -301,5 +328,76 @@ class IndexableRepositoryTest extends TestCase {
 	public function test_override_columns_allows_the_image_url_overrides(): void {
 		$this->assertContains( 'og_image_url', IndexableRepository::OVERRIDE_COLUMNS );
 		$this->assertContains( 'twitter_image_url', IndexableRepository::OVERRIDE_COLUMNS );
+	}
+
+	/**
+	 * The unique key is (object_type, object_subtype, object_id), so a post
+	 * that changes subtype does not update its old row — it inserts a second
+	 * one. Without a purge the stale row keeps is_indexable = 1 and keeps its
+	 * chunk slot, and the URL is published from two sitemaps at once.
+	 *
+	 * This is exactly what installing a subtype-declaring plugin over an
+	 * existing catalogue does, on every product, at once.
+	 */
+	public function test_a_post_changing_subtype_purges_its_rows_under_other_subtypes(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'PURGE_SQL' );
+		$this->wpdb->shouldReceive( 'query' );
+
+		// Stale subtypes are discovered, then deleted through the normal
+		// delete path so the chunk slot is released.
+		$this->wpdb->shouldReceive( 'get_col' )
+			->once()
+			->with( 'PURGE_SQL' )
+			->andReturn( array( 'product' ) );
+
+		Actions\expectDone( 'taseo_indexable_deleting' )->once()->with( 'post', 'product', 88123 );
+		$this->wpdb->shouldReceive( 'delete' )->once();
+
+		$this->repository->upsert_synced_fields(
+			'post',
+			'aucteeno_auction',
+			88123,
+			array(
+				'permalink'     => 'https://example.com/auction/spring/',
+				'is_indexable'  => true,
+				'last_modified' => '2026-08-11 10:00:00',
+			)
+		);
+	}
+
+	public function test_a_post_that_kept_its_subtype_deletes_nothing(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'PURGE_SQL' );
+		$this->wpdb->shouldReceive( 'query' );
+		$this->wpdb->shouldReceive( 'get_col' )->once()->with( 'PURGE_SQL' )->andReturn( array() );
+
+		$this->wpdb->shouldNotReceive( 'delete' );
+
+		$this->repository->upsert_synced_fields(
+			'post',
+			'product',
+			88123,
+			array( 'permalink' => 'https://example.com/p/', 'is_indexable' => true )
+		);
+	}
+
+	/**
+	 * custom_page ids are provider-chosen and collide across families by
+	 * design — vendor_store:42 and vendor_items:42 are the same vendor's two
+	 * URLs. Purging by (object_type, object_id) there would have each push
+	 * delete the other.
+	 */
+	public function test_custom_page_families_never_purge_each_other(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' );
+
+		$this->wpdb->shouldNotReceive( 'get_col' );
+		$this->wpdb->shouldNotReceive( 'delete' );
+
+		$this->repository->upsert_synced_fields(
+			'custom_page',
+			'vendor_items',
+			42,
+			array( 'permalink' => 'https://example.com/store/acme/items/', 'is_indexable' => true )
+		);
 	}
 }

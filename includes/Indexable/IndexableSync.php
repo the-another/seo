@@ -26,6 +26,7 @@ class IndexableSync {
 	 *
 	 * @param IndexableRepository $repository         Repository.
 	 * @param Settings            $settings           Settings.
+	 * @param PostSubtypes        $subtypes           Post subtype registry.
 	 * @param callable            $rebuild_dispatcher Invoked when a permalink-structure
 	 *                                                change requires a full permalink
 	 *                                                rebuild (wired to IndexableBackfill
@@ -34,6 +35,7 @@ class IndexableSync {
 	public function __construct(
 		private readonly IndexableRepository $repository,
 		private readonly Settings $settings,
+		private readonly PostSubtypes $subtypes,
 		private $rebuild_dispatcher
 	) {
 	}
@@ -95,7 +97,7 @@ class IndexableSync {
 
 		$this->repository->upsert_synced_fields(
 			'post',
-			$post->post_type,
+			$this->subtypes->resolve( $post ),
 			$post_id,
 			array(
 				'permalink'     => (string) get_permalink( $post_id ),
@@ -121,7 +123,7 @@ class IndexableSync {
 
 		$this->repository->upsert_synced_fields(
 			'post',
-			$post->post_type,
+			$this->subtypes->resolve( $post ),
 			$post_id,
 			array(
 				'permalink'     => '',
@@ -134,6 +136,10 @@ class IndexableSync {
 	/**
 	 * Handles permanent deletion by removing the row.
 	 *
+	 * The row is addressed by the SAME resolution that wrote it. This fires
+	 * before the post and its meta are gone, so whatever the resolver keyed
+	 * off is still readable and the two agree.
+	 *
 	 * @param int $post_id Post ID.
 	 * @return void
 	 */
@@ -144,7 +150,7 @@ class IndexableSync {
 			return;
 		}
 
-		$this->repository->delete( 'post', $post->post_type, $post_id );
+		$this->repository->delete( 'post', $this->subtypes->resolve( $post ), $post_id );
 	}
 
 	/**

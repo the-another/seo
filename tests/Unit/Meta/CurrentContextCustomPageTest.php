@@ -10,6 +10,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
@@ -54,7 +55,7 @@ class CurrentContextCustomPageTest extends TestCase {
 	}
 
 	private function resolve(): ?array {
-		return ( new CurrentContext( $this->repository, $this->settings, $this->custom_pages ) )->resolve();
+		return ( new CurrentContext( $this->repository, $this->settings, $this->custom_pages, new PostSubtypes() ) )->resolve();
 	}
 
 	public function test_a_registered_declaration_produces_a_custom_page_context(): void {

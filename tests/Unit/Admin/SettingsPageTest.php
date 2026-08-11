@@ -10,6 +10,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
@@ -69,7 +70,7 @@ class SettingsPageTest extends TestCase {
 		$this->sitemap_files      = Mockery::mock( SitemapFileRepository::class );
 		$this->sitemap_storage    = Mockery::mock( SitemapStorage::class );
 		$this->sitemap_sweeper    = Mockery::mock( SitemapSweeper::class );
-		$this->template_variables = new TemplateVariables();
+		$this->template_variables = new TemplateVariables( new PostSubtypes() );
 
 		$this->custom_pages = Mockery::mock( CustomPages::class );
 		$this->custom_pages->shouldReceive( 'all' )->andReturn( array() )->byDefault();
@@ -77,6 +78,11 @@ class SettingsPageTest extends TestCase {
 		$this->sitemap_families   = Mockery::mock( SitemapFamilies::class );
 		$this->sitemap_assignment = Mockery::mock( SitemapAssignment::class );
 		$this->sitemap_families->shouldReceive( 'all' )->andReturn( array() )->byDefault();
+		// The sitemap toggle list spans post subtypes, taxonomies, and
+		// families, so the save path now reads the first two as well. Tests
+		// asserting on specific rows override these.
+		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array() )->byDefault();
+		$this->settings->shouldReceive( 'get_enabled_taxonomies' )->andReturn( array() )->byDefault();
 		// handle_save() always reads this before update() regardless of tab;
 		// only the sitemap-toggle tests below care about its value.
 		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
@@ -90,7 +96,8 @@ class SettingsPageTest extends TestCase {
 			$this->template_variables,
 			$this->custom_pages,
 			$this->sitemap_families,
-			$this->sitemap_assignment
+			$this->sitemap_assignment,
+			new PostSubtypes()
 		);
 	}
 
