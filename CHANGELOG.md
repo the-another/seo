@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-11
+
 ### Added
 - Post subtypes: one post type can be split into several SEO subtypes via the `taseo_post_subtypes` (declare) and `taseo_post_subtype` (resolve) filters. Each subtype gets its own title/description templates, schema type, and sitemap family — so a marketplace storing auctions, catalogue items, and merchandise in a single `product` post type can treat them as three things instead of one. Anything a resolver does not claim stays in the post type's own bucket.
 - `taseo_schema_graph` filter over the finished `@graph` node list, applied last, for adding images, vendor `Organization` nodes, or any other node an integration owns.
@@ -69,7 +71,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/the-another/seo/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/the-another/seo/releases/tag/v0.1.0

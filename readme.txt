@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 0.3.0
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,18 @@ Chunked sitemap XML files are written to `wp-content/uploads/taseo-sitemaps/` an
 No. WooCommerce is optional — when present, products get `og:type=product`, price/availability tags, and Product schema.
 
 == Changelog ==
+
+
+= 0.4.0 - 2026-08-11 =
+* Add: Post subtypes — one post type can be split into several SEO subtypes via the `taseo_post_subtypes` and `taseo_post_subtype` filters, each with its own templates, schema type, and sitemap family. A store keeping auctions, catalogue items, and merchandise in a single `product` post type can now treat them as three things.
+* Add: `taseo_schema_graph` filter over the finished JSON-LD `@graph`, applied last, for contributing images, extra nodes, or corrections.
+* Add: `taseo_template_variable_values` filter, the counterpart to `taseo_template_variables` — declaring a `%%token%%` offered it, but nothing could supply its value outside custom pages.
+* Add: `taseo_sync_post()` — a public entry point for importers that write posts with direct database queries and so never fire `save_post`.
+* Add: Sitemap include/exclude toggles now cover post subtypes and taxonomies, not just external URL families. Excluding one keeps its rows and per-object overrides, so re-including restores the URLs.
+* Fix: A post that changes subtype no longer leaves its old row behind. The row was keyed by subtype, so the stale one kept its sitemap slot and the URL was published from two files at once.
+* Fix: WooCommerce's own JSON-LD is suppressed for nodes this plugin emits, ending duplicate `Product` and `BreadcrumbList` markup on product pages. Its copies survive when schema is switched off, rather than leaving the page with nothing.
+* Fix: A subtype inherits its owning post type's schema-type default, so splitting `product` no longer silently downgrades its subtypes from `Product` to `WebPage`.
+* Fix: JSON-LD values are no longer HTML-encoded — titles reached the graph as `Jack Daniel&#8217;s`, which consumers render literally. HTML output is unchanged.
 
 = 0.3.0 - 2026-08-07 =
 * Add: Public sitemap push API — other plugins register URL families via the `taseo_sitemap_families` filter and push URLs with `taseo_sitemap_sync_url()`, `taseo_sitemap_delete_url()`, and `taseo_sitemap_delete_family()`.
