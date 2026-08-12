@@ -76,6 +76,27 @@ class MigrationNoticeTest extends TestCase {
 		$this->assertSame( '', $this->render() );
 	}
 
+	public function test_skips_an_entry_that_is_not_an_array(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'not an array' ) );
+
+		$this->assertSame( '', $this->render() );
+	}
+
+	public function test_skips_an_entry_missing_an_engine(): void {
+		Functions\when( 'get_option' )->justReturn( array( array( 'domain' => 'brandtwo.com' ) ) );
+
+		$this->assertSame( '', $this->render() );
+	}
+
+	public function test_falls_back_to_the_raw_slug_for_an_unknown_engine(): void {
+		Functions\when( 'get_option' )->justReturn( array( array( 'engine' => 'duckduckgo', 'domain' => '' ) ) );
+
+		$html = $this->render();
+
+		$this->assertStringContainsString( 'notice-warning', $html );
+		$this->assertStringContainsString( 'duckduckgo', $html );
+	}
+
 	public function test_renders_nothing_when_the_user_cannot_manage_options(): void {
 		Functions\when( 'current_user_can' )->justReturn( false );
 		Functions\expect( 'get_option' )->never();
