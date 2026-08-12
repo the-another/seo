@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- Per-domain site verification and tracking. A multi-brand site whose brands live on separate domains can now hold its own Google Search Console, Bing Webmaster Tools, Yandex Webmaster, Yahoo and Meta verification codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.
+- `taseo_verification_domains` filter: push a host to give it its own codes. Values are normalized (lowercase, scheme/port/path and leading `www.` stripped) and de-duplicated, and the site's own host is always present and always first, so a filter cannot remove or reorder the default. The Another Multi-Brand Global Styles pushes every host from its published Brands' URL rules; with no subscribers the list is the site's own host and behaviour is unchanged.
+- Verification codes and verification files are per-domain with no inheritance — a webmaster property is verified on its own, and inheriting would guarantee a silently failed verification instead of an obviously empty field. Tracking IDs do inherit: a blank GA4 / Tag Manager / Meta Pixel field on a brand domain falls back to the default domain's, so brands sharing one analytics property need it typed once.
+- Requests arriving on an unrecognised host — a staging alias, a bare IP, a load balancer — resolve to the default domain, which is exactly what every host received before. Existing single-domain sites need no migration and see no output change: the default domain keeps using the settings keys it already had.
+
 ## [0.4.0] - 2026-08-11
 
 ### Added
