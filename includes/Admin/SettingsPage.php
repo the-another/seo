@@ -42,30 +42,32 @@ class SettingsPage {
 	private const SCHEMA_TYPE_CHOICES = array( 'None', 'WebPage', 'Article', 'Product' );
 
 	/**
-	 * Verification meta-tag settings keys.
+	 * Engine slug => pattern a file-mode token must match, and the prefix and
+	 * suffix stripped when an operator pastes a whole filename instead.
 	 *
-	 * @var array<int, string>
+	 * @since 0.5.0
+	 *
+	 * @var array<string, array{pattern: string, prefix: string, suffix: string, lowercase: bool}>
 	 */
-	private const VERIFICATION_CODE_KEYS = array(
-		'verify_google',
-		'verify_bing',
-		'verify_yandex',
-		'verify_yahoo',
-		'verify_facebook',
-	);
-
-	/**
-	 * Verification file settings keys => validation pattern.
-	 *
-	 * Anchored, and allowing no slash or dot beyond the single extension:
-	 * these values are compared against an incoming request path.
-	 *
-	 * @var array<string, string>
-	 */
-	private const VERIFICATION_FILE_PATTERNS = array(
-		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
-		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
-		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	private const TOKEN_SHAPES = array(
+		'google' => array(
+			'pattern'   => '/^[a-z0-9]+$/',
+			'prefix'    => 'google',
+			'suffix'    => '.html',
+			'lowercase' => true,
+		),
+		'bing'   => array(
+			'pattern'   => '/^[A-Za-z0-9]+$/',
+			'prefix'    => '',
+			'suffix'    => '',
+			'lowercase' => false,
+		),
+		'yandex' => array(
+			'pattern'   => '/^[a-z0-9]+$/',
+			'prefix'    => 'yandex_',
+			'suffix'    => '.html',
+			'lowercase' => true,
+		),
 	);
 
 	/**
@@ -1031,46 +1033,41 @@ class SettingsPage {
 		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
 
 		$services = array(
-			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), 'verify_google', 'verify_google_file', __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ) ),
-			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), 'verify_bing', 'verify_bing_file', __( 'Token from BingSiteAuth.xml', 'the-another-seo' ) ),
-			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), 'verify_yandex', 'verify_yandex_file', __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ) ),
-			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), 'verify_yahoo', '', '' ),
-			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), 'verify_facebook', '', '' ),
+			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), true ),
+			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), true ),
+			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), true ),
+			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), false ),
+			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), false ),
 		);
 
 		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
-		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only. Each domain must be verified on its own; codes are never shared between domains.', 'the-another-seo' ) . '</p>';
+		echo '<p>' . esc_html__( 'Paste the code or the file name — either works, and the file name is worked out for you. Each domain must be verified on its own; codes are never shared between domains.', 'the-another-seo' ) . '</p>';
 		echo '<table class="form-table">';
 
 		foreach ( $services as $engine => $service ) {
-			list( $label, $code_key, $file_key, $file_hint ) = $service;
+			list( $label, $has_methods ) = $service;
+
+			$code   = $this->settings->get_verification_code( $engine, $lookup );
+			$method = $has_methods ? $this->settings->get_verification_method( $engine, $lookup ) : Settings::METHOD_META;
+
+			printf( '<tr><th scope="row">%s</th><td>', esc_html( $label ) );
+
+			if ( $has_methods ) {
+				$this->render_method_radios( $engine, $method );
+			}
 
 			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" class="regular-text" placeholder="%4$s" />',
-				esc_html( $label ),
-				esc_attr( $code_key ),
-				esc_attr( $this->settings->get_verification_code( $engine, $lookup ) ),
+				'<input type="text" name="taseo_settings[verify_%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
+				esc_attr( $engine ),
+				esc_attr( $code ),
 				esc_attr__( 'Verification code', 'the-another-seo' )
 			);
 
-			if ( '' !== $file_key ) {
-				$file_value = $this->settings->get_verification_file( $engine, $lookup );
-
+			if ( $has_methods && Settings::METHOD_FILE === $method && '' !== $code ) {
 				printf(
-					'<br /><input type="text" name="taseo_settings[%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
-					esc_attr( $file_key ),
-					esc_attr( $file_value ),
-					esc_attr( $file_hint )
+					'<br /><a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
+					esc_url( $this->verification_file_url( $active, self::verification_filename( $engine, $code ) ) )
 				);
-
-				if ( '' !== $file_value ) {
-					$filename = 'bing' === $engine ? VerificationFileServer::BING_FILENAME : $file_value;
-
-					printf(
-						' <a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
-						esc_url( $this->verification_file_url( $active, $filename ) )
-					);
-				}
 			}
 
 			echo '</td></tr>';
@@ -1113,6 +1110,60 @@ class SettingsPage {
 				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
 			);
 		}
+	}
+
+	/**
+	 * The method choice for one service.
+	 *
+	 * A fieldset with a screen-reader legend, matching how the Post Types tab
+	 * groups its checkboxes. No JavaScript: the input's help text is chosen
+	 * from the saved method, so picking a radio relabels nothing until save.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $method Saved method.
+	 * @return void
+	 */
+	private function render_method_radios( string $engine, string $method ): void {
+		$choices = array(
+			Settings::METHOD_META => __( 'Meta tag', 'the-another-seo' ),
+			Settings::METHOD_FILE => __( 'File', 'the-another-seo' ),
+		);
+
+		echo '<fieldset><legend class="screen-reader-text">' . esc_html__( 'Verification method', 'the-another-seo' ) . '</legend>';
+
+		foreach ( $choices as $value => $choice_label ) {
+			printf(
+				'<label style="margin-right:1em;"><input type="radio" name="taseo_settings[verify_%1$s_method]" value="%2$s"%3$s /> %4$s</label>',
+				esc_attr( $engine ),
+				esc_attr( $value ),
+				checked( $method, $value, false ),
+				esc_html( $choice_label )
+			);
+		}
+
+		echo '</fieldset>';
+	}
+
+	/**
+	 * The public filename a service's token is served at.
+	 *
+	 * Mirrors VerificationFileServer::build_files(). Static so the renderer can
+	 * show the link without reaching into the server.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $token  Stored token.
+	 * @return string Filename.
+	 */
+	private static function verification_filename( string $engine, string $token ): string {
+		if ( 'bing' === $engine ) {
+			return VerificationFileServer::BING_FILENAME;
+		}
+
+		return 'yandex' === $engine ? 'yandex_' . $token . '.html' : 'google' . $token . '.html';
 	}
 
 	/**
@@ -1582,21 +1633,28 @@ class SettingsPage {
 
 		$webmaster = array();
 
-		foreach ( self::VERIFICATION_CODE_KEYS as $code_key ) {
-			if ( isset( $raw[ $code_key ] ) ) {
-				$webmaster[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
-			}
-		}
+		foreach ( array( 'google', 'bing', 'yandex', 'yahoo', 'facebook' ) as $engine ) {
+			$code_key   = 'verify_' . $engine;
+			$method_key = $code_key . '_method';
+			$has_method = isset( self::TOKEN_SHAPES[ $engine ] );
 
-		foreach ( self::VERIFICATION_FILE_PATTERNS as $file_key => $pattern ) {
-			if ( ! isset( $raw[ $file_key ] ) ) {
+			$method = Settings::METHOD_META;
+
+			if ( $has_method && isset( $raw[ $method_key ] ) && Settings::METHOD_FILE === $raw[ $method_key ] ) {
+				$method = Settings::METHOD_FILE;
+			}
+
+			if ( $has_method && isset( $raw[ $method_key ] ) ) {
+				$webmaster[ $method_key ] = $method;
+			}
+
+			if ( ! isset( $raw[ $code_key ] ) ) {
 				continue;
 			}
 
-			$value = trim( (string) $raw[ $file_key ] );
-			$value = 'verify_bing_file' === $file_key ? $value : strtolower( $value );
-
-			$webmaster[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $code_key ] = Settings::METHOD_FILE === $method
+				? self::sanitize_token( $engine, (string) $raw[ $code_key ] )
+				: VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
 		}
 
 		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
@@ -1669,5 +1727,41 @@ class SettingsPage {
 		}
 
 		return $clean;
+	}
+
+	/**
+	 * Reduce a pasted file value to the bare token this plugin stores.
+	 *
+	 * Accepts what the operator is most likely to have on their clipboard: the
+	 * whole filename the service handed them, or the token alone.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $raw    Raw submitted value.
+	 * @return string Token, '' when nothing valid survives.
+	 */
+	private static function sanitize_token( string $engine, string $raw ): string {
+		$shape = self::TOKEN_SHAPES[ $engine ] ?? null;
+
+		if ( null === $shape ) {
+			return '';
+		}
+
+		$value = trim( $raw );
+
+		if ( $shape['lowercase'] ) {
+			$value = strtolower( $value );
+		}
+
+		if ( '' !== $shape['prefix'] && str_starts_with( $value, $shape['prefix'] ) ) {
+			$value = substr( $value, strlen( $shape['prefix'] ) );
+		}
+
+		if ( '' !== $shape['suffix'] && str_ends_with( $value, $shape['suffix'] ) ) {
+			$value = substr( $value, 0, -strlen( $shape['suffix'] ) );
+		}
+
+		return 1 === preg_match( $shape['pattern'], $value ) ? $value : '';
 	}
 }

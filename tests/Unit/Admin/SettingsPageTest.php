@@ -582,41 +582,25 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( 'metatoken', $clean['verify_facebook'] );
 	}
 
-	public function test_accepts_valid_verification_filenames(): void {
+	/**
+	 * Path-traversal attempts pasted into a file-mode field must not survive
+	 * as a token: neither is alnum-only after prefix/suffix stripping, so
+	 * both fall through to sanitize_token()'s pattern check and come back
+	 * empty rather than partially normalized.
+	 */
+	public function test_sanitize_rejects_verification_filenames_containing_paths(): void {
 		$clean = $this->page->sanitize_settings(
 			array(
-				'verify_google_file' => 'google1a2b3c.html',
-				'verify_bing_file'   => 'BINGTOKEN123',
-				'verify_yandex_file' => 'yandex_9f8e7d.html',
+				'verify_google'        => '../wp-config.php',
+				'verify_google_method' => 'file',
+				'verify_yandex'        => 'yandex_x.html/../../etc/passwd',
+				'verify_yandex_method' => 'file',
 			),
 			'webmaster'
 		);
 
-		$this->assertSame( 'google1a2b3c.html', $clean['verify_google_file'] );
-		$this->assertSame( 'BINGTOKEN123', $clean['verify_bing_file'] );
-		$this->assertSame( 'yandex_9f8e7d.html', $clean['verify_yandex_file'] );
-	}
-
-	public function test_rejects_verification_filenames_containing_paths(): void {
-		$clean = $this->page->sanitize_settings(
-			array(
-				'verify_google_file' => '../wp-config.php',
-				'verify_yandex_file' => 'yandex_x.html/../../etc/passwd',
-			),
-			'webmaster'
-		);
-
-		$this->assertSame( '', $clean['verify_google_file'] );
-		$this->assertSame( '', $clean['verify_yandex_file'] );
-	}
-
-	public function test_rejects_a_verification_filename_with_the_wrong_prefix(): void {
-		$clean = $this->page->sanitize_settings(
-			array( 'verify_google_file' => 'notgoogle123.html' ),
-			'webmaster'
-		);
-
-		$this->assertSame( '', $clean['verify_google_file'] );
+		$this->assertSame( '', $clean['verify_google'] );
+		$this->assertSame( '', $clean['verify_yandex'] );
 	}
 
 	public function test_normalizes_and_validates_tracking_ids(): void {
@@ -732,17 +716,17 @@ class SettingsPageTest extends TestCase {
 
 		$clean = $this->page->sanitize_settings(
 			array(
-				'verify_google'      => 'brandcode',
-				'verify_bing'        => 'brandbing',
-				'verify_yandex'      => 'brandyandex',
-				'verify_yahoo'       => 'brandyahoo',
-				'verify_facebook'    => 'brandmeta',
-				'verify_google_file' => 'google1a2b3c.html',
-				'verify_bing_file'   => 'BINGTOKEN123',
-				'verify_yandex_file' => 'yandex_9f8e7d.html',
-				'analytics_ga4_id'   => 'G-BRAND1234',
-				'analytics_gtm_id'   => 'GTM-BRAND12',
-				'meta_pixel_id'      => '123456789012345',
+				'verify_google'        => 'brandcode',
+				'verify_bing'          => 'brandbing',
+				'verify_yandex'        => 'brandyandex',
+				'verify_yahoo'         => 'brandyahoo',
+				'verify_facebook'      => 'brandmeta',
+				'verify_google_method' => 'file',
+				'verify_bing_method'   => 'file',
+				'verify_yandex_method' => 'file',
+				'analytics_ga4_id'     => 'G-BRAND1234',
+				'analytics_gtm_id'     => 'GTM-BRAND12',
+				'meta_pixel_id'        => '123456789012345',
 			),
 			'webmaster',
 			'brandgone.example'
@@ -754,9 +738,9 @@ class SettingsPageTest extends TestCase {
 			'verify_yandex',
 			'verify_yahoo',
 			'verify_facebook',
-			'verify_google_file',
-			'verify_bing_file',
-			'verify_yandex_file',
+			'verify_google_method',
+			'verify_bing_method',
+			'verify_yandex_method',
 			'analytics_ga4_id',
 			'analytics_gtm_id',
 			'meta_pixel_id',
@@ -941,10 +925,11 @@ class SettingsPageTest extends TestCase {
 
 	/**
 	 * Wire up Settings getter expectations for the webmaster tab, defaulting
-	 * every verification code/file and tracking ID to '' unless overridden.
+	 * every verification code to '', every method to meta, and every
+	 * tracking ID to '' unless overridden.
 	 *
-	 * @param array<string, string> $codes Verification codes keyed by engine.
-	 * @param array<string, string> $files Verification files keyed by engine.
+	 * @param array<string, string> $codes   Verification codes keyed by engine.
+	 * @param array<string, string> $methods Verification methods keyed by engine.
 	 * @param string                $ga4   GA4 measurement ID.
 	 * @param string                $gtm   GTM container ID.
 	 * @param string                $pixel Meta Pixel ID.
@@ -961,7 +946,7 @@ class SettingsPageTest extends TestCase {
 	 */
 	private function stub_webmaster_settings(
 		array $codes = array(),
-		array $files = array(),
+		array $methods = array(),
 		string $ga4 = '',
 		string $gtm = '',
 		string $pixel = '',
@@ -979,21 +964,23 @@ class SettingsPageTest extends TestCase {
 			$codes
 		);
 
-		$files = array_merge(
+		$methods = array_merge(
 			array(
-				'google' => '',
-				'bing'   => '',
-				'yandex' => '',
+				'google' => 'meta',
+				'bing'   => 'meta',
+				'yandex' => 'meta',
 			),
-			$files
+			$methods
 		);
 
 		foreach ( $codes as $engine => $value ) {
 			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine, $host )->andReturn( $value );
 		}
 
-		foreach ( $files as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine, $host )->andReturn( $value );
+		foreach ( $methods as $engine => $method ) {
+			$this->settings->shouldReceive( 'get_verification_method' )
+				->with( $engine, $host )
+				->andReturn( $method );
 		}
 
 		// The renderer deliberately calls BOTH getter forms in one render and
@@ -1029,6 +1016,13 @@ class SettingsPageTest extends TestCase {
 		// the root-install form.
 		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => $home . $path );
 
+		// A real equality check, not the blank stub other tabs use: the
+		// method radios' checked state is what several tests here assert on.
+		Functions\when( 'checked' )->alias(
+			static fn( $checked, $current = true, bool $echo = true ): string =>
+				(string) $checked === (string) $current ? ' checked="checked"' : ''
+		);
+
 		$_GET['tab'] = 'webmaster';
 
 		if ( '' !== $domain ) {
@@ -1044,16 +1038,100 @@ class SettingsPageTest extends TestCase {
 		return $html;
 	}
 
+	public function test_webmaster_tab_renders_a_method_radio_pair_per_service(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'name="taseo_settings[verify_google_method]"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_bing_method]"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex_method]"', $html );
+		$this->assertStringNotContainsString( 'name="taseo_settings[verify_yahoo_method]"', $html );
+	}
+
+	public function test_webmaster_tab_checks_the_saved_method(): void {
+		$this->stub_webmaster_settings( array(), array( 'google' => 'file' ) );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertMatchesRegularExpression(
+			'/name="taseo_settings\[verify_google_method\]" value="file"[^>]*checked/',
+			$html
+		);
+	}
+
+	public function test_sanitize_stores_a_valid_method(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => '1a2b3c', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'file', $clean['verify_google_method'] );
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
+	public function test_sanitize_falls_back_to_meta_for_an_unknown_method(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'abc', 'verify_google_method' => 'carrier-pigeon' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'meta', $clean['verify_google_method'] );
+	}
+
+	public function test_sanitize_normalizes_a_pasted_google_filename_to_its_token(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'google1a2b3c.html', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
+	public function test_sanitize_normalizes_a_pasted_yandex_filename_to_its_token(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_yandex' => 'yandex_abc123.html', 'verify_yandex_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'abc123', $clean['verify_yandex'] );
+	}
+
+	public function test_sanitize_rejects_a_file_token_of_the_wrong_shape(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'has spaces!', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	/**
+	 * Bing's token is case-sensitive, unlike Google's and Yandex's: TOKEN_SHAPES
+	 * marks it 'lowercase' => false, and sanitize_token() must honour that
+	 * rather than applying one blanket case rule to all three services.
+	 */
+	public function test_sanitize_preserves_bing_token_case(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_bing' => 'BingToKen123', 'verify_bing_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'BingToKen123', $clean['verify_bing'] );
+	}
+
 	public function test_webmaster_tab_renders_an_input_for_every_verification_and_tracking_key(): void {
 		$this->stub_webmaster_settings();
 
 		$html = $this->render_webmaster_html();
 
 		foreach ( array( 'verify_google', 'verify_bing', 'verify_yandex', 'verify_yahoo', 'verify_facebook' ) as $key ) {
-			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
-		}
-
-		foreach ( array( 'verify_google_file', 'verify_bing_file', 'verify_yandex_file' ) as $key ) {
 			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
 		}
 
@@ -1071,11 +1149,7 @@ class SettingsPageTest extends TestCase {
 				'yahoo'    => 'yahootoken',
 				'facebook' => 'facebooktoken',
 			),
-			array(
-				'google' => 'google1a2b3c.html',
-				'bing'   => 'bingfiletoken',
-				'yandex' => 'yandex_9f8e7d.html',
-			),
+			array(),
 			'G-ABCD1234',
 			'GTM-ABCD123',
 			'123456789012345'
@@ -1089,17 +1163,16 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'name="taseo_settings[verify_yahoo]" value="yahootoken"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[verify_facebook]" value="facebooktoken"', $html );
 
-		$this->assertStringContainsString( 'name="taseo_settings[verify_google_file]" value="google1a2b3c.html"', $html );
-		$this->assertStringContainsString( 'name="taseo_settings[verify_bing_file]" value="bingfiletoken"', $html );
-		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex_file]" value="yandex_9f8e7d.html"', $html );
-
 		$this->assertStringContainsString( 'name="taseo_settings[analytics_ga4_id]" value="G-ABCD1234"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[analytics_gtm_id]" value="GTM-ABCD123"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[meta_pixel_id]" value="123456789012345"', $html );
 	}
 
 	public function test_webmaster_tab_links_a_configured_verification_file(): void {
-		$this->stub_webmaster_settings( array(), array( 'google' => 'google1a2b3c.html' ) );
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' )
+		);
 
 		$html = $this->render_webmaster_html();
 
@@ -1123,8 +1196,8 @@ class SettingsPageTest extends TestCase {
 	 */
 	public function test_webmaster_tab_links_a_brand_domains_file_on_that_domains_host(): void {
 		$this->stub_webmaster_settings(
-			array(),
-			array( 'google' => 'google1a2b3c.html' ),
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' ),
 			'',
 			'',
 			'',
@@ -1145,8 +1218,8 @@ class SettingsPageTest extends TestCase {
 	 */
 	public function test_a_brand_domains_file_link_keeps_a_subdirectory_installs_path(): void {
 		$this->stub_webmaster_settings(
-			array(),
-			array( 'google' => 'google1a2b3c.html' ),
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' ),
 			'',
 			'',
 			'',
@@ -1164,7 +1237,10 @@ class SettingsPageTest extends TestCase {
 	 * branch this one goes through was already correct, and stays that way.
 	 */
 	public function test_the_default_domains_file_link_keeps_a_subdirectory_installs_path(): void {
-		$this->stub_webmaster_settings( array(), array( 'google' => 'google1a2b3c.html' ) );
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' )
+		);
 
 		$this->assertStringContainsString(
 			'https://example.com/blog/google1a2b3c.html',
@@ -1173,7 +1249,10 @@ class SettingsPageTest extends TestCase {
 	}
 
 	public function test_webmaster_tab_bing_file_link_uses_the_fixed_filename_not_the_stored_token(): void {
-		$this->stub_webmaster_settings( array(), array( 'bing' => 'BINGTOKEN123' ) );
+		$this->stub_webmaster_settings(
+			array( 'bing' => 'BINGTOKEN123' ),
+			array( 'bing' => 'file' )
+		);
 
 		$html = $this->render_webmaster_html();
 
