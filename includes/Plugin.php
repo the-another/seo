@@ -9,6 +9,7 @@
 namespace TheAnother\Plugin\SEO;
 
 use TheAnother\Plugin\SEO\Admin\Metabox;
+use TheAnother\Plugin\SEO\Admin\MigrationNotice;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
 use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
@@ -191,6 +192,7 @@ class Plugin {
 				$c->get( 'domain_registry' )
 			)
 		);
+		$c->register( 'migration_notice', fn() => new MigrationNotice() );
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
 		$c->register( 'sitemap_storage', fn() => new SitemapStorage() );
 		$c->register(
@@ -278,6 +280,7 @@ class Plugin {
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
 			$this->container->get( 'settings_page' )->init( $hook_manager );
+			$this->container->get( 'migration_notice' )->init( $hook_manager );
 		}
 	}
 
