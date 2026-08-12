@@ -55,17 +55,22 @@ class VerificationFileServerTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function files( array $files = array(), string $host = 'example.com' ): void {
+	private function files( array $tokens = array(), string $host = 'example.com' ): void {
 		$defaults = array(
 			'google' => '',
 			'bing'   => '',
 			'yandex' => '',
 		);
 
-		foreach ( array_merge( $defaults, $files ) as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_file' )
+		foreach ( array_merge( $defaults, $tokens ) as $engine => $token ) {
+			$this->settings->shouldReceive( 'get_verification_code' )
 				->with( $engine, $host )
-				->andReturn( $value )
+				->andReturn( $token )
+				->byDefault();
+
+			$this->settings->shouldReceive( 'get_verification_method' )
+				->with( $engine, $host )
+				->andReturn( '' === $token ? 'meta' : 'file' )
 				->byDefault();
 		}
 	}
@@ -88,7 +93,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_serves_the_google_file_with_an_exact_body(): void {
-		$this->files( array( 'google' => 'google1a2b3c.html' ) );
+		$this->files( array( 'google' => '1a2b3c' ) );
 		Functions\expect( 'status_header' )->once()->with( 200 );
 
 		$this->assertSame(
@@ -109,7 +114,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_serves_the_yandex_file_with_an_exact_body(): void {
-		$this->files( array( 'yandex' => 'yandex_9f8e7d.html' ) );
+		$this->files( array( 'yandex' => '9f8e7d' ) );
 
 		$body = $this->serve( '/yandex_9f8e7d.html' );
 
@@ -120,7 +125,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_ignores_a_non_matching_path(): void {
-		$this->files( array( 'google' => 'google1a2b3c.html' ) );
+		$this->files( array( 'google' => '1a2b3c' ) );
 
 		Functions\expect( 'status_header' )->never();
 
@@ -128,7 +133,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_ignores_a_wrong_token(): void {
-		$this->files( array( 'google' => 'google1a2b3c.html' ) );
+		$this->files( array( 'google' => '1a2b3c' ) );
 
 		$this->assertSame( '', $this->serve( '/google-wrong-token.html' ) );
 	}
@@ -145,7 +150,7 @@ class VerificationFileServerTest extends TestCase {
 
 	public function test_strips_the_home_url_path_prefix_for_subdirectory_installs(): void {
 		Functions\when( 'home_url' )->justReturn( 'https://example.com/blog' );
-		$this->files( array( 'google' => 'google1a2b3c.html' ) );
+		$this->files( array( 'google' => '1a2b3c' ) );
 
 		$this->assertSame(
 			'google-site-verification: google1a2b3c.html',
@@ -154,7 +159,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_ignores_a_query_string(): void {
-		$this->files( array( 'google' => 'google1a2b3c.html' ) );
+		$this->files( array( 'google' => '1a2b3c' ) );
 
 		$this->assertSame(
 			'google-site-verification: google1a2b3c.html',
@@ -208,7 +213,7 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_a_malformed_stored_yandex_filename_is_never_served(): void {
-		$this->files( array( 'yandex' => 'yandex_<script>.html' ) );
+		$this->files( array( 'yandex' => '<script>alert(1)</script>' ) );
 
 		Functions\expect( 'status_header' )->never();
 
@@ -278,7 +283,7 @@ class VerificationFileServerTest extends TestCase {
 	public function test_serves_a_brand_domains_own_file(): void {
 		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
 
-		$this->files( array( 'google' => 'googlebrandtwo.html' ), 'brandtwo.com' );
+		$this->files( array( 'google' => 'brandtwo' ), 'brandtwo.com' );
 
 		Functions\expect( 'status_header' )->once()->with( 200 );
 
@@ -296,11 +301,57 @@ class VerificationFileServerTest extends TestCase {
 		// maybe_serve() ignored the host entirely.
 		$this->files();
 
-		$this->settings->shouldReceive( 'get_verification_file' )
+		$this->settings->shouldReceive( 'get_verification_code' )
 			->with( 'google', 'brandtwo.com' )
-			->andReturn( 'googlebrandtwo.html' )
+			->andReturn( 'brandtwo' )
+			->byDefault();
+
+		$this->settings->shouldReceive( 'get_verification_method' )
+			->with( 'google', 'brandtwo.com' )
+			->andReturn( 'file' )
 			->byDefault();
 
 		$this->assertSame( '', $this->serve( '/googlebrandtwo.html' ) );
+	}
+
+	public function test_derives_the_google_filename_from_the_token(): void {
+		$this->files( array( 'google' => '1a2b3c' ) );
+
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->assertSame(
+			'google-site-verification: google1a2b3c.html',
+			$this->serve( '/google1a2b3c.html' )
+		);
+	}
+
+	public function test_derives_the_yandex_filename_from_the_token(): void {
+		$this->files( array( 'yandex' => 'abc123' ) );
+
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->assertStringContainsString(
+			'Verification: abc123',
+			$this->serve( '/yandex_abc123.html' )
+		);
+	}
+
+	public function test_serves_bing_at_its_fixed_filename(): void {
+		$this->files( array( 'bing' => 'BINGTOKEN' ) );
+
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->assertStringContainsString( '<user>BINGTOKEN</user>', $this->serve( '/BingSiteAuth.xml' ) );
+	}
+
+	public function test_serves_nothing_for_a_service_in_meta_mode(): void {
+		$this->settings->shouldReceive( 'get_verification_code' )->with( 'google', 'example.com' )->andReturn( '1a2b3c' );
+		$this->settings->shouldReceive( 'get_verification_method' )->with( 'google', 'example.com' )->andReturn( 'meta' );
+		$this->settings->shouldReceive( 'get_verification_code' )->with( 'bing', 'example.com' )->andReturn( '' );
+		$this->settings->shouldReceive( 'get_verification_method' )->with( 'bing', 'example.com' )->andReturn( 'meta' );
+		$this->settings->shouldReceive( 'get_verification_code' )->with( 'yandex', 'example.com' )->andReturn( '' );
+		$this->settings->shouldReceive( 'get_verification_method' )->with( 'yandex', 'example.com' )->andReturn( 'meta' );
+
+		$this->assertSame( '', $this->serve( '/google1a2b3c.html' ) );
 	}
 }

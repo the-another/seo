@@ -171,6 +171,37 @@ class MethodMigration {
 	}
 
 	/**
+	 * Run the conversion once, if it has not run already.
+	 *
+	 * Guarded by an option rather than a plugin-version comparison: the flag
+	 * says what happened to the data, which is the thing that matters, and it
+	 * stays true across downgrades.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @return void
+	 */
+	public function maybe_run(): void {
+		if ( '1' === get_option( self::VERSION_OPTION, '' ) ) {
+			return;
+		}
+
+		$stored = get_option( Settings::OPTION_NAME, array() );
+
+		if ( is_array( $stored ) ) {
+			$result = self::migrate( $stored );
+
+			update_option( Settings::OPTION_NAME, $result['settings'] );
+
+			if ( array() !== $result['dropped'] ) {
+				update_option( self::NOTICE_OPTION, $result['dropped'] );
+			}
+		}
+
+		update_option( self::VERSION_OPTION, '1' );
+	}
+
+	/**
 	 * Recover the bare token from a legacy file value.
 	 *
 	 * @since 0.5.0

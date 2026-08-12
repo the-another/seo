@@ -81,18 +81,6 @@ class Settings {
 	);
 
 	/**
-	 * Engine slug => settings key for verification files. Yahoo retired its
-	 * own webmaster tools; Meta does not publish its file body format.
-	 *
-	 * @var array<string, string>
-	 */
-	private const VERIFICATION_FILE_KEYS = array(
-		'google' => 'verify_google_file',
-		'bing'   => 'verify_bing_file',
-		'yandex' => 'verify_yandex_file',
-	);
-
-	/**
 	 * Engine slug => settings key for the chosen verification method. Only the
 	 * three services that offer both a tag and a file appear here; Yahoo and
 	 * Meta publish no file method, so they have nothing to choose.
@@ -448,23 +436,6 @@ class Settings {
 	 */
 	public function get_verification_code( string $engine, string $host = '' ): string {
 		$key = self::VERIFICATION_KEYS[ $engine ] ?? '';
-
-		return '' === $key ? '' : $this->get_domain_value( $key, $host );
-	}
-
-	/**
-	 * Verification file value for one service on one domain. Google and Yandex
-	 * store the full filename; Bing stores only the token (its filename is
-	 * fixed).
-	 *
-	 * @since 0.5.0 Added the $host parameter.
-	 *
-	 * @param string $engine Engine slug.
-	 * @param string $host   Normalized host, '' for the default domain.
-	 * @return string Value, '' when unset or unknown.
-	 */
-	public function get_verification_file( string $engine, string $host = '' ): string {
-		$key = self::VERIFICATION_FILE_KEYS[ $engine ] ?? '';
 
 		return '' === $key ? '' : $this->get_domain_value( $key, $host );
 	}

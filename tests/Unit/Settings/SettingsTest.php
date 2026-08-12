@@ -230,28 +230,6 @@ class SettingsTest extends TestCase {
 		$this->assertSame( '', ( new Settings() )->get_verification_code( 'duckduckgo' ) );
 	}
 
-	public function test_verification_file_returns_stored_value_per_engine(): void {
-		Functions\when( 'get_option' )->justReturn(
-			array(
-				'verify_google_file' => 'google1a2b3c.html',
-				'verify_bing_file'   => 'BINGTOKEN123',
-				'verify_yandex_file' => 'yandex_9f8e7d.html',
-			)
-		);
-
-		$settings = new Settings();
-
-		$this->assertSame( 'google1a2b3c.html', $settings->get_verification_file( 'google' ) );
-		$this->assertSame( 'BINGTOKEN123', $settings->get_verification_file( 'bing' ) );
-		$this->assertSame( 'yandex_9f8e7d.html', $settings->get_verification_file( 'yandex' ) );
-	}
-
-	public function test_verification_file_returns_empty_string_for_engine_without_file_method(): void {
-		Functions\when( 'get_option' )->justReturn( array( 'verify_facebook' => 'metatoken' ) );
-
-		$this->assertSame( '', ( new Settings() )->get_verification_file( 'facebook' ) );
-	}
-
 	public function test_verification_method_defaults_to_meta(): void {
 		Functions\when( 'get_option' )->justReturn( array() );
 
@@ -410,20 +388,6 @@ class SettingsTest extends TestCase {
 
 		$this->assertSame( '', $settings->get_verification_code( 'google', 'brandtwo.com' ) );
 		$this->assertSame( '', $settings->get_verification_code( 'google', 'unconfigured.com' ) );
-	}
-
-	public function test_verification_file_does_not_inherit_the_default(): void {
-		Functions\when( 'get_option' )->justReturn(
-			array(
-				'verify_google_file'   => 'googledefault.html',
-				'verification_domains' => array( 'brandtwo.com' => array() ),
-			)
-		);
-
-		$settings = new Settings();
-
-		$this->assertSame( 'googledefault.html', $settings->get_verification_file( 'google' ) );
-		$this->assertSame( '', $settings->get_verification_file( 'google', 'brandtwo.com' ) );
 	}
 
 	public function test_tracking_ids_inherit_the_default_when_blank(): void {

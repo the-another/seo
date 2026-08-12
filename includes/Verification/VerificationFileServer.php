@@ -43,28 +43,29 @@ class VerificationFileServer {
 	private const ALLOWED_CONTENT_TYPES = array( 'text/plain', 'text/html', 'application/xml' );
 
 	/**
-	 * Per-service validation patterns for stored verification-file values.
+	 * Per-service validation for a stored verification token.
 	 *
 	 * Re-applied here at output time so this class never trusts a distant
-	 * caller for its own safety: SettingsPage::sanitize_settings() anchors
-	 * these same patterns on save, but options are writable outside that
-	 * sanitizer (WP-CLI, a migration, this branch's own e2e harness), and a
-	 * stored value here becomes both the response body and the $files array
-	 * key that an incoming request path is matched against. Must be kept in
-	 * agreement with SettingsPage::VERIFICATION_FILE_PATTERNS.
+	 * caller for its own safety: SettingsPage validates on save, but options
+	 * are writable outside that sanitizer (WP-CLI, a migration, this branch's
+	 * own e2e harness), and a stored token becomes both part of the response
+	 * body and the filename an incoming request path is matched against.
+	 * Google and Yandex issue lowercase tokens; Bing's is case-sensitive.
+	 *
+	 * @since 0.5.0 Validates the bare token rather than a stored filename.
 	 *
 	 * @var array<string, string>
 	 */
-	private const FILE_VALUE_PATTERNS = array(
-		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
-		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
-		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	private const TOKEN_PATTERNS = array(
+		'google' => '/^[a-z0-9]+$/',
+		'bing'   => '/^[A-Za-z0-9]+$/',
+		'yandex' => '/^[a-z0-9]+$/',
 	);
 
 	/**
 	 * General safe-filename shape for filter-supplied file keys.
 	 *
-	 * Deliberately looser than FILE_VALUE_PATTERNS above: the
+	 * Deliberately looser than TOKEN_PATTERNS above: the
 	 * taseo_verification_files filter is the escape hatch for services with
 	 * no dedicated field (Ahrefs, Pinterest, Meta's own file), so it only
 	 * guards against path traversal and extension smuggling, not per-vendor
@@ -128,9 +129,14 @@ class VerificationFileServer {
 		 * The filter carries no host argument, so a subscriber that needs to
 		 * know which domain it is running for must resolve that itself.
 		 *
+		 * A service verifying by meta tag contributes nothing here — the array
+		 * holds only the services whose method is `file` on the requested domain,
+		 * keyed by the filename derived from their token.
+		 *
 		 * @since 1.0.0
 		 * @since 0.5.0 Semantics changed: the value is now the requesting
 		 *              domain's files rather than the whole site's.
+		 * @since 0.5.0 Services on the meta method are absent from the array.
 		 *
 		 * @param array<string, array{content_type: string, body: string}> $files Files.
 		 */
@@ -223,7 +229,12 @@ class VerificationFileServer {
 	/**
 	 * Build the configured files for one domain, keyed by filename.
 	 *
-	 * @since 0.5.0 Added the $host parameter.
+	 * The filename is derived from the token, never stored: Google serves
+	 * google{token}.html, Yandex yandex_{token}.html, and Bing a fixed name
+	 * with the token in the body. That is why the settings screen asks for one
+	 * value per service rather than a code and a filename.
+	 *
+	 * @since 0.5.0 Builds from tokens and the per-service method.
 	 *
 	 * @param string $host Normalized host of the current request.
 	 * @return array<string, array{content_type: string, body: string}> Files.
@@ -231,30 +242,38 @@ class VerificationFileServer {
 	private function build_files( string $host ): array {
 		$files = array();
 
-		$google = $this->settings->get_verification_file( 'google', $host );
+		foreach ( self::TOKEN_PATTERNS as $engine => $pattern ) {
+			if ( Settings::METHOD_FILE !== $this->settings->get_verification_method( $engine, $host ) ) {
+				continue;
+			}
 
-		if ( '' !== $google && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_google_file'], $google ) ) {
-			$files[ $google ] = array(
-				'content_type' => 'text/html',
-				'body'         => 'google-site-verification: ' . $google,
-			);
-		}
+			$token = $this->settings->get_verification_code( $engine, $host );
 
-		$bing = $this->settings->get_verification_file( 'bing', $host );
+			if ( '' === $token || 1 !== preg_match( $pattern, $token ) ) {
+				continue;
+			}
 
-		if ( '' !== $bing && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_bing_file'], $bing ) ) {
-			$files[ self::BING_FILENAME ] = array(
-				'content_type' => 'application/xml',
-				'body'         => "<?xml version=\"1.0\"?>\n<users>\n  <user>" . $bing . "</user>\n</users>",
-			);
-		}
+			if ( 'google' === $engine ) {
+				$filename = 'google' . $token . '.html';
 
-		$yandex = $this->settings->get_verification_file( 'yandex', $host );
+				$files[ $filename ] = array(
+					'content_type' => 'text/html',
+					'body'         => 'google-site-verification: ' . $filename,
+				);
 
-		if ( '' !== $yandex && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_yandex_file'], $yandex ) ) {
-			$token = substr( $yandex, strlen( 'yandex_' ), -strlen( '.html' ) );
+				continue;
+			}
 
-			$files[ $yandex ] = array(
+			if ( 'bing' === $engine ) {
+				$files[ self::BING_FILENAME ] = array(
+					'content_type' => 'application/xml',
+					'body'         => "<?xml version=\"1.0\"?>\n<users>\n  <user>" . $token . "</user>\n</users>",
+				);
+
+				continue;
+			}
+
+			$files[ 'yandex_' . $token . '.html' ] = array(
 				'content_type' => 'text/html',
 				'body'         => "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">\n</head>\n<body>Verification: " . $token . "</body>\n</html>",
 			);

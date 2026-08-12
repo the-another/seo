@@ -39,6 +39,7 @@ use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
 use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
+use TheAnother\Plugin\SEO\Verification\MethodMigration;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
@@ -94,6 +95,7 @@ class Plugin {
 		SitemapFilesTable::maybe_upgrade();
 
 		$this->register_services();
+		$this->container->get( 'method_migration' )->maybe_run();
 		$this->init_services();
 		$this->maybe_dispatch_initial_backfill();
 		$this->maybe_flush_rewrites();
@@ -108,6 +110,7 @@ class Plugin {
 		$c = $this->container;
 
 		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'method_migration', fn() => new MethodMigration() );
 		$c->register( 'domain_registry', fn() => new DomainRegistry() );
 		$c->register( 'custom_pages', fn() => new CustomPages() );
 		$c->register( 'post_subtypes', fn() => new PostSubtypes() );
