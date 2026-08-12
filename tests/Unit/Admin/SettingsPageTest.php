@@ -56,7 +56,20 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'esc_url_raw' )->returnArg();
 		Functions\when( 'absint' )->alias( fn( $v ) => abs( (int) $v ) );
 		Functions\when( 'add_query_arg' )->alias(
-			static fn( string $key, string $value, string $url ): string => $url . '&' . $key . '=' . $value
+			static function ( array|string $key, mixed $value = '', string $url = '' ): string {
+				if ( is_array( $key ) ) {
+					$args = $key;
+					$url  = (string) $value;
+				} else {
+					$args = array( $key => (string) $value );
+				}
+
+				foreach ( $args as $arg_key => $arg_value ) {
+					$url .= '&' . $arg_key . '=' . $arg_value;
+				}
+
+				return $url;
+			}
 		);
 		Functions\when( '__' )->returnArg();
 		Functions\when( 'esc_html__' )->returnArg();
@@ -802,6 +815,8 @@ class SettingsPageTest extends TestCase {
 	 * @param string                $ga4   GA4 measurement ID.
 	 * @param string                $gtm   GTM container ID.
 	 * @param string                $pixel Meta Pixel ID.
+	 * @param string                $host  Active domain lookup key passed to the
+	 *                                     non-inheriting getters, '' for the default.
 	 * @return void
 	 */
 	private function stub_webmaster_settings(
@@ -809,7 +824,8 @@ class SettingsPageTest extends TestCase {
 		array $files = array(),
 		string $ga4 = '',
 		string $gtm = '',
-		string $pixel = ''
+		string $pixel = '',
+		string $host = ''
 	): void {
 		$codes = array_merge(
 			array(
@@ -832,16 +848,17 @@ class SettingsPageTest extends TestCase {
 		);
 
 		foreach ( $codes as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine )->andReturn( $value );
+			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine, $host )->andReturn( $value );
 		}
 
 		foreach ( $files as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine )->andReturn( $value );
+			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine, $host )->andReturn( $value );
 		}
 
 		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( $ga4 );
 		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( $gtm );
 		$this->settings->shouldReceive( 'get_meta_pixel_id' )->andReturn( $pixel );
+		$this->settings->shouldReceive( 'get_domain_record' )->andReturn( array() )->byDefault();
 	}
 
 	/**
@@ -849,18 +866,23 @@ class SettingsPageTest extends TestCase {
 	 * the output. render_webmaster_tab() is private, so this drives it the
 	 * way the real admin screen does: through render_page()'s tab dispatch.
 	 *
+	 * @param string $domain Domain to request via ?domain=, '' to omit it.
 	 * @return string Rendered HTML.
 	 */
-	private function render_webmaster_html(): string {
+	private function render_webmaster_html( string $domain = '' ): string {
 		$this->stub_render_functions();
 
 		$_GET['tab'] = 'webmaster';
+
+		if ( '' !== $domain ) {
+			$_GET['domain'] = $domain;
+		}
 
 		ob_start();
 		$this->page->render_page();
 		$html = (string) ob_get_clean();
 
-		unset( $_GET['tab'] );
+		unset( $_GET['tab'], $_GET['domain'] );
 
 		return $html;
 	}
@@ -977,6 +999,78 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_renders_a_domain_nav_with_the_default_marked(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'class="subsubsub"', $html );
+		$this->assertStringContainsString( 'example.com (default)', $html );
+		$this->assertStringContainsString( 'brandtwo.com', $html );
+		$this->assertStringContainsString( '<input type="hidden" name="domain" value="example.com" />', $html );
+	}
+
+	public function test_webmaster_tab_reads_the_active_domains_record(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => 'brandtwocode' ),
+			array(),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$html = $this->render_webmaster_html( 'brandtwo.com' );
+
+		$this->assertStringContainsString( '<input type="hidden" name="domain" value="brandtwo.com" />', $html );
+		$this->assertStringContainsString( 'brandtwocode', $html );
+	}
+
+	public function test_webmaster_tab_falls_back_to_the_default_for_an_unknown_domain(): void {
+		$this->stub_webmaster_settings();
+
+		$this->assertStringContainsString(
+			'<input type="hidden" name="domain" value="example.com" />',
+			$this->render_webmaster_html( 'attacker.example' )
+		);
+	}
+
+	public function test_webmaster_tab_advertises_an_inherited_tracking_id(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'placeholder="GTM-DEFAULT (inherited)"',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	/**
+	 * Rendering the inherited default straight into the value= attribute would
+	 * save it as this domain's own on the next submit, silently turning
+	 * inheritance into a copy that then drifts. The field must stay blank; only
+	 * the placeholder (covered above) is allowed to advertise the inherited ID.
+	 */
+	public function test_webmaster_tab_does_not_copy_an_inherited_tracking_id_into_the_value(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'<input type="text" name="taseo_settings[analytics_gtm_id]" value="" placeholder="GTM-DEFAULT (inherited)" />',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	public function test_webmaster_tab_shows_the_active_domains_own_stored_tracking_value(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+		$this->settings->shouldReceive( 'get_domain_record' )
+			->with( 'brandtwo.com' )
+			->andReturn( array( 'analytics_gtm_id' => 'GTM-OWN123' ) );
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[analytics_gtm_id]" value="GTM-OWN123"',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
 	}
 
 	public function test_templates_tab_renders_a_pill_for_each_available_variable(): void {

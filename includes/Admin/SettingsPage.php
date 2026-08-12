@@ -1013,6 +1013,23 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_webmaster_tab(): void {
+		$hosts = $this->domains->get_hosts();
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only domain switch.
+		$raw_domain = isset( $_GET['domain'] ) ? sanitize_text_field( wp_unslash( $_GET['domain'] ) ) : '';
+		$requested  = DomainRegistry::normalize_host( $raw_domain );
+		$active     = in_array( $requested, $hosts, true ) ? $requested : (string) ( $hosts[0] ?? '' );
+		$default    = DomainRegistry::default_host();
+
+		// '' is Settings' word for "the default domain", which is where the
+		// flat keys live. Everything below reads and writes through $lookup so
+		// the default domain keeps using them.
+		$lookup = $active === $default ? '' : $active;
+
+		$this->render_domain_nav( $hosts, $active, $default );
+
+		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
+
 		$services = array(
 			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), 'verify_google', 'verify_google_file', __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ) ),
 			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), 'verify_bing', 'verify_bing_file', __( 'Token from BingSiteAuth.xml', 'the-another-seo' ) ),
@@ -1022,7 +1039,7 @@ class SettingsPage {
 		);
 
 		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
-		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only.', 'the-another-seo' ) . '</p>';
+		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only. Each domain must be verified on its own; codes are never shared between domains.', 'the-another-seo' ) . '</p>';
 		echo '<table class="form-table">';
 
 		foreach ( $services as $engine => $service ) {
@@ -1032,12 +1049,12 @@ class SettingsPage {
 				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" class="regular-text" placeholder="%4$s" />',
 				esc_html( $label ),
 				esc_attr( $code_key ),
-				esc_attr( $this->settings->get_verification_code( $engine ) ),
+				esc_attr( $this->settings->get_verification_code( $engine, $lookup ) ),
 				esc_attr__( 'Verification code', 'the-another-seo' )
 			);
 
 			if ( '' !== $file_key ) {
-				$file_value = $this->settings->get_verification_file( $engine );
+				$file_value = $this->settings->get_verification_file( $engine, $lookup );
 
 				printf(
 					'<br /><input type="text" name="taseo_settings[%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
@@ -1051,7 +1068,7 @@ class SettingsPage {
 
 					printf(
 						' <a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
-						esc_url( home_url( '/' . $filename ) )
+						esc_url( $this->verification_file_url( $active, $filename ) )
 					);
 				}
 			}
@@ -1061,31 +1078,144 @@ class SettingsPage {
 
 		echo '</table>';
 
+		// Read the stored record directly rather than through the getters: they
+		// inherit, and rendering an inherited ID into the input would save it as
+		// this domain's own on the next submit, quietly turning inheritance into
+		// a copy that then drifts.
+		$record = '' === $lookup ? array() : $this->settings->get_domain_record( $active );
+
+		$tracking = array(
+			'analytics_ga4_id' => array( __( 'GA4 Measurement ID', 'the-another-seo' ), $this->settings->get_ga4_id(), 'G-XXXXXXXXXX' ),
+			'analytics_gtm_id' => array( __( 'Tag Manager Container ID', 'the-another-seo' ), $this->settings->get_gtm_id(), 'GTM-XXXXXXX' ),
+			'meta_pixel_id'    => array( __( 'Meta Pixel ID', 'the-another-seo' ), $this->settings->get_meta_pixel_id(), '123456789012345' ),
+		);
+
 		echo '<h2>' . esc_html__( 'Tracking', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_ga4_id]" value="%s" placeholder="G-XXXXXXXXXX" /></td></tr>',
-			esc_html__( 'GA4 Measurement ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_ga4_id() )
-		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_gtm_id]" value="%s" placeholder="GTM-XXXXXXX" /></td></tr>',
-			esc_html__( 'Tag Manager Container ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_gtm_id() )
-		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[meta_pixel_id]" value="%s" placeholder="123456789012345" /></td></tr>',
-			esc_html__( 'Meta Pixel ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_meta_pixel_id() )
-		);
+
+		foreach ( $tracking as $key => $field ) {
+			list( $label, $default_value, $hint ) = $field;
+
+			printf(
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" placeholder="%4$s" /></td></tr>',
+				esc_html( $label ),
+				esc_attr( $key ),
+				esc_attr( '' === $lookup ? $default_value : (string) ( $record[ $key ] ?? '' ) ),
+				esc_attr( $this->tracking_placeholder( $lookup, $default_value, $hint ) )
+			);
+		}
+
 		echo '</table>';
 
-		if ( '' !== $this->settings->get_ga4_id() && '' !== $this->settings->get_gtm_id() ) {
+		if ( '' !== $this->settings->get_ga4_id( $lookup ) && '' !== $this->settings->get_gtm_id( $lookup ) ) {
 			printf(
 				'<div class="notice notice-warning inline"><p>%s</p></div>',
 				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
 			);
 		}
+	}
+
+	/**
+	 * The domain switcher for the Webmaster Tools tab.
+	 *
+	 * Core's own secondary-navigation pattern (`.subsubsub`, styled in
+	 * wp-admin/css/common.css), the same one the Titles & Templates tab uses.
+	 * Unlike that one these carry a `current` state, because they are separate
+	 * views of the tab rather than in-page anchors. The trailing
+	 * `<div class="clear">` is load-bearing: `.subsubsub` is `float: left`, so
+	 * without it the first `<h2>` wraps alongside the nav.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param array<int, string> $hosts        Registered hosts, default first.
+	 * @param string             $active       Host being edited.
+	 * @param string             $default_host Default host.
+	 * @return void
+	 */
+	private function render_domain_nav( array $hosts, string $active, string $default_host ): void {
+		echo '<ul class="subsubsub">';
+
+		$last = array_key_last( $hosts );
+
+		foreach ( $hosts as $index => $host ) {
+			$url = add_query_arg(
+				array(
+					'page'   => 'taseo',
+					'tab'    => 'webmaster',
+					'domain' => $host,
+				),
+				admin_url( 'options-general.php' )
+			);
+
+			if ( $host === $default_host ) {
+				/* translators: %s: hostname of the site's own domain. */
+				$label = sprintf( __( '%s (default)', 'the-another-seo' ), $host );
+			} else {
+				$label = $host;
+			}
+
+			printf(
+				'<li><a href="%s" class="%s">%s</a>%s</li>',
+				esc_url( $url ),
+				$host === $active ? 'current' : '',
+				esc_html( $label ),
+				$index === $last ? '' : ' |'
+			);
+		}
+
+		echo '</ul>';
+		echo '<div class="clear"></div>';
+
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'Domains come from your Brands. Add a URL rule to a Brand to add one here.', 'the-another-seo' )
+		);
+	}
+
+	/**
+	 * Public URL of a domain's verification file.
+	 *
+	 * The default domain goes through home_url() so a subdirectory install
+	 * keeps its path; other domains are host swaps of the site's own scheme,
+	 * since nothing here knows how they are served.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $host     Normalized host.
+	 * @param string $filename Verification filename.
+	 * @return string URL.
+	 */
+	private function verification_file_url( string $host, string $filename ): string {
+		if ( DomainRegistry::default_host() === $host ) {
+			return (string) home_url( '/' . $filename );
+		}
+
+		$scheme = (string) wp_parse_url( (string) home_url(), PHP_URL_SCHEME );
+
+		return ( '' !== $scheme ? $scheme : 'https' ) . '://' . $host . '/' . $filename;
+	}
+
+	/**
+	 * Placeholder for a tracking field.
+	 *
+	 * On a non-default domain a blank field inherits the default's ID, so the
+	 * placeholder shows what will actually fire. Without it "blank" reads as
+	 * "no tracking", which is the opposite of what happens.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $lookup        Active domain lookup key, '' for the default.
+	 * @param string $default_value The default domain's stored ID.
+	 * @param string $fallback      Shape hint used when there is nothing to inherit.
+	 * @return string Placeholder.
+	 */
+	private function tracking_placeholder( string $lookup, string $default_value, string $fallback ): string {
+		if ( '' === $lookup || '' === $default_value ) {
+			return $fallback;
+		}
+
+		/* translators: %s: the default domain's tracking ID. */
+		return sprintf( __( '%s (inherited)', 'the-another-seo' ), $default_value );
 	}
 
 	/**
