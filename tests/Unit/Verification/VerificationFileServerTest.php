@@ -30,7 +30,7 @@ class VerificationFileServerTest extends TestCase {
 		$this->domains  = Mockery::mock( DomainRegistry::class );
 		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
 
-		$this->server   = new VerificationFileServer( $this->settings, $this->domains );
+		$this->server = new VerificationFileServer( $this->settings, $this->domains );
 
 		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
 		Functions\when( 'wp_parse_url' )->alias(
@@ -289,7 +289,17 @@ class VerificationFileServerTest extends TestCase {
 	}
 
 	public function test_does_not_serve_one_domains_file_on_another_domain(): void {
-		$this->files( array( 'google' => 'googledefault.html' ) );
+		// The current host stays example.com (the setUp default) and has no
+		// file of its own. googlebrandtwo.html exists only under brandtwo.com,
+		// so a pass here means host resolution actually gated the lookup —
+		// unlike asserting on a filename no host owns, which passes even if
+		// maybe_serve() ignored the host entirely.
+		$this->files();
+
+		$this->settings->shouldReceive( 'get_verification_file' )
+			->with( 'google', 'brandtwo.com' )
+			->andReturn( 'googlebrandtwo.html' )
+			->byDefault();
 
 		$this->assertSame( '', $this->serve( '/googlebrandtwo.html' ) );
 	}
