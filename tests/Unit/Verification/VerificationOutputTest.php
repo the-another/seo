@@ -10,6 +10,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
@@ -18,6 +19,7 @@ class VerificationOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $settings;
+	private $domains;
 	private VerificationOutput $output;
 
 	protected function setUp(): void {
@@ -25,7 +27,11 @@ class VerificationOutputTest extends TestCase {
 		Monkey\setUp();
 
 		$this->settings = Mockery::mock( Settings::class );
-		$this->output   = new VerificationOutput( $this->settings );
+
+		$this->domains  = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
+
+		$this->output   = new VerificationOutput( $this->settings, $this->domains );
 
 		Functions\when( 'esc_attr' )->returnArg();
 		Functions\when( 'is_front_page' )->justReturn( true );
@@ -37,7 +43,7 @@ class VerificationOutputTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function codes( array $codes = array() ): void {
+	private function codes( array $codes = array(), string $host = 'example.com' ): void {
 		$defaults = array(
 			'google'   => '',
 			'bing'     => '',
@@ -48,7 +54,7 @@ class VerificationOutputTest extends TestCase {
 
 		foreach ( array_merge( $defaults, $codes ) as $engine => $code ) {
 			$this->settings->shouldReceive( 'get_verification_code' )
-				->with( $engine )
+				->with( $engine, $host )
 				->andReturn( $code );
 		}
 	}
@@ -161,5 +167,16 @@ class VerificationOutputTest extends TestCase {
 
 	public function test_sanitize_code_strips_disallowed_characters(): void {
 		$this->assertSame( 'abc123', VerificationOutput::sanitize_code( ' ab"c<1>2 3 ' ) );
+	}
+
+	public function test_prints_the_codes_of_the_domain_the_request_arrived_on(): void {
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
+
+		$this->codes( array( 'google' => 'brandtwocode' ), 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'<meta name="google-site-verification" content="brandtwocode" />',
+			$this->render()
+		);
 	}
 }

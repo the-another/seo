@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Verification;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -36,9 +37,13 @@ class VerificationOutput {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings $settings Settings.
+	 * @param Settings       $settings Settings.
+	 * @param DomainRegistry $domains  Domain registry.
 	 */
-	public function __construct( private readonly Settings $settings ) {
+	public function __construct(
+		private readonly Settings $settings,
+		private readonly DomainRegistry $domains
+	) {
 	}
 
 	/**
@@ -74,9 +79,10 @@ class VerificationOutput {
 		}
 
 		$tags = array();
+		$host = $this->domains->get_current_host();
 
 		foreach ( self::META_NAMES as $engine => $meta_name ) {
-			$code = $this->settings->get_verification_code( $engine );
+			$code = $this->settings->get_verification_code( $engine, $host );
 
 			if ( '' !== $code ) {
 				$tags[ $meta_name ] = $code;

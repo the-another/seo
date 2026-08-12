@@ -231,7 +231,7 @@ class Plugin {
 		$c->register( 'blocks', fn() => new Blocks() );
 		$c->register(
 			'verification_output',
-			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'verification_file_server',
