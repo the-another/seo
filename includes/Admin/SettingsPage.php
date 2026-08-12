@@ -1175,9 +1175,12 @@ class SettingsPage {
 	/**
 	 * Public URL of a domain's verification file.
 	 *
-	 * The default domain goes through home_url() so a subdirectory install
-	 * keeps its path; other domains are host swaps of the site's own scheme,
-	 * since nothing here knows how they are served.
+	 * Both branches start from home_url(), so a subdirectory install keeps its
+	 * path; other domains then swap only the host, since nothing here knows how
+	 * they are served. Dropping the path on the host-swap branch would produce
+	 * a link that never reaches WordPress: VerificationFileServer strips the
+	 * install's path from the request the same way on every domain, so a
+	 * `/blog` install serves the file at `scheme://host/blog/<filename>`.
 	 *
 	 * @since 0.5.0
 	 *
@@ -1186,13 +1189,18 @@ class SettingsPage {
 	 * @return string URL.
 	 */
 	private function verification_file_url( string $host, string $filename ): string {
+		$url = (string) home_url( '/' . $filename );
+
 		if ( DomainRegistry::default_host() === $host ) {
-			return (string) home_url( '/' . $filename );
+			return $url;
 		}
 
-		$scheme = (string) wp_parse_url( (string) home_url(), PHP_URL_SCHEME );
+		$parts  = wp_parse_url( $url );
+		$parts  = is_array( $parts ) ? $parts : array();
+		$scheme = isset( $parts['scheme'] ) ? (string) $parts['scheme'] : '';
+		$path   = isset( $parts['path'] ) ? (string) $parts['path'] : '/' . $filename;
 
-		return ( '' !== $scheme ? $scheme : 'https' ) . '://' . $host . '/' . $filename;
+		return ( '' !== $scheme ? $scheme : 'https' ) . '://' . $host . $path;
 	}
 
 	/**

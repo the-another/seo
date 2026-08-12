@@ -116,12 +116,21 @@ class VerificationFileServer {
 		$files = $this->build_files( $this->domains->get_current_host() );
 
 		/**
-		 * Filters the verification files this site serves, keyed by filename.
+		 * Filters the verification files served on this request, keyed by
+		 * filename.
 		 *
 		 * Each value is an array with 'content_type' and 'body'. The body is
 		 * emitted verbatim — byte-exactness is the whole point of the method.
 		 *
+		 * The files are built for the domain the request arrived on, not for
+		 * the site as a whole: on a multi-domain install this filter runs once
+		 * per requesting domain and the incoming array differs between them.
+		 * The filter carries no host argument, so a subscriber that needs to
+		 * know which domain it is running for must resolve that itself.
+		 *
 		 * @since 1.0.0
+		 * @since 0.5.0 Semantics changed: the value is now the requesting
+		 *              domain's files rather than the whole site's.
 		 *
 		 * @param array<string, array{content_type: string, body: string}> $files Files.
 		 */

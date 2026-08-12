@@ -439,13 +439,18 @@ class Settings {
 	/**
 	 * One domain's stored record.
 	 *
+	 * The argument is normalized first, like every other public host-taking
+	 * method here: records are keyed on normalized hosts, so a caller passing
+	 * `WWW.Example.com` must resolve the same record as `example.com`.
+	 *
 	 * @since 0.5.0
 	 *
-	 * @param string $host Normalized host.
+	 * @param string $host Host, normalized or not.
 	 * @return array<string, string> Record, empty when the domain has none.
 	 */
 	public function get_domain_record( string $host ): array {
-		$all = $this->get( self::DOMAINS_KEY, array() );
+		$host = DomainRegistry::normalize_host( $host );
+		$all  = $this->get( self::DOMAINS_KEY, array() );
 
 		if ( ! is_array( $all ) || ! isset( $all[ $host ] ) || ! is_array( $all[ $host ] ) ) {
 			return array();

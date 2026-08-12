@@ -950,6 +950,13 @@ class SettingsPageTest extends TestCase {
 	 * @param string                $pixel Meta Pixel ID.
 	 * @param string                $host  Active domain lookup key passed to the
 	 *                                     non-inheriting getters, '' for the default.
+	 * @param array<string, string> $active Effective tracking IDs for the active
+	 *                                      domain — i.e. what the $host-taking
+	 *                                      getter form returns — keyed 'ga4' /
+	 *                                      'gtm' / 'pixel'. Defaults to the
+	 *                                      default domain's values, which is
+	 *                                      what inheritance really returns; pass
+	 *                                      them to make the two forms differ.
 	 * @return void
 	 */
 	private function stub_webmaster_settings(
@@ -958,7 +965,8 @@ class SettingsPageTest extends TestCase {
 		string $ga4 = '',
 		string $gtm = '',
 		string $pixel = '',
-		string $host = ''
+		string $host = '',
+		array $active = array()
 	): void {
 		$codes = array_merge(
 			array(
@@ -988,9 +996,20 @@ class SettingsPageTest extends TestCase {
 			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine, $host )->andReturn( $value );
 		}
 
-		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( $ga4 );
-		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( $gtm );
-		$this->settings->shouldReceive( 'get_meta_pixel_id' )->andReturn( $pixel );
+		// The renderer deliberately calls BOTH getter forms in one render and
+		// they mean different things: the argument-less form supplies the
+		// default domain's value for the inherit placeholder, while the $lookup
+		// form drives the double-tracking warning. Bound separately so the two
+		// call sites are distinguishable — a bare stub matches either, which
+		// would let the renderer swap them without failing a single test.
+		$this->settings->shouldReceive( 'get_ga4_id' )->withNoArgs()->andReturn( $ga4 );
+		$this->settings->shouldReceive( 'get_gtm_id' )->withNoArgs()->andReturn( $gtm );
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->withNoArgs()->andReturn( $pixel );
+
+		$this->settings->shouldReceive( 'get_ga4_id' )->with( $host )->andReturn( $active['ga4'] ?? $ga4 );
+		$this->settings->shouldReceive( 'get_gtm_id' )->with( $host )->andReturn( $active['gtm'] ?? $gtm );
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->with( $host )->andReturn( $active['pixel'] ?? $pixel );
+
 		$this->settings->shouldReceive( 'get_domain_record' )->andReturn( array() )->byDefault();
 	}
 
@@ -1000,10 +1019,15 @@ class SettingsPageTest extends TestCase {
 	 * way the real admin screen does: through render_page()'s tab dispatch.
 	 *
 	 * @param string $domain Domain to request via ?domain=, '' to omit it.
+	 * @param string $home   Site home URL, for exercising a subdirectory install.
 	 * @return string Rendered HTML.
 	 */
-	private function render_webmaster_html( string $domain = '' ): string {
+	private function render_webmaster_html( string $domain = '', string $home = 'https://example.com' ): string {
 		$this->stub_render_functions();
+
+		// Redefines stub_render_functions()' own home_url(), which hardcodes
+		// the root-install form.
+		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => $home . $path );
 
 		$_GET['tab'] = 'webmaster';
 
@@ -1091,6 +1115,61 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'target="_blank"', $html );
+	}
+
+	/**
+	 * The host-swap branch of verification_file_url(): a non-default domain's
+	 * file link points at that domain, on the site's own scheme.
+	 */
+	public function test_webmaster_tab_links_a_brand_domains_file_on_that_domains_host(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array( 'google' => 'google1a2b3c.html' ),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$this->assertStringContainsString(
+			'<a href="https://brandtwo.com/google1a2b3c.html" target="_blank" rel="noreferrer noopener">https://brandtwo.com/google1a2b3c.html</a>',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	/**
+	 * VerificationFileServer strips the install's own path from the request the
+	 * same way on every domain, so on a subdirectory install the brand domain's
+	 * file really is served under that path. A path-less preview link would
+	 * point at a URL WordPress never sees.
+	 */
+	public function test_a_brand_domains_file_link_keeps_a_subdirectory_installs_path(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array( 'google' => 'google1a2b3c.html' ),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$this->assertStringContainsString(
+			'https://brandtwo.com/blog/google1a2b3c.html',
+			$this->render_webmaster_html( 'brandtwo.com', 'https://example.com/blog' )
+		);
+	}
+
+	/**
+	 * The default domain's own link keeps the subdirectory path too — the
+	 * branch this one goes through was already correct, and stays that way.
+	 */
+	public function test_the_default_domains_file_link_keeps_a_subdirectory_installs_path(): void {
+		$this->stub_webmaster_settings( array(), array( 'google' => 'google1a2b3c.html' ) );
+
+		$this->assertStringContainsString(
+			'https://example.com/blog/google1a2b3c.html',
+			$this->render_webmaster_html( '', 'https://example.com/blog' )
+		);
 	}
 
 	public function test_webmaster_tab_bing_file_link_uses_the_fixed_filename_not_the_stored_token(): void {
@@ -1192,6 +1271,42 @@ class SettingsPageTest extends TestCase {
 			'<input type="text" name="taseo_settings[analytics_gtm_id]" value="" placeholder="GTM-DEFAULT (inherited)" />',
 			$this->render_webmaster_html( 'brandtwo.com' )
 		);
+	}
+
+	/**
+	 * The two tracking getter forms drive two different things and must not be
+	 * swapped: the argument-less form feeds the inherit placeholder (the
+	 * DEFAULT domain's value), the $lookup form feeds the double-tracking
+	 * warning (the ACTIVE domain's effective value). Here the default has no
+	 * GTM at all while the brand domain has its own, so each call site fails
+	 * loudly if it reads the other one's value.
+	 */
+	public function test_webmaster_tab_keeps_the_default_and_active_tracking_lookups_apart(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array(),
+			'G-DEFAULT12',
+			'',
+			'',
+			'brandtwo.com',
+			array( 'gtm' => 'GTM-OWN123' )
+		);
+		$this->settings->shouldReceive( 'get_domain_record' )
+			->with( 'brandtwo.com' )
+			->andReturn( array( 'analytics_gtm_id' => 'GTM-OWN123' ) );
+
+		$html = $this->render_webmaster_html( 'brandtwo.com' );
+
+		// The default has no GTM to inherit, so the placeholder is the shape
+		// hint — not the active domain's own ID.
+		$this->assertStringContainsString(
+			'name="taseo_settings[analytics_gtm_id]" value="GTM-OWN123" placeholder="GTM-XXXXXXX"',
+			$html
+		);
+
+		// ...while the warning sees the active domain's GTM alongside the
+		// inherited GA4, so it fires.
+		$this->assertStringContainsString( 'counted twice', $html );
 	}
 
 	public function test_webmaster_tab_shows_the_active_domains_own_stored_tracking_value(): void {

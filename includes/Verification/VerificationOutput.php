@@ -92,7 +92,15 @@ class VerificationOutput {
 		/**
 		 * Filters the verification tags, keyed by meta name.
 		 *
+		 * The tags are resolved for the domain the request arrived on, not for
+		 * the site as a whole: on a multi-domain install this filter runs once
+		 * per requesting domain and the incoming array differs between them.
+		 * The filter carries no host argument, so a subscriber that needs to
+		 * know which domain it is running for must resolve that itself.
+		 *
 		 * @since 1.0.0
+		 * @since 0.5.0 Semantics changed: the value is now the requesting
+		 *              domain's tags rather than the whole site's.
 		 *
 		 * @param array<string, string> $tags Meta name => verification code.
 		 */

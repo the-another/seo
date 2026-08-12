@@ -8,6 +8,7 @@ use Brain\Monkey\Filters;
 use Brain\Monkey\Functions;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 
@@ -49,6 +50,55 @@ class DomainRegistryTest extends TestCase {
 		$this->assertSame( '', DomainRegistry::normalize_host( 'münchen.de' ) );
 		$this->assertSame( '', DomainRegistry::normalize_host( '  brandtwo.com/a/b  ' ) );
 		$this->assertSame( '', DomainRegistry::normalize_host( 'brandtwo.com:8443/a/b' ) );
+	}
+
+	/**
+	 * The cross-plugin parity table.
+	 *
+	 * DomainRegistry::normalize_host() and the multi-brand plugin's
+	 * UrlRuleRegistry::normalize_host() implement the same algorithm and MUST
+	 * stay behaviourally identical: this plugin matches an incoming request's
+	 * host against keys that plugin pushed through taseo_verification_domains,
+	 * so a one-character divergence silently serves the wrong domain's
+	 * verification codes.
+	 *
+	 * This table is the union of both repos' cases and is duplicated verbatim
+	 * in the other half of the pair:
+	 * the-another-multi-brand-global-styles/tests/Unit/Brand/UrlRuleRegistryTest.php
+	 * (`parity_normalize_host_cases()`). Edit one, edit the other — either
+	 * implementation drifting now fails its own suite.
+	 *
+	 * @return array<string, array{0: string, 1: string}> Input => expected.
+	 */
+	public static function parity_normalize_host_cases(): array {
+		return array(
+			'plain host'                 => array( 'example.com', 'example.com' ),
+			'uppercase'                  => array( 'EXAMPLE.com', 'example.com' ),
+			'leading www'                => array( 'www.example.com', 'example.com' ),
+			'with port'                  => array( 'example.com:8080', 'example.com' ),
+			'www and port'               => array( 'WWW.Example.com:443', 'example.com' ),
+			'full https url'             => array( 'https://example.com/path', 'example.com' ),
+			'full http url with www'     => array( 'http://www.example.com', 'example.com' ),
+			'scheme, www, port and path' => array( 'HTTPS://WWW.BrandTwo.com:8443/shop', 'brandtwo.com' ),
+			'bare brand host'            => array( 'brandtwo.com', 'brandtwo.com' ),
+			'surrounding whitespace'     => array( '  example.com  ', 'example.com' ),
+			'brand host padded'          => array( '  brandtwo.com  ', 'brandtwo.com' ),
+			'punycode host accepted'     => array( 'xn--mnchen-3ya.de', 'xn--mnchen-3ya.de' ),
+			'empty string'               => array( '', '' ),
+			'scheme url with no host'    => array( 'http:///no-host-here', '' ),
+			'underscore rejected'        => array( 'brand_two.com', '' ),
+			'host with space rejected'   => array( 'exam ple.com', '' ),
+			'not a host'                 => array( 'not a host', '' ),
+			'bare host with path'        => array( 'brandtwo.com/a/b', '' ),
+			'padded host with path'      => array( '  brandtwo.com/a/b  ', '' ),
+			'host, port and path'        => array( 'brandtwo.com:8443/a/b', '' ),
+			'unicode host rejected'      => array( 'münchen.de', '' ),
+		);
+	}
+
+	#[DataProvider( 'parity_normalize_host_cases' )]
+	public function test_normalize_host_matches_the_multi_brand_plugins_algorithm( string $input, string $expected ): void {
+		$this->assertSame( $expected, DomainRegistry::normalize_host( $input ) );
 	}
 
 	public function test_default_host_comes_from_home_url(): void {

@@ -412,4 +412,24 @@ class SettingsTest extends TestCase {
 
 		$this->assertSame( array(), ( new Settings() )->get_domain_record( 'brandtwo.com' ) );
 	}
+
+	/**
+	 * Records are keyed on normalized hosts, so this public getter normalizes
+	 * its argument like every other host-taking method on this class — a caller
+	 * holding a raw `www.`/scheme/port form resolves the same record.
+	 */
+	public function test_get_domain_record_normalizes_its_host(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$settings = new Settings();
+		$expected = array( 'verify_google' => 'brandcode' );
+
+		$this->assertSame( $expected, $settings->get_domain_record( 'brandtwo.com' ) );
+		$this->assertSame( $expected, $settings->get_domain_record( 'WWW.BrandTwo.com' ) );
+		$this->assertSame( $expected, $settings->get_domain_record( 'https://www.brandtwo.com:8443/shop' ) );
+	}
 }

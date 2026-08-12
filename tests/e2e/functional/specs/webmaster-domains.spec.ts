@@ -98,14 +98,6 @@ test.describe( 'per-domain verification', () => {
 		] );
 	} );
 
-	test( 'the default domain shows its own code, not the brand domain\'s', async ( {
-		page,
-	} ) => {
-		await expect(
-			page.locator( 'input[name="taseo_settings[verify_google]"]' )
-		).toHaveValue( 'googlee2etoken' );
-	} );
-
 	test( 'switching to the brand domain loads that domain\'s values', async ( {
 		page,
 	} ) => {
@@ -117,6 +109,23 @@ test.describe( 'per-domain verification', () => {
 
 		await expect( page.locator( 'input[name="domain"]' ) ).toHaveValue(
 			'brandtwo.test'
+		);
+
+		// The feature's central claim: verification codes NEVER inherit the
+		// default, unlike tracking IDs (asserted in the next test). The fixture
+		// record for brandtwo.test omits verify_bing while the default domain
+		// has BINGE2ETOKEN, so this field must be blank AND advertise nothing
+		// but the generic hint. A regression flipping $inherit on for codes
+		// would show 'BINGE2ETOKEN (inherited)' here — handing a brand domain
+		// the default's code guarantees a failed verification instead of an
+		// obvious blank field.
+		const bingInput = page.locator(
+			'input[name="taseo_settings[verify_bing]"]'
+		);
+		await expect( bingInput ).toHaveValue( '' );
+		await expect( bingInput ).toHaveAttribute(
+			'placeholder',
+			'Verification code'
 		);
 	} );
 
@@ -167,6 +176,16 @@ test.describe( 'per-domain verification', () => {
 		await expect(
 			page.locator( 'input[name="taseo_settings[verify_yandex]"]' )
 		).toHaveValue( 'yandexe2etoken' );
+
+		// Same proof for the field the brand domain DOES override: the default
+		// still shows its own googlee2etoken, not brandtwo.test's
+		// brandtwoe2etoken, after that domain has been visited and saved. On
+		// its own — asserted on a pristine default tab, as it used to be — this
+		// would pass with the whole domain feature deleted; it only means
+		// anything here, downstream of the brand-domain save.
+		await expect(
+			page.locator( 'input[name="taseo_settings[verify_google]"]' )
+		).toHaveValue( 'googlee2etoken' );
 	} );
 
 	test( 'a brand domain file is served on that host only', async () => {

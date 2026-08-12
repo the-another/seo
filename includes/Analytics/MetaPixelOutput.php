@@ -123,7 +123,15 @@ class MetaPixelOutput {
 		 *
 		 * Append an ID here to fire a secondary pixel on specific pages.
 		 *
+		 * The stored ID is resolved for the domain the request arrived on, not
+		 * for the site as a whole: on a multi-domain install this filter runs
+		 * once per requesting domain and the incoming array differs between
+		 * them. The filter carries no host argument, so a subscriber that needs
+		 * to know which domain it is running for must resolve that itself.
+		 *
 		 * @since 1.0.0
+		 * @since 0.5.0 Semantics changed: the value now starts from the
+		 *              requesting domain's ID rather than the whole site's.
 		 *
 		 * @param array<int, string> $ids Pixel IDs.
 		 */
