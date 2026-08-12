@@ -38,7 +38,7 @@ class DomainRegistryTest extends TestCase {
 	public function test_normalize_host_lowercases_and_strips_scheme_port_path_and_www(): void {
 		$this->assertSame( 'brandtwo.com', DomainRegistry::normalize_host( 'HTTPS://WWW.BrandTwo.com:8443/shop' ) );
 		$this->assertSame( 'brandtwo.com', DomainRegistry::normalize_host( 'brandtwo.com' ) );
-		$this->assertSame( 'brandtwo.com', DomainRegistry::normalize_host( '  brandtwo.com/a/b  ' ) );
+		$this->assertSame( 'brandtwo.com', DomainRegistry::normalize_host( '  brandtwo.com  ' ) );
 		$this->assertSame( 'xn--mnchen-3ya.de', DomainRegistry::normalize_host( 'xn--mnchen-3ya.de' ) );
 	}
 
@@ -47,6 +47,8 @@ class DomainRegistryTest extends TestCase {
 		$this->assertSame( '', DomainRegistry::normalize_host( 'not a host' ) );
 		$this->assertSame( '', DomainRegistry::normalize_host( 'brand_two.com' ) );
 		$this->assertSame( '', DomainRegistry::normalize_host( 'münchen.de' ) );
+		$this->assertSame( '', DomainRegistry::normalize_host( '  brandtwo.com/a/b  ' ) );
+		$this->assertSame( '', DomainRegistry::normalize_host( 'brandtwo.com:8443/a/b' ) );
 	}
 
 	public function test_default_host_comes_from_home_url(): void {
@@ -93,6 +95,17 @@ class DomainRegistryTest extends TestCase {
 			->andReturn( array( 'example.com', 42, null, 'not a host', 'brandtwo.com' ) );
 
 		$this->assertSame( array( 'example.com', 'brandtwo.com' ), $this->registry->get_hosts() );
+	}
+
+	public function test_get_hosts_memoizes_the_filtered_list(): void {
+		Filters\expectApplied( 'taseo_verification_domains' )
+			->once()
+			->andReturn( array( 'example.com', 'brandtwo.com' ) );
+
+		$first  = $this->registry->get_hosts();
+		$second = $this->registry->get_hosts();
+
+		$this->assertSame( $first, $second );
 	}
 
 	public function test_get_current_host_returns_a_known_host(): void {

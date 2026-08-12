@@ -25,6 +25,16 @@ namespace TheAnother\Plugin\SEO\Domains;
 class DomainRegistry {
 
 	/**
+	 * Memoized host list. The filter's subscribers are fixed for the life of
+	 * a request, so re-applying it per caller buys nothing.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var array<int, string>|null
+	 */
+	private ?array $hosts = null;
+
+	/**
 	 * Normalize a hostname: lowercase, strip scheme/port/path, strip leading
 	 * `www.`.
 	 *
@@ -52,7 +62,13 @@ class DomainRegistry {
 			$parsed = wp_parse_url( $raw );
 			$raw    = is_array( $parsed ) && isset( $parsed['host'] ) ? (string) $parsed['host'] : '';
 		} else {
-			$raw = (string) preg_replace( '#/.*$#', '', $raw );
+			// Bare hostname, optionally with a trailing port. Only the port is
+			// dropped: a path here means the caller passed something that is not
+			// a bare host, and the character-class check below rejects it rather
+			// than silently keeping the leading segment. Identical to
+			// UrlRuleRegistry::normalize_host() in the multi-brand plugin, whose
+			// pushed keys must compare equal to what this returns.
+			$raw = (string) preg_replace( '/:\d+$/', '', $raw );
 		}
 
 		if ( '' === $raw ) {
@@ -84,11 +100,19 @@ class DomainRegistry {
 	/**
 	 * Every domain that carries its own codes, default first.
 	 *
+	 * Memoized per instance: the filter's subscribers don't change mid-request,
+	 * so callers that ask repeatedly (every output class does) don't each pay
+	 * for re-applying it.
+	 *
 	 * @since 0.5.0
 	 *
 	 * @return array<int, string> Normalized hosts.
 	 */
 	public function get_hosts(): array {
+		if ( null !== $this->hosts ) {
+			return $this->hosts;
+		}
+
 		$default = self::default_host();
 
 		/**
@@ -124,7 +148,9 @@ class DomainRegistry {
 			array_unshift( $clean, $default );
 		}
 
-		return $clean;
+		$this->hosts = $clean;
+
+		return $this->hosts;
 	}
 
 	/**
@@ -143,8 +169,9 @@ class DomainRegistry {
 			? sanitize_text_field( wp_unslash( $_SERVER['HTTP_HOST'] ) )
 			: '';
 
-		$host = self::normalize_host( $raw );
+		$host  = self::normalize_host( $raw );
+		$hosts = $this->get_hosts();
 
-		return in_array( $host, $this->get_hosts(), true ) ? $host : self::default_host();
+		return in_array( $host, $hosts, true ) ? $host : ( $hosts[0] ?? '' );
 	}
 }
