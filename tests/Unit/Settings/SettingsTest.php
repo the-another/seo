@@ -17,6 +17,11 @@ class SettingsTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+
+		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
+		Functions\when( 'wp_parse_url' )->alias(
+			static fn( string $url, int $component = -1 ) => parse_url( $url, $component )
+		);
 	}
 
 	protected function tearDown(): void {
@@ -327,5 +332,84 @@ class SettingsTest extends TestCase {
 		);
 
 		$this->assertSame( array(), ( new Settings() )->get_disabled_sitemap_families() );
+	}
+
+	public function test_verification_code_for_the_default_host_reads_the_flat_key(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google' ) );
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google', 'example.com' ) );
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google', 'WWW.Example.com' ) );
+	}
+
+	public function test_verification_code_for_another_host_reads_its_own_record(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$this->assertSame( 'brandcode', ( new Settings() )->get_verification_code( 'google', 'brandtwo.com' ) );
+	}
+
+	public function test_verification_code_does_not_inherit_the_default(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => '' ) ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( '', $settings->get_verification_code( 'google', 'brandtwo.com' ) );
+		$this->assertSame( '', $settings->get_verification_code( 'google', 'unconfigured.com' ) );
+	}
+
+	public function test_verification_file_does_not_inherit_the_default(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google_file'   => 'googledefault.html',
+				'verification_domains' => array( 'brandtwo.com' => array() ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'googledefault.html', $settings->get_verification_file( 'google' ) );
+		$this->assertSame( '', $settings->get_verification_file( 'google', 'brandtwo.com' ) );
+	}
+
+	public function test_tracking_ids_inherit_the_default_when_blank(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'analytics_ga4_id'     => 'G-DEFAULT',
+				'analytics_gtm_id'     => 'GTM-DEFAULT',
+				'meta_pixel_id'        => '111111111111111',
+				'verification_domains' => array(
+					'brandtwo.com' => array( 'analytics_ga4_id' => 'G-BRAND' ),
+				),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'G-BRAND', $settings->get_ga4_id( 'brandtwo.com' ) );
+		$this->assertSame( 'GTM-DEFAULT', $settings->get_gtm_id( 'brandtwo.com' ) );
+		$this->assertSame( '111111111111111', $settings->get_meta_pixel_id( 'brandtwo.com' ) );
+	}
+
+	public function test_get_domain_record_returns_an_empty_array_for_an_unknown_host(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verification_domains' => 'corrupt' ) );
+
+		$this->assertSame( array(), ( new Settings() )->get_domain_record( 'brandtwo.com' ) );
 	}
 }

@@ -8,6 +8,8 @@
 
 namespace TheAnother\Plugin\SEO\Settings;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
+
 /**
  * Class Settings
  *
@@ -22,6 +24,19 @@ class Settings {
 	 * @var string
 	 */
 	public const OPTION_NAME = 'taseo_settings';
+
+	/**
+	 * Per-domain records, keyed by normalized host.
+	 *
+	 * The default domain is deliberately absent: it keeps the flat keys that
+	 * predate this map, which is what lets the feature ship without a
+	 * migration.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var string
+	 */
+	public const DOMAINS_KEY = 'verification_domains';
 
 	/**
 	 * Default schema.org type per object subtype.
@@ -390,55 +405,122 @@ class Settings {
 	}
 
 	/**
-	 * Verification meta-tag code for one service.
+	 * Verification meta-tag code for one service on one domain.
+	 *
+	 * @since 0.5.0 Added the $host parameter.
 	 *
 	 * @param string $engine Engine slug.
+	 * @param string $host   Normalized host, '' for the default domain.
 	 * @return string Code, '' when unset or unknown.
 	 */
-	public function get_verification_code( string $engine ): string {
+	public function get_verification_code( string $engine, string $host = '' ): string {
 		$key = self::VERIFICATION_KEYS[ $engine ] ?? '';
 
-		return '' === $key ? '' : (string) $this->get( $key, '' );
+		return '' === $key ? '' : $this->get_domain_value( $key, $host );
 	}
 
 	/**
-	 * Verification file value for one service. Google and Yandex store the
-	 * full filename; Bing stores only the token (its filename is fixed).
+	 * Verification file value for one service on one domain. Google and Yandex
+	 * store the full filename; Bing stores only the token (its filename is
+	 * fixed).
+	 *
+	 * @since 0.5.0 Added the $host parameter.
 	 *
 	 * @param string $engine Engine slug.
+	 * @param string $host   Normalized host, '' for the default domain.
 	 * @return string Value, '' when unset or unknown.
 	 */
-	public function get_verification_file( string $engine ): string {
+	public function get_verification_file( string $engine, string $host = '' ): string {
 		$key = self::VERIFICATION_FILE_KEYS[ $engine ] ?? '';
 
-		return '' === $key ? '' : (string) $this->get( $key, '' );
+		return '' === $key ? '' : $this->get_domain_value( $key, $host );
 	}
 
 	/**
-	 * GA4 measurement ID.
+	 * One domain's stored record.
 	 *
-	 * @return string ID or ''.
+	 * @since 0.5.0
+	 *
+	 * @param string $host Normalized host.
+	 * @return array<string, string> Record, empty when the domain has none.
 	 */
-	public function get_ga4_id(): string {
-		return (string) $this->get( 'analytics_ga4_id', '' );
+	public function get_domain_record( string $host ): array {
+		$all = $this->get( self::DOMAINS_KEY, array() );
+
+		if ( ! is_array( $all ) || ! isset( $all[ $host ] ) || ! is_array( $all[ $host ] ) ) {
+			return array();
+		}
+
+		return array_map( 'strval', $all[ $host ] );
 	}
 
 	/**
-	 * Google Tag Manager container ID.
+	 * Read one key for one domain.
 	 *
-	 * @return string ID or ''.
+	 * Verification codes and files never inherit: a webmaster property is
+	 * verified on its own, and handing a brand domain the default's code would
+	 * quietly guarantee a failed verification rather than an obvious blank
+	 * field. Tracking IDs do inherit, because brands commonly share one
+	 * analytics property and re-typing it per domain is how they drift apart.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $key     Settings key.
+	 * @param string $host    Normalized host, '' for the default domain.
+	 * @param bool   $inherit Fall back to the default domain when blank.
+	 * @return string Value.
 	 */
-	public function get_gtm_id(): string {
-		return (string) $this->get( 'analytics_gtm_id', '' );
+	private function get_domain_value( string $key, string $host, bool $inherit = false ): string {
+		$host = DomainRegistry::normalize_host( $host );
+
+		if ( '' === $host || DomainRegistry::default_host() === $host ) {
+			return (string) $this->get( $key, '' );
+		}
+
+		$record = $this->get_domain_record( $host );
+		$value  = isset( $record[ $key ] ) ? (string) $record[ $key ] : '';
+
+		if ( '' !== $value || ! $inherit ) {
+			return $value;
+		}
+
+		return (string) $this->get( $key, '' );
 	}
 
 	/**
-	 * Meta Pixel ID. Returned as a string, never cast to int: a leading
-	 * zero is significant and casting would silently change the pixel.
+	 * GA4 measurement ID for one domain.
 	 *
+	 * @since 0.5.0 Added the $host parameter.
+	 *
+	 * @param string $host Normalized host, '' for the default domain.
 	 * @return string ID or ''.
 	 */
-	public function get_meta_pixel_id(): string {
-		return (string) $this->get( 'meta_pixel_id', '' );
+	public function get_ga4_id( string $host = '' ): string {
+		return $this->get_domain_value( 'analytics_ga4_id', $host, true );
+	}
+
+	/**
+	 * Google Tag Manager container ID for one domain.
+	 *
+	 * @since 0.5.0 Added the $host parameter.
+	 *
+	 * @param string $host Normalized host, '' for the default domain.
+	 * @return string ID or ''.
+	 */
+	public function get_gtm_id( string $host = '' ): string {
+		return $this->get_domain_value( 'analytics_gtm_id', $host, true );
+	}
+
+	/**
+	 * Meta Pixel ID for one domain. Returned as a string, never cast to int: a
+	 * leading zero is significant and casting would silently change the pixel.
+	 *
+	 * @since 0.5.0 Added the $host parameter.
+	 *
+	 * @param string $host Normalized host, '' for the default domain.
+	 * @return string ID or ''.
+	 */
+	public function get_meta_pixel_id( string $host = '' ): string {
+		return $this->get_domain_value( 'meta_pixel_id', $host, true );
 	}
 }
