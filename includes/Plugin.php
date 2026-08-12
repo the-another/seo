@@ -239,11 +239,11 @@ class Plugin {
 		);
 		$c->register(
 			'analytics_output',
-			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'meta_pixel_output',
-			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 	}
 

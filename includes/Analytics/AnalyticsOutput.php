@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Analytics;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -38,9 +39,13 @@ class AnalyticsOutput {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings $settings Settings.
+	 * @param Settings       $settings Settings.
+	 * @param DomainRegistry $domains  Domain registry.
 	 */
-	public function __construct( private readonly Settings $settings ) {
+	public function __construct(
+		private readonly Settings $settings,
+		private readonly DomainRegistry $domains
+	) {
 	}
 
 	/**
@@ -148,7 +153,7 @@ class AnalyticsOutput {
 			return array();
 		}
 
-		$stored = $this->settings->get_ga4_id();
+		$stored = $this->settings->get_ga4_id( $this->domains->get_current_host() );
 		$ids    = '' === $stored ? array() : array( $stored );
 
 		/**
@@ -173,7 +178,7 @@ class AnalyticsOutput {
 			return array();
 		}
 
-		$stored = $this->settings->get_gtm_id();
+		$stored = $this->settings->get_gtm_id( $this->domains->get_current_host() );
 		$ids    = '' === $stored ? array() : array( $stored );
 
 		/**
