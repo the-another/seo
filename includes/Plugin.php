@@ -16,6 +16,7 @@ use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
 use TheAnother\Plugin\SEO\Database\SitemapFilesTable;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
@@ -107,6 +108,7 @@ class Plugin {
 		$c = $this->container;
 
 		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'domain_registry', fn() => new DomainRegistry() );
 		$c->register( 'custom_pages', fn() => new CustomPages() );
 		$c->register( 'post_subtypes', fn() => new PostSubtypes() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
