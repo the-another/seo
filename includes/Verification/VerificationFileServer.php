@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Verification;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -76,9 +77,13 @@ class VerificationFileServer {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings $settings Settings.
+	 * @param Settings       $settings Settings.
+	 * @param DomainRegistry $domains  Domain registry.
 	 */
-	public function __construct( private readonly Settings $settings ) {
+	public function __construct(
+		private readonly Settings $settings,
+		private readonly DomainRegistry $domains
+	) {
 	}
 
 	/**
@@ -108,7 +113,7 @@ class VerificationFileServer {
 			return;
 		}
 
-		$files = $this->build_files();
+		$files = $this->build_files( $this->domains->get_current_host() );
 
 		/**
 		 * Filters the verification files this site serves, keyed by filename.
@@ -207,14 +212,17 @@ class VerificationFileServer {
 	}
 
 	/**
-	 * Build the configured files, keyed by filename.
+	 * Build the configured files for one domain, keyed by filename.
 	 *
+	 * @since 0.5.0 Added the $host parameter.
+	 *
+	 * @param string $host Normalized host of the current request.
 	 * @return array<string, array{content_type: string, body: string}> Files.
 	 */
-	private function build_files(): array {
+	private function build_files( string $host ): array {
 		$files = array();
 
-		$google = $this->settings->get_verification_file( 'google' );
+		$google = $this->settings->get_verification_file( 'google', $host );
 
 		if ( '' !== $google && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_google_file'], $google ) ) {
 			$files[ $google ] = array(
@@ -223,7 +231,7 @@ class VerificationFileServer {
 			);
 		}
 
-		$bing = $this->settings->get_verification_file( 'bing' );
+		$bing = $this->settings->get_verification_file( 'bing', $host );
 
 		if ( '' !== $bing && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_bing_file'], $bing ) ) {
 			$files[ self::BING_FILENAME ] = array(
@@ -232,7 +240,7 @@ class VerificationFileServer {
 			);
 		}
 
-		$yandex = $this->settings->get_verification_file( 'yandex' );
+		$yandex = $this->settings->get_verification_file( 'yandex', $host );
 
 		if ( '' !== $yandex && 1 === preg_match( self::FILE_VALUE_PATTERNS['verify_yandex_file'], $yandex ) ) {
 			$token = substr( $yandex, strlen( 'yandex_' ), -strlen( '.html' ) );

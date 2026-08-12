@@ -235,7 +235,7 @@ class Plugin {
 		);
 		$c->register(
 			'verification_file_server',
-			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ) )
+			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'analytics_output',

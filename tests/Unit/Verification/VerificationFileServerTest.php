@@ -10,6 +10,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 
@@ -18,6 +19,7 @@ class VerificationFileServerTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $settings;
+	private $domains;
 	private VerificationFileServer $server;
 
 	protected function setUp(): void {
@@ -25,7 +27,10 @@ class VerificationFileServerTest extends TestCase {
 		Monkey\setUp();
 
 		$this->settings = Mockery::mock( Settings::class );
-		$this->server   = new VerificationFileServer( $this->settings );
+		$this->domains  = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
+
+		$this->server   = new VerificationFileServer( $this->settings, $this->domains );
 
 		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
 		Functions\when( 'wp_parse_url' )->alias(
@@ -50,7 +55,7 @@ class VerificationFileServerTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function files( array $files = array() ): void {
+	private function files( array $files = array(), string $host = 'example.com' ): void {
 		$defaults = array(
 			'google' => '',
 			'bing'   => '',
@@ -59,7 +64,7 @@ class VerificationFileServerTest extends TestCase {
 
 		foreach ( array_merge( $defaults, $files ) as $engine => $value ) {
 			$this->settings->shouldReceive( 'get_verification_file' )
-				->with( $engine )
+				->with( $engine, $host )
 				->andReturn( $value )
 				->byDefault();
 		}
@@ -268,5 +273,24 @@ class VerificationFileServerTest extends TestCase {
 		Functions\expect( 'status_header' )->never();
 
 		$this->assertSame( '', $this->serve( '/evil.html' ) );
+	}
+
+	public function test_serves_a_brand_domains_own_file(): void {
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
+
+		$this->files( array( 'google' => 'googlebrandtwo.html' ), 'brandtwo.com' );
+
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->assertSame(
+			'google-site-verification: googlebrandtwo.html',
+			$this->serve( '/googlebrandtwo.html' )
+		);
+	}
+
+	public function test_does_not_serve_one_domains_file_on_another_domain(): void {
+		$this->files( array( 'google' => 'googledefault.html' ) );
+
+		$this->assertSame( '', $this->serve( '/googlebrandtwo.html' ) );
 	}
 }
