@@ -29,6 +29,8 @@ class MethodMigrationTest extends TestCase {
 
 		$this->assertSame( 'metatoken', $result['settings']['verify_google'] );
 		$this->assertSame( 'meta', $result['settings']['verify_google_method'] );
+		$this->assertArrayNotHasKey( 'verify_bing_method', $result['settings'] );
+		$this->assertArrayNotHasKey( 'verify_yandex_method', $result['settings'] );
 		$this->assertSame( array(), $result['dropped'] );
 	}
 

@@ -29,12 +29,16 @@ class MethodMigration {
 	/**
 	 * Option flag: the conversion has already run.
 	 *
+	 * @since 0.5.0
+	 *
 	 * @var string
 	 */
 	public const VERSION_OPTION = 'taseo_verification_method_migrated';
 
 	/**
 	 * Option holding what the conversion had to drop, for the admin notice.
+	 *
+	 * @since 0.5.0
 	 *
 	 * @var string
 	 */
