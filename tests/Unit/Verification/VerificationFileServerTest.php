@@ -193,15 +193,22 @@ class VerificationFileServerTest extends TestCase {
 		$this->assertSame( '', $this->serve( '/evil.html' ) );
 	}
 
-	public function test_a_malformed_stored_google_filename_is_never_served(): void {
+	public function test_a_malformed_stored_google_token_is_never_served(): void {
 		// Options are writable outside SettingsPage::sanitize_settings()
 		// (WP-CLI, a migration, this branch's own e2e harness); the class
-		// must not trust a distant caller for its own safety.
-		$this->files( array( 'google' => '../wp-config.php' ) );
+		// must not trust a distant caller for its own safety. An uppercase
+		// token both survives FILTER_KEY_PATTERN and would derive a filename
+		// matching the request path exactly, so a pass here can only be
+		// TOKEN_PATTERNS['google'] rejecting it — not a filter-key mismatch,
+		// and not a path that no configuration could ever produce. Uppercase
+		// specifically: it passes Bing's [A-Za-z0-9]+ pattern, so this only
+		// goes red if Google's own lowercase-only pattern is deleted OR
+		// unified with Bing's, which is the exact defect this test guards.
+		$this->files( array( 'google' => 'ABC123' ) );
 
 		Functions\expect( 'status_header' )->never();
 
-		$this->assertSame( '', $this->serve( '/../wp-config.php' ) );
+		$this->assertSame( '', $this->serve( '/googleABC123.html' ) );
 	}
 
 	public function test_a_malformed_stored_bing_token_is_never_served(): void {
@@ -212,12 +219,15 @@ class VerificationFileServerTest extends TestCase {
 		$this->assertSame( '', $this->serve( '/BingSiteAuth.xml' ) );
 	}
 
-	public function test_a_malformed_stored_yandex_filename_is_never_served(): void {
-		$this->files( array( 'yandex' => '<script>alert(1)</script>' ) );
+	public function test_a_malformed_stored_yandex_token_is_never_served(): void {
+		// Same reasoning as the Google case above: an uppercase token
+		// survives FILTER_KEY_PATTERN and derives a filename matching the
+		// request path exactly, so only TOKEN_PATTERNS['yandex'] can reject it.
+		$this->files( array( 'yandex' => 'ABcd12' ) );
 
 		Functions\expect( 'status_header' )->never();
 
-		$this->assertSame( '', $this->serve( '/yandex_<script>.html' ) );
+		$this->assertSame( '', $this->serve( '/yandex_ABcd12.html' ) );
 	}
 
 	public function test_files_filter_key_containing_a_slash_is_not_served(): void {
