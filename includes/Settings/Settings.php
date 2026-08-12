@@ -39,6 +39,24 @@ class Settings {
 	public const DOMAINS_KEY = 'verification_domains';
 
 	/**
+	 * Verification by meta tag.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var string
+	 */
+	public const METHOD_META = 'meta';
+
+	/**
+	 * Verification by served file.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var string
+	 */
+	public const METHOD_FILE = 'file';
+
+	/**
 	 * Default schema.org type per object subtype.
 	 *
 	 * @var array<string, string>
