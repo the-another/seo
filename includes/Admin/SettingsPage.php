@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Admin;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
@@ -135,6 +136,7 @@ class SettingsPage {
 	 * @param SitemapFamilies       $sitemap_families   External URL families registry.
 	 * @param SitemapAssignment     $sitemap_assignment Sitemap chunk assignment (family toggle transitions).
 	 * @param PostSubtypes          $post_subtypes      Post subtype registry (per-subtype rows).
+	 * @param DomainRegistry        $domains            Verification domain registry.
 	 */
 	public function __construct(
 		private readonly Settings $settings,
@@ -146,7 +148,8 @@ class SettingsPage {
 		private readonly CustomPages $custom_pages,
 		private readonly SitemapFamilies $sitemap_families,
 		private readonly SitemapAssignment $sitemap_assignment,
-		private readonly PostSubtypes $post_subtypes
+		private readonly PostSubtypes $post_subtypes,
+		private readonly DomainRegistry $domains
 	) {
 	}
 
@@ -1096,12 +1099,13 @@ class SettingsPage {
 			return;
 		}
 
-		$raw = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
-		$tab = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
+		$raw    = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
+		$tab    = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
+		$domain = isset( $_POST['domain'] ) ? sanitize_text_field( wp_unslash( $_POST['domain'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
 
 		$previously_disabled = $this->settings->get_disabled_sitemap_families();
 
-		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
+		$this->settings->update( $this->sanitize_settings( $raw, $tab, $domain ) );
 
 		if ( 'sitemap' === $tab ) {
 			$now_disabled = $this->settings->get_disabled_sitemap_families();
@@ -1127,6 +1131,10 @@ class SettingsPage {
 
 		if ( array_key_exists( $tab, self::TABS ) ) {
 			$redirect = add_query_arg( 'tab', $tab, $redirect );
+		}
+
+		if ( 'webmaster' === $tab && '' !== $domain ) {
+			$redirect = add_query_arg( 'domain', $domain, $redirect );
 		}
 
 		$redirect = add_query_arg( 'settings-updated', 'true', $redirect );
@@ -1260,11 +1268,12 @@ class SettingsPage {
 	 * keys belonging to other tabs are merge-preserved by Settings::update(),
 	 * since a tab's form never submits fields it doesn't own.
 	 *
-	 * @param array<string, mixed> $raw Raw values.
-	 * @param string               $tab Active tab slug (from the posted 'tab' field).
+	 * @param array<string, mixed> $raw    Raw values.
+	 * @param string               $tab    Active tab slug (from the posted 'tab' field).
+	 * @param string               $domain Active domain (from the posted 'domain' field), '' for the default.
 	 * @return array<string, mixed> Clean values.
 	 */
-	public function sanitize_settings( array $raw, string $tab = '' ): array {
+	public function sanitize_settings( array $raw, string $tab = '', string $domain = '' ): array {
 		$clean = array();
 
 		foreach ( array( 'enabled_post_types', 'enabled_taxonomies' ) as $list_key ) {
@@ -1384,9 +1393,24 @@ class SettingsPage {
 			}
 		}
 
+		$domain = DomainRegistry::normalize_host( $domain );
+
+		// An unregistered host is treated as the default rather than stored:
+		// a record key later decides which body a public request is answered
+		// with, so a crafted POST must not be able to seed one.
+		if ( '' !== $domain && ! in_array( $domain, $this->domains->get_hosts(), true ) ) {
+			$domain = '';
+		}
+
+		if ( DomainRegistry::default_host() === $domain ) {
+			$domain = '';
+		}
+
+		$webmaster = array();
+
 		foreach ( self::VERIFICATION_CODE_KEYS as $code_key ) {
 			if ( isset( $raw[ $code_key ] ) ) {
-				$clean[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
+				$webmaster[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
 			}
 		}
 
@@ -1398,7 +1422,7 @@ class SettingsPage {
 			$value = trim( (string) $raw[ $file_key ] );
 			$value = 'verify_bing_file' === $file_key ? $value : strtolower( $value );
 
-			$clean[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
 		}
 
 		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
@@ -1409,7 +1433,24 @@ class SettingsPage {
 			$value = trim( (string) $raw[ $id_key ] );
 			$value = 'meta_pixel_id' === $id_key ? $value : strtoupper( $value );
 
-			$clean[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+		}
+
+		if ( array() !== $webmaster ) {
+			if ( '' === $domain ) {
+				$clean = array_merge( $clean, $webmaster );
+			} else {
+				// Start from what is stored: this key holds every domain's
+				// record, so replacing it wholesale would discard the sibling
+				// domains the submitted form never carried.
+				$stored = $this->settings->get( Settings::DOMAINS_KEY, array() );
+				$rows   = is_array( $stored ) ? $stored : array();
+				$row    = isset( $rows[ $domain ] ) && is_array( $rows[ $domain ] ) ? $rows[ $domain ] : array();
+
+				$rows[ $domain ] = array_merge( $row, $webmaster );
+
+				$clean[ Settings::DOMAINS_KEY ] = $rows;
+			}
 		}
 
 		if ( 'social' === $tab ) {

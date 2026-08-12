@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
@@ -35,6 +36,7 @@ class SettingsPageTest extends TestCase {
 	private $custom_pages;
 	private $sitemap_families;
 	private $sitemap_assignment;
+	private $domains;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -87,6 +89,25 @@ class SettingsPageTest extends TestCase {
 		// only the sitemap-toggle tests below care about its value.
 		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
 
+		// DomainRegistry::default_host() is static and calls these directly.
+		// The sanitizer tests never render, so stub_render_functions()'s copy
+		// of home_url() doesn't run early enough for them.
+		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
+		Functions\when( 'wp_parse_url' )->alias(
+			static fn( string $url, int $component = -1 ) => parse_url( $url, $component )
+		);
+
+		$this->domains = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_hosts' )
+			->andReturn( array( 'example.com', 'brandtwo.com', 'brandthree.co' ) )
+			->byDefault();
+		// The sanitizer only reads this key when a non-default domain is
+		// posted; tests asserting on sibling records override it.
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array() )
+			->byDefault();
+
 		$this->page = new SettingsPage(
 			$this->settings,
 			$this->backfill,
@@ -97,7 +118,8 @@ class SettingsPageTest extends TestCase {
 			$this->custom_pages,
 			$this->sitemap_families,
 			$this->sitemap_assignment,
-			new PostSubtypes()
+			new PostSubtypes(),
+			$this->domains
 		);
 	}
 
@@ -618,6 +640,59 @@ class SettingsPageTest extends TestCase {
 		$clean = $this->page->sanitize_settings( array( 'verify_google' => '' ), 'webmaster' );
 
 		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	public function test_sanitize_writes_the_flat_keys_for_the_default_domain(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'defaultcode' ),
+			'webmaster',
+			'example.com'
+		);
+
+		$this->assertSame( 'defaultcode', $clean['verify_google'] );
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
+	}
+
+	public function test_sanitize_writes_a_brand_domains_record(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google'    => 'brandcode',
+				'analytics_ga4_id' => 'g-brand123',
+			),
+			'webmaster',
+			'brandtwo.com'
+		);
+
+		$this->assertArrayNotHasKey( 'verify_google', $clean );
+		$this->assertSame( 'brandcode', $clean['verification_domains']['brandtwo.com']['verify_google'] );
+		$this->assertSame( 'G-BRAND123', $clean['verification_domains']['brandtwo.com']['analytics_ga4_id'] );
+	}
+
+	public function test_sanitize_leaves_sibling_domains_intact(): void {
+		// Overrides the byDefault() stub added in setUp().
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array( 'brandthree.co' => array( 'verify_google' => 'threecode' ) ) );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'twocode' ),
+			'webmaster',
+			'brandtwo.com'
+		);
+
+		$this->assertSame( 'threecode', $clean['verification_domains']['brandthree.co']['verify_google'] );
+		$this->assertSame( 'twocode', $clean['verification_domains']['brandtwo.com']['verify_google'] );
+	}
+
+	public function test_sanitize_rejects_a_domain_that_is_not_registered(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'injected' ),
+			'webmaster',
+			'attacker.example'
+		);
+
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
+		$this->assertSame( 'injected', $clean['verify_google'] );
 	}
 
 	public function test_save_redirect_preserves_the_active_tab(): void {

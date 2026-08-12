@@ -184,7 +184,8 @@ class Plugin {
 				$c->get( 'custom_pages' ),
 				$c->get( 'sitemap_families' ),
 				$c->get( 'sitemap_assignment' ),
-				$c->get( 'post_subtypes' )
+				$c->get( 'post_subtypes' ),
+				$c->get( 'domain_registry' )
 			)
 		);
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
