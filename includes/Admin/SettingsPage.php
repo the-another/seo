@@ -1263,8 +1263,16 @@ class SettingsPage {
 			$redirect = add_query_arg( 'tab', $tab, $redirect );
 		}
 
-		if ( 'webmaster' === $tab && '' !== $domain ) {
-			$redirect = add_query_arg( 'domain', $domain, $redirect );
+		if ( 'webmaster' === $tab ) {
+			// Only advertise a domain the save actually wrote to. Carrying the
+			// raw posted value through would re-open the form on a domain the
+			// sanitizer just rejected, and normalizing keeps the arg in the
+			// same shape the domain nav emits.
+			$host = DomainRegistry::normalize_host( $domain );
+
+			if ( '' !== $host && in_array( $host, $this->domains->get_hosts(), true ) ) {
+				$redirect = add_query_arg( 'domain', $host, $redirect );
+			}
 		}
 
 		$redirect = add_query_arg( 'settings-updated', 'true', $redirect );
@@ -1388,6 +1396,45 @@ class SettingsPage {
 		$template = wp_strip_all_tags( $template );
 
 		return trim( (string) preg_replace( '/[\r\n\t ]+/', ' ', $template ) );
+	}
+
+	/**
+	 * Which domain a webmaster submission writes to.
+	 *
+	 * Three outcomes, and telling the last two apart is the whole point:
+	 *
+	 * - `''` — the default domain, i.e. the flat keys. This is what an absent
+	 *   `domain` field means, which covers every non-webmaster tab and any
+	 *   form rendered before the domain switcher existed.
+	 * - a host — that domain's record under Settings::DOMAINS_KEY.
+	 * - `null` — write nothing. The field carried a host that is not
+	 *   registered, and there is no safe place to put the values. Treating it
+	 *   as the default is the one genuinely destructive option: get_hosts() is
+	 *   dynamic (a Brand's URL rule edited in another tab changes it
+	 *   mid-session), so an operator can return to a stale Webmaster Tools
+	 *   screen and press Save with no attacker involved — and the posted
+	 *   codes would overwrite the site's own. Seeding a record on an
+	 *   unregistered host is rejected too, since a record key decides which
+	 *   body a public request is answered with. Discarding the edit loses
+	 *   nothing that still exists.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $domain Posted domain field, '' when none was posted.
+	 * @return string|null Lookup key, or null to write nothing.
+	 */
+	private function webmaster_target( string $domain ): ?string {
+		if ( '' === trim( $domain ) ) {
+			return '';
+		}
+
+		$host = DomainRegistry::normalize_host( $domain );
+
+		if ( DomainRegistry::default_host() === $host ) {
+			return '';
+		}
+
+		return in_array( $host, $this->domains->get_hosts(), true ) ? $host : null;
 	}
 
 	/**
@@ -1523,18 +1570,7 @@ class SettingsPage {
 			}
 		}
 
-		$domain = DomainRegistry::normalize_host( $domain );
-
-		// An unregistered host is treated as the default rather than stored:
-		// a record key later decides which body a public request is answered
-		// with, so a crafted POST must not be able to seed one.
-		if ( '' !== $domain && ! in_array( $domain, $this->domains->get_hosts(), true ) ) {
-			$domain = '';
-		}
-
-		if ( DomainRegistry::default_host() === $domain ) {
-			$domain = '';
-		}
+		$target = $this->webmaster_target( $domain );
 
 		$webmaster = array();
 
@@ -1566,8 +1602,10 @@ class SettingsPage {
 			$webmaster[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
 		}
 
-		if ( array() !== $webmaster ) {
-			if ( '' === $domain ) {
+		// A null target means the submission named a domain that is not
+		// registered: nothing is written, so the values are simply discarded.
+		if ( array() !== $webmaster && null !== $target ) {
+			if ( '' === $target ) {
 				$clean = array_merge( $clean, $webmaster );
 			} else {
 				// Start from what is stored: this key holds every domain's
@@ -1575,9 +1613,9 @@ class SettingsPage {
 				// domains the submitted form never carried.
 				$stored = $this->settings->get( Settings::DOMAINS_KEY, array() );
 				$rows   = is_array( $stored ) ? $stored : array();
-				$row    = isset( $rows[ $domain ] ) && is_array( $rows[ $domain ] ) ? $rows[ $domain ] : array();
+				$row    = isset( $rows[ $target ] ) && is_array( $rows[ $target ] ) ? $rows[ $target ] : array();
 
-				$rows[ $domain ] = array_merge( $row, $webmaster );
+				$rows[ $target ] = array_merge( $row, $webmaster );
 
 				$clean[ Settings::DOMAINS_KEY ] = $rows;
 			}

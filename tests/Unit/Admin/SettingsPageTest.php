@@ -697,7 +697,14 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( 'twocode', $clean['verification_domains']['brandtwo.com']['verify_google'] );
 	}
 
-	public function test_sanitize_rejects_a_domain_that_is_not_registered(): void {
+	/**
+	 * An unregistered host writes nothing at all — not a record (a record key
+	 * decides which body a public request is answered with, so a crafted POST
+	 * must not be able to seed one) and not the flat keys either. Falling back
+	 * to the flat keys would make the posted values land on the DEFAULT domain,
+	 * which is data loss, not rejection.
+	 */
+	public function test_sanitize_discards_a_webmaster_save_for_an_unregistered_domain(): void {
 		$clean = $this->page->sanitize_settings(
 			array( 'verify_google' => 'injected' ),
 			'webmaster',
@@ -705,7 +712,61 @@ class SettingsPageTest extends TestCase {
 		);
 
 		$this->assertArrayNotHasKey( 'verification_domains', $clean );
-		$this->assertSame( 'injected', $clean['verify_google'] );
+		$this->assertArrayNotHasKey( 'verify_google', $clean );
+	}
+
+	/**
+	 * The sequence that makes this a data-loss bug rather than a hardening
+	 * detail: get_hosts() is dynamic, so an operator can open Webmaster Tools
+	 * on a brand domain, have that Brand's URL rule edited elsewhere, and press
+	 * Save — with no attacker involved. Every posted webmaster value must be
+	 * discarded, leaving both the default domain's flat keys and the stored
+	 * per-domain records exactly as they were (Settings::update() merges, so an
+	 * absent key is an untouched key).
+	 */
+	public function test_sanitize_for_an_unregistered_domain_touches_neither_flat_keys_nor_records(): void {
+		// Overrides the byDefault() stub added in setUp().
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array( 'brandthree.co' => array( 'verify_google' => 'threecode' ) ) );
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google'      => 'brandcode',
+				'verify_bing'        => 'brandbing',
+				'verify_yandex'      => 'brandyandex',
+				'verify_yahoo'       => 'brandyahoo',
+				'verify_facebook'    => 'brandmeta',
+				'verify_google_file' => 'google1a2b3c.html',
+				'verify_bing_file'   => 'BINGTOKEN123',
+				'verify_yandex_file' => 'yandex_9f8e7d.html',
+				'analytics_ga4_id'   => 'G-BRAND1234',
+				'analytics_gtm_id'   => 'GTM-BRAND12',
+				'meta_pixel_id'      => '123456789012345',
+			),
+			'webmaster',
+			'brandgone.example'
+		);
+
+		$posted = array(
+			'verify_google',
+			'verify_bing',
+			'verify_yandex',
+			'verify_yahoo',
+			'verify_facebook',
+			'verify_google_file',
+			'verify_bing_file',
+			'verify_yandex_file',
+			'analytics_ga4_id',
+			'analytics_gtm_id',
+			'meta_pixel_id',
+		);
+
+		foreach ( $posted as $key ) {
+			$this->assertArrayNotHasKey( $key, $clean );
+		}
+
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
 	}
 
 	public function test_save_redirect_preserves_the_active_tab(): void {
@@ -737,6 +798,78 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'tab=webmaster', $redirected );
 
 		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * The cosmetic tail of the same bug: the sanitizer discards a save aimed at
+	 * an unregistered domain, so the redirect must not advertise that domain
+	 * either — re-opening the form on it would suggest the values were stored.
+	 */
+	public function test_save_redirect_drops_a_domain_that_is_not_registered(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'webmaster';
+		$_POST['domain']               = 'brandgone.example';
+		$_POST['taseo_settings']       = array( 'verify_google' => 'googletoken' );
+
+		$redirected = '';
+
+		$this->stub_save_redirect_functions( $redirected );
+
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->page->handle_save( false );
+
+		$this->assertStringNotContainsString( 'domain=', $redirected );
+		$this->assertStringContainsString( 'tab=webmaster', $redirected );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['domain'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * A registered domain still round-trips, normalized into the same shape the
+	 * domain nav emits.
+	 */
+	public function test_save_redirect_keeps_and_normalizes_a_registered_domain(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'webmaster';
+		$_POST['domain']               = 'WWW.BrandTwo.com';
+		$_POST['taseo_settings']       = array( 'verify_google' => 'googletoken' );
+
+		$redirected = '';
+
+		$this->stub_save_redirect_functions( $redirected );
+
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->page->handle_save( false );
+
+		$this->assertStringContainsString( 'domain=brandtwo.com', $redirected );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['domain'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * Stub the WP functions handle_save() calls on its way to the redirect,
+	 * capturing the location it lands on.
+	 *
+	 * @param string $redirected Receives the redirect target (by reference).
+	 * @return void
+	 */
+	private function stub_save_redirect_functions( string &$redirected ): void {
+		Functions\when( 'wp_verify_nonce' )->justReturn( true );
+		Functions\when( 'current_user_can' )->justReturn( true );
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\when( 'sanitize_key' )->returnArg();
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'admin_url' )->alias( static fn( string $path ) => 'https://example.com/wp-admin/' . $path );
+		Functions\when( 'add_query_arg' )->alias(
+			static fn( string $key, string $value, string $url ) => $url . '&' . $key . '=' . $value
+		);
+		Functions\when( 'wp_safe_redirect' )->alias(
+			function ( string $location ) use ( &$redirected ): void {
+				$redirected = $location;
+			}
+		);
 	}
 
 	/**
