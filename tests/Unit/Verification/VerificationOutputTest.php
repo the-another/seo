@@ -36,6 +36,8 @@ class VerificationOutputTest extends TestCase {
 		Functions\when( 'esc_attr' )->returnArg();
 		Functions\when( 'is_front_page' )->justReturn( true );
 		Functions\when( 'is_paged' )->justReturn( false );
+
+		$this->methods();
 	}
 
 	protected function tearDown(): void {
@@ -56,6 +58,23 @@ class VerificationOutputTest extends TestCase {
 			$this->settings->shouldReceive( 'get_verification_code' )
 				->with( $engine, $host )
 				->andReturn( $code );
+		}
+	}
+
+	private function methods( array $methods = array(), string $host = 'example.com' ): void {
+		$defaults = array(
+			'google'   => 'meta',
+			'bing'     => 'meta',
+			'yandex'   => 'meta',
+			'yahoo'    => 'meta',
+			'facebook' => 'meta',
+		);
+
+		foreach ( array_merge( $defaults, $methods ) as $engine => $method ) {
+			$this->settings->shouldReceive( 'get_verification_method' )
+				->with( $engine, $host )
+				->andReturn( $method )
+				->byDefault();
 		}
 	}
 
@@ -172,11 +191,25 @@ class VerificationOutputTest extends TestCase {
 	public function test_prints_the_codes_of_the_domain_the_request_arrived_on(): void {
 		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
 
+		$this->methods( array(), 'brandtwo.com' );
 		$this->codes( array( 'google' => 'brandtwocode' ), 'brandtwo.com' );
 
 		$this->assertStringContainsString(
 			'<meta name="google-site-verification" content="brandtwocode" />',
 			$this->render()
+		);
+	}
+
+	public function test_a_service_in_file_mode_prints_no_meta_tag(): void {
+		$this->methods( array( 'google' => 'file' ) );
+		$this->codes( array( 'google' => 'filetoken', 'bing' => 'bingcode' ) );
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'google-site-verification', $html );
+		$this->assertStringContainsString(
+			'<meta name="msvalidate.01" content="bingcode" />',
+			$html
 		);
 	}
 }

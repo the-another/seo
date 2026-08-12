@@ -82,6 +82,10 @@ class VerificationOutput {
 		$host = $this->domains->get_current_host();
 
 		foreach ( self::META_NAMES as $engine => $meta_name ) {
+			if ( Settings::METHOD_FILE === $this->settings->get_verification_method( $engine, $host ) ) {
+				continue;
+			}
+
 			$code = $this->settings->get_verification_code( $engine, $host );
 
 			if ( '' !== $code ) {
@@ -98,9 +102,13 @@ class VerificationOutput {
 		 * The filter carries no host argument, so a subscriber that needs to
 		 * know which domain it is running for must resolve that itself.
 		 *
+		 * A service verifying by file contributes nothing here — the array holds
+		 * only the services whose method is `meta` on the requested domain.
+		 *
 		 * @since 1.0.0
 		 * @since 0.5.0 Semantics changed: the value is now the requesting
 		 *              domain's tags rather than the whole site's.
+		 * @since 0.5.0 Services on the file method are absent from the array.
 		 *
 		 * @param array<string, string> $tags Meta name => verification code.
 		 */

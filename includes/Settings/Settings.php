@@ -93,6 +93,21 @@ class Settings {
 	);
 
 	/**
+	 * Engine slug => settings key for the chosen verification method. Only the
+	 * three services that offer both a tag and a file appear here; Yahoo and
+	 * Meta publish no file method, so they have nothing to choose.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var array<string, string>
+	 */
+	private const VERIFICATION_METHOD_KEYS = array(
+		'google' => 'verify_google_method',
+		'bing'   => 'verify_bing_method',
+		'yandex' => 'verify_yandex_method',
+	);
+
+	/**
 	 * Get one settings key.
 	 *
 	 * @param string $key      Key.
@@ -452,6 +467,35 @@ class Settings {
 		$key = self::VERIFICATION_FILE_KEYS[ $engine ] ?? '';
 
 		return '' === $key ? '' : $this->get_domain_value( $key, $host );
+	}
+
+	/**
+	 * How one service verifies on one domain.
+	 *
+	 * Anything other than an explicit `file` resolves to `meta`: an engine with
+	 * no file method, an unmigrated record, and a corrupted value all mean the
+	 * same thing here, and printing a tag is the safe reading of "unknown" —
+	 * serving an unexpected file at a guessable path is not.
+	 *
+	 * Does not inherit the default domain, matching codes and files: a domain's
+	 * method is its own.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $host   Normalized host, '' for the default domain.
+	 * @return string Settings::METHOD_META or Settings::METHOD_FILE.
+	 */
+	public function get_verification_method( string $engine, string $host = '' ): string {
+		$key = self::VERIFICATION_METHOD_KEYS[ $engine ] ?? '';
+
+		if ( '' === $key ) {
+			return self::METHOD_META;
+		}
+
+		return self::METHOD_FILE === $this->get_domain_value( $key, $host )
+			? self::METHOD_FILE
+			: self::METHOD_META;
 	}
 
 	/**

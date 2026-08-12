@@ -252,6 +252,44 @@ class SettingsTest extends TestCase {
 		$this->assertSame( '', ( new Settings() )->get_verification_file( 'facebook' ) );
 	}
 
+	public function test_verification_method_defaults_to_meta(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_reads_a_stored_file_method(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_google_method' => 'file' ) );
+
+		$this->assertSame( 'file', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_rejects_an_unrecognised_value(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_google_method' => 'carrier-pigeon' ) );
+
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_is_per_domain_and_does_not_inherit(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google_method' => 'file',
+				'verification_domains' => array( 'brandtwo.com' => array() ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'file', $settings->get_verification_method( 'google' ) );
+		$this->assertSame( 'meta', $settings->get_verification_method( 'google', 'brandtwo.com' ) );
+	}
+
+	public function test_verification_method_is_empty_for_an_unknown_engine(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'yahoo' ) );
+	}
+
 	public function test_tracking_ids_return_stored_values(): void {
 		Functions\when( 'get_option' )->justReturn(
 			array(
