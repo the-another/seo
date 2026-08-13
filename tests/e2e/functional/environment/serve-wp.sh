@@ -218,26 +218,26 @@ wp rewrite flush --path="$WP_DIR" --allow-root
 # a key into that. Seed an empty array first so the inserts below have an
 # array to patch into.
 wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root || true
-wp option patch insert taseo_settings verify_google 'googlee2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google 'e2efile' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google_method 'file' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_bing 'BINGE2ETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing_method 'file' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_yandex 'yandexe2etoken' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_yahoo 'yahooe2etoken' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_facebook 'metae2etoken' --path="$WP_DIR" --allow-root
-wp option patch insert taseo_settings verify_google_file 'googlee2efile.html' --path="$WP_DIR" --allow-root
-wp option patch insert taseo_settings verify_bing_file 'BINGFILETOKEN' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
 
 # The brand domain's own per-domain record (Settings::DOMAINS_KEY), keyed by
 # the normalized host the taseo-domains-fixture.php mu-plugin above pushes
-# through the taseo_verification_domains filter. verify_google/_file are set
+# through the taseo_verification_domains filter. verify_google/_method are set
 # so webmaster-domains.spec.ts can assert per-domain codes and files carry no
 # inheritance; analytics_gtm_id is deliberately left OUT of this record (only
 # analytics_ga4_id is set) so that same spec can assert a blank GTM field on
 # the brand domain inherits the default domain's analytics_gtm_id instead.
 wp option patch insert taseo_settings verification_domains --format=json \
-	'{"brandtwo.test":{"verify_google":"brandtwoe2etoken","verify_google_file":"googlebrandtwo.html","analytics_ga4_id":"G-BRAND2E2E"}}' \
+	'{"brandtwo.test":{"verify_google":"brandtwo","verify_google_method":"file","analytics_ga4_id":"G-BRAND2E2E"}}' \
 	--path="$WP_DIR" --allow-root
 
 # Drain the Action Scheduler queue: the initial indexable backfill runs as a

@@ -95,7 +95,7 @@ test.describe( 'webmaster admin settings', () => {
 
 		await expect(
 			page.locator( 'input[name="taseo_settings[verify_google]"]' )
-		).toHaveValue( 'googlee2etoken' );
+		).toHaveValue( 'e2efile' );
 		await expect(
 			page.locator( 'input[name="taseo_settings[verify_bing]"]' )
 		).toHaveValue( 'BINGE2ETOKEN' );
@@ -109,16 +109,37 @@ test.describe( 'webmaster admin settings', () => {
 			page.locator( 'input[name="taseo_settings[verify_facebook]"]' )
 		).toHaveValue( 'metae2etoken' );
 
+		// One input per service now, not a code field plus a separate file
+		// field: the method is chosen with a radio pair instead. Google and
+		// Bing are both seeded on the file method (serve-wp.sh), so their
+		// "file" radio must be the one actually checked — and, the negative
+		// half a renderer that marks both (or neither) radio checked would
+		// still pass a bare positive assertion — their "meta" radio must NOT
+		// be checked.
 		await expect(
-			page.locator( 'input[name="taseo_settings[verify_google_file]"]' )
-		).toHaveValue( 'googlee2efile.html' );
+			page.locator(
+				'input[name="taseo_settings[verify_google_method]"][value="file"]'
+			)
+		).toBeChecked();
 		await expect(
-			page.locator( 'input[name="taseo_settings[verify_bing_file]"]' )
-		).toHaveValue( 'BINGFILETOKEN' );
+			page.locator(
+				'input[name="taseo_settings[verify_google_method]"][value="meta"]'
+			)
+		).not.toBeChecked();
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[verify_bing_method]"][value="file"]'
+			)
+		).toBeChecked();
+		await expect(
+			page.locator(
+				'input[name="taseo_settings[verify_bing_method]"][value="meta"]'
+			)
+		).not.toBeChecked();
 
-		// The Google verification file is configured, so its clickable public
-		// URL should render. Bing's link must use the fixed BingSiteAuth.xml
-		// filename, never the stored token.
+		// The Google verification file is configured and its method is file,
+		// so its clickable public URL should render. Bing's link must use the
+		// fixed BingSiteAuth.xml filename, never the stored token.
 		await expect(
 			page.getByRole( 'link', { name: /googlee2efile\.html$/ } )
 		).toHaveAttribute( 'href', /\/googlee2efile\.html$/ );

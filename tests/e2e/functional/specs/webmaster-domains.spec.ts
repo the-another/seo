@@ -30,6 +30,17 @@
  * (also on template_redirect, priority 10) fire a 301 before the request
  * can ever reach a 404 — see the inline comment on the negative assertion
  * below, which is why that assertion sends the port explicitly.
+ *
+ * That same redirect_canonical mismatch also means a BRAND domain's host
+ * (e.g. brandtwo.test) can never reach a literal 404 through this technique
+ * at all, port or no port: serve-wp.sh pins option_home/siteurl to this
+ * environment's own http://localhost:$WP_E2E_PORT for EVERY request
+ * regardless of incoming Host, so brandtwo.test never equals the pinned
+ * home_url() and any request that falls through without an earlier handler
+ * exiting first gets 301'd. There is no Host value simultaneously
+ * "recognized as brandtwo.test" and "matching the pinned home_url()" — see
+ * the inline comment on the method-switch test's negative assertion below,
+ * which asserts 301, not 404, for exactly this reason.
  */
 import { test, expect } from '@wordpress/e2e-test-utils-playwright';
 import { request as httpRequest } from 'node:http';
@@ -105,7 +116,7 @@ test.describe( 'per-domain verification', () => {
 
 		await expect(
 			page.locator( 'input[name="taseo_settings[verify_google]"]' )
-		).toHaveValue( 'brandtwoe2etoken' );
+		).toHaveValue( 'brandtwo' );
 
 		await expect( page.locator( 'input[name="domain"]' ) ).toHaveValue(
 			'brandtwo.test'
@@ -178,14 +189,14 @@ test.describe( 'per-domain verification', () => {
 		).toHaveValue( 'yandexe2etoken' );
 
 		// Same proof for the field the brand domain DOES override: the default
-		// still shows its own googlee2etoken, not brandtwo.test's
-		// brandtwoe2etoken, after that domain has been visited and saved. On
-		// its own — asserted on a pristine default tab, as it used to be — this
-		// would pass with the whole domain feature deleted; it only means
-		// anything here, downstream of the brand-domain save.
+		// still shows its own e2efile, not brandtwo.test's brandtwo, after
+		// that domain has been visited and saved. On its own — asserted on a
+		// pristine default tab, as it used to be — this would pass with the
+		// whole domain feature deleted; it only means anything here,
+		// downstream of the brand-domain save.
 		await expect(
 			page.locator( 'input[name="taseo_settings[verify_google]"]' )
-		).toHaveValue( 'googlee2etoken' );
+		).toHaveValue( 'e2efile' );
 	} );
 
 	test( 'a brand domain file is served on that host only', async () => {
@@ -224,6 +235,46 @@ test.describe( 'per-domain verification', () => {
 		expect( response.status() ).toBe( 200 );
 		expect( await response.text() ).toBe(
 			'google-site-verification: googlee2efile.html'
+		);
+	} );
+
+	// Runs last in this file: it permanently flips brandtwo.test's Google
+	// method from file to meta (nothing in this suite resets it, and
+	// workers: 1 / fullyParallel: false in playwright.config.ts make that
+	// safe) — the preceding 'a brand domain file is served on that host
+	// only' test above depends on that domain still being on the file
+	// method, so it must run first.
+	test( 'switching a service to meta stops serving its file', async ( {
+		page,
+	} ) => {
+		await page.goto( `${ WEBMASTER_TAB }&domain=brandtwo.test` );
+
+		await page
+			.locator(
+				'input[name="taseo_settings[verify_google_method]"][value="meta"]'
+			)
+			.check( { force: true } );
+
+		// check() then click(): two click-family actions, the documented
+		// per-session maximum — see the note at the top of
+		// webmaster-admin.spec.ts. Do not add a third to this test.
+		await page.locator( '#submit' ).click( { force: true } );
+
+		await expect( page ).toHaveURL( /domain=brandtwo\.test/ );
+
+		const onBrand = await fetchWithHost(
+			'/googlebrandtwo.html',
+			'brandtwo.test'
+		);
+
+		// 301, not 404 — see the header comment's note on brand-domain hosts
+		// and redirect_canonical. The body check is the falsifiable half: a
+		// regression that left the file serving would return 200 with this
+		// exact content, which is the only way this assertion could fail to
+		// catch it.
+		expect( onBrand.status ).toBe( 301 );
+		expect( onBrand.body ).not.toBe(
+			'google-site-verification: googlebrandtwo.html'
 		);
 	} );
 } );

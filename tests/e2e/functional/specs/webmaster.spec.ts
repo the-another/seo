@@ -15,12 +15,23 @@ test.describe( 'webmaster verification and tracking', () => {
 	test( 'verification meta tags on the front page', async ( { page } ) => {
 		await page.goto( '/' );
 
+		// Both directions of the method gate, not just "the tag printed": a
+		// service now has ONE method, never a code and a file value at once
+		// (the two-credential state this feature abolishes). serve-wp.sh
+		// seeds Google and Bing on the file method — see the file-serving
+		// tests below — and Yandex/Yahoo/Meta with a code and no method key,
+		// which resolves to meta (Settings::get_verification_method()'s
+		// default). So the front page must print exactly the meta-method
+		// services' tags and print NEITHER file-method service's tag. A gate
+		// that stopped suppressing file-mode services, or one that started
+		// suppressing meta-mode ones, would both be caught here — do not
+		// "restore" a single-direction assertion that only checks presence.
 		await expect(
 			page.locator( 'meta[name="google-site-verification"]' )
-		).toHaveAttribute( 'content', 'googlee2etoken' );
+		).toHaveCount( 0 );
 		await expect(
 			page.locator( 'meta[name="msvalidate.01"]' )
-		).toHaveAttribute( 'content', 'BINGE2ETOKEN' );
+		).toHaveCount( 0 );
 		await expect(
 			page.locator( 'meta[name="yandex-verification"]' )
 		).toHaveAttribute( 'content', 'yandexe2etoken' );
@@ -68,8 +79,12 @@ test.describe( 'webmaster verification and tracking', () => {
 		expect( response.headers()[ 'content-type' ] ).toContain(
 			'application/xml'
 		);
+		// The body embeds Bing's one stored token (BINGE2ETOKEN, seeded by
+		// serve-wp.sh). There is no separate file-only token anymore — the
+		// same value that would otherwise be the meta tag's content is what
+		// the file method serves in the <user> element.
 		expect( await response.text() ).toBe(
-			'<?xml version="1.0"?>\n<users>\n  <user>BINGFILETOKEN</user>\n</users>'
+			'<?xml version="1.0"?>\n<users>\n  <user>BINGE2ETOKEN</user>\n</users>'
 		);
 	} );
 
