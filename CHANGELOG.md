@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 - Verification settings collapsed from two keys per service to one token plus a method. A one-time migration converts existing settings, including every per-domain record, and runs before any output. Bing and Yandex are lossless — both keys held the same token. Google is the one service whose two methods use unrelated credentials, so a site that had **both** a Google meta code and a Google verification file keeps the file and loses the meta code; its `<meta>` tag stops printing after the upgrade. A dismissible admin notice names every service and domain this happened to, so nothing is discarded silently. Re-add a code from Search Console to switch back to the meta tag.
+- Switching a service's method and saving clears a stored value that does not fit the new method's shape — a Google meta code is not a Google file token, and vice versa. The save now says so: the field names the service whose value was discarded instead of reporting success over an empty box, and the input's placeholder shows which shape the selected method expects (`google1a2b3c.html` and `yandex_9f8e7d.html` in file mode, the token from `BingSiteAuth.xml` for Bing, the plain code in meta mode).
 
 ## [0.4.0] - 2026-08-11
 

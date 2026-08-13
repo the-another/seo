@@ -109,6 +109,20 @@ class SettingsPage {
 	private const INVALID_TEMPLATE_CODE = 'taseo_invalid_template__';
 
 	/**
+	 * Settings-error code prefix for a verification value the sanitizer had to
+	 * discard. The settings key is appended, following INVALID_TEMPLATE_CODE's
+	 * convention, so one save can report several services and a reader of the
+	 * errors can tell which field failed. Deliberately a different prefix:
+	 * collect_invalid_rows() treats everything under INVALID_TEMPLATE_CODE as
+	 * a template row key.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @var string
+	 */
+	private const INVALID_VERIFICATION_CODE = 'taseo_invalid_verification__';
+
+	/**
 	 * Hook suffix of this settings page, for gating asset enqueue.
 	 *
 	 * @var string
@@ -1032,25 +1046,26 @@ class SettingsPage {
 
 		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
 
+		// Engine slug => whether the service publishes a file method. Labels
+		// come from verification_service_label(), which the sanitizer also
+		// uses, so a rejected value is named exactly as its row is.
 		$services = array(
-			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), true ),
-			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), true ),
-			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), true ),
-			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), false ),
-			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), false ),
+			'google'   => true,
+			'bing'     => true,
+			'yandex'   => true,
+			'yahoo'    => false,
+			'facebook' => false,
 		);
 
 		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
 		echo '<p>' . esc_html__( 'Paste the code or the file name — either works, and the file name is worked out for you. Each domain must be verified on its own; codes are never shared between domains.', 'the-another-seo' ) . '</p>';
 		echo '<table class="form-table">';
 
-		foreach ( $services as $engine => $service ) {
-			list( $label, $has_methods ) = $service;
-
+		foreach ( $services as $engine => $has_methods ) {
 			$code   = $this->settings->get_verification_code( $engine, $lookup );
 			$method = $has_methods ? $this->settings->get_verification_method( $engine, $lookup ) : Settings::METHOD_META;
 
-			printf( '<tr><th scope="row">%s</th><td>', esc_html( $label ) );
+			printf( '<tr><th scope="row">%s</th><td>', esc_html( self::verification_service_label( $engine ) ) );
 
 			if ( $has_methods ) {
 				$this->render_method_radios( $engine, $method );
@@ -1060,7 +1075,7 @@ class SettingsPage {
 				'<input type="text" name="taseo_settings[verify_%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
 				esc_attr( $engine ),
 				esc_attr( $code ),
-				esc_attr__( 'Verification code', 'the-another-seo' )
+				esc_attr( self::verification_placeholder( $engine, $method ) )
 			);
 
 			if ( $has_methods && Settings::METHOD_FILE === $method && '' !== $code ) {
@@ -1116,8 +1131,9 @@ class SettingsPage {
 	 * The method choice for one service.
 	 *
 	 * A fieldset with a screen-reader legend, matching how the Post Types tab
-	 * groups its checkboxes. No JavaScript: the input's help text is chosen
-	 * from the saved method, so picking a radio relabels nothing until save.
+	 * groups its checkboxes. No JavaScript: the input's placeholder is chosen
+	 * from the saved method by verification_placeholder(), so picking a radio
+	 * relabels nothing until the form is saved.
 	 *
 	 * @since 0.5.0
 	 *
@@ -1144,6 +1160,58 @@ class SettingsPage {
 		}
 
 		echo '</fieldset>';
+	}
+
+	/**
+	 * Human name of a verification service.
+	 *
+	 * Shared by the renderer and by the sanitizer's rejection notice, so a
+	 * discarded value is named on screen exactly as its own row is.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Translated label, the slug itself for an unknown engine.
+	 */
+	private static function verification_service_label( string $engine ): string {
+		return match ( $engine ) {
+			'google'   => __( 'Google Search Console', 'the-another-seo' ),
+			'bing'     => __( 'Bing Webmaster Tools', 'the-another-seo' ),
+			'yandex'   => __( 'Yandex Webmaster', 'the-another-seo' ),
+			'yahoo'    => __( 'Yahoo', 'the-another-seo' ),
+			'facebook' => __( 'Meta Business Manager', 'the-another-seo' ),
+			default    => $engine,
+		};
+	}
+
+	/**
+	 * Placeholder for a service's single verification input.
+	 *
+	 * The two methods take unrelated credentials — a Google meta token is
+	 * [A-Za-z0-9_-]+ and its file token [a-z0-9]+, issued separately by Search
+	 * Console — so one neutral hint under both radios tells the operator
+	 * nothing about which of the two the field is currently asking for. Saving
+	 * a meta code under the file method discards it (see sanitize_token()),
+	 * which is why the field has to say what this mode expects.
+	 *
+	 * @since 0.5.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $method Resolved method, Settings::METHOD_META for a
+	 *                       service that publishes no file method.
+	 * @return string Placeholder text.
+	 */
+	private static function verification_placeholder( string $engine, string $method ): string {
+		if ( Settings::METHOD_FILE !== $method ) {
+			return __( 'Verification code', 'the-another-seo' );
+		}
+
+		return match ( $engine ) {
+			'google' => __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ),
+			'bing'   => __( 'Token from BingSiteAuth.xml', 'the-another-seo' ),
+			'yandex' => __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ),
+			default  => __( 'Verification code', 'the-another-seo' ),
+		};
 	}
 
 	/**
@@ -1652,9 +1720,34 @@ class SettingsPage {
 				continue;
 			}
 
+			// The method is read from $raw rather than from storage because the
+			// radios and the code input sit in the same row of the same form:
+			// a posted code always arrives with the method it was typed under.
+			// The METHOD_META fallback for a code posted without its radio is
+			// therefore not reachable from this screen.
+			$posted = (string) $raw[ $code_key ];
+
 			$webmaster[ $code_key ] = Settings::METHOD_FILE === $method
-				? self::sanitize_token( $engine, (string) $raw[ $code_key ] )
-				: VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
+				? self::sanitize_token( $engine, $posted )
+				: VerificationOutput::sanitize_code( $posted );
+
+			// A submitted value that sanitizes away is reported rather than
+			// swallowed. The two methods take unrelated credentials, so
+			// switching one and pressing Save clears the stored code — behind
+			// a "Settings saved" notice and an empty field, unless this says
+			// otherwise.
+			if ( '' === $webmaster[ $code_key ] && '' !== trim( $posted ) ) {
+				add_settings_error(
+					'taseo_messages',
+					self::INVALID_VERIFICATION_CODE . $code_key,
+					sprintf(
+						/* translators: %s: verification service name, such as Google Search Console. */
+						esc_html__( '%s: that verification value was not saved. It is not the shape the selected method expects — the field now shows an example of what to paste.', 'the-another-seo' ),
+						esc_html( self::verification_service_label( $engine ) )
+					),
+					'error'
+				);
+			}
 		}
 
 		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {

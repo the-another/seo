@@ -589,6 +589,10 @@ class SettingsPageTest extends TestCase {
 	 * empty rather than partially normalized.
 	 */
 	public function test_sanitize_rejects_verification_filenames_containing_paths(): void {
+		// One per discarded value: a rejected verification value is reported,
+		// never swallowed under the "Settings saved" notice.
+		Functions\expect( 'add_settings_error' )->twice();
+
 		$clean = $this->page->sanitize_settings(
 			array(
 				'verify_google'        => '../wp-config.php',
@@ -1102,8 +1106,54 @@ class SettingsPageTest extends TestCase {
 	}
 
 	public function test_sanitize_rejects_a_file_token_of_the_wrong_shape(): void {
+		Functions\expect( 'add_settings_error' )->once();
+
 		$clean = $this->page->sanitize_settings(
 			array( 'verify_google' => 'has spaces!', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	/**
+	 * The credential-loss trap this reports on: a Google meta code is
+	 * [A-Za-z0-9_-]+ and its file token [a-z0-9]+, so flipping the method to
+	 * File and pressing Save discards the stored meta code. It still clears —
+	 * the value genuinely is not a file token — but the operator is told,
+	 * by service name, rather than shown a success notice over an empty field.
+	 */
+	public function test_a_meta_code_saved_under_the_file_method_is_reported_by_service_name(): void {
+		$message = '';
+		$type    = '';
+
+		Functions\when( 'add_settings_error' )->alias(
+			function ( string $slug, string $code, string $text, string $level ) use ( &$message, &$type ): void {
+				$message = $text;
+				$type    = $level;
+			}
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'AbC123_-xyz', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+		$this->assertStringContainsString( 'Google Search Console', $message );
+		$this->assertSame( 'error', $type );
+	}
+
+	/**
+	 * Emptying a field on purpose is not a rejection: it must not raise a
+	 * notice. add_settings_error() is deliberately left unstubbed here, so a
+	 * call would fatal rather than pass unnoticed.
+	 */
+	public function test_deliberately_clearing_a_verification_field_reports_nothing(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => '   ', 'verify_google_method' => 'file' ),
 			'webmaster',
 			''
 		);
@@ -1188,6 +1238,53 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'target="_blank"', $html );
+	}
+
+	/**
+	 * The two methods take unrelated credentials, so the shared input has to
+	 * say which one it is currently asking for. In file mode that is the
+	 * filename shape the service issues.
+	 */
+	public function test_webmaster_tab_placeholder_names_the_file_shape_in_file_mode(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array(
+				'google' => 'file',
+				'bing'   => 'file',
+				'yandex' => 'file',
+			)
+		);
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_google]" value="" class="regular-text" placeholder="File name, e.g. google1a2b3c.html"',
+			$html
+		);
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_bing]" value="" class="regular-text" placeholder="Token from BingSiteAuth.xml"',
+			$html
+		);
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_yandex]" value="" class="regular-text" placeholder="File name, e.g. yandex_9f8e7d.html"',
+			$html
+		);
+	}
+
+	public function test_webmaster_tab_placeholder_stays_generic_in_meta_mode(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_google]" value="" class="regular-text" placeholder="Verification code"',
+			$html
+		);
+		// Yahoo publishes no file method at all, so its hint never varies.
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_yahoo]" value="" class="regular-text" placeholder="Verification code"',
+			$html
+		);
 	}
 
 	/**
