@@ -130,7 +130,7 @@ class MetaPixelOutput {
 		 * to know which domain it is running for must resolve that itself.
 		 *
 		 * @since 1.0.0
-		 * @since 0.5.0 Semantics changed: the value now starts from the
+		 * @since 1.0.0 Semantics changed: the value now starts from the
 		 *              requesting domain's ID rather than the whole site's.
 		 *
 		 * @param array<int, string> $ids Pixel IDs.

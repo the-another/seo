@@ -32,7 +32,7 @@ class Settings {
 	 * predate this map, which is what lets the feature ship without a
 	 * migration.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -41,7 +41,7 @@ class Settings {
 	/**
 	 * Verification by meta tag.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -50,7 +50,7 @@ class Settings {
 	/**
 	 * Verification by served file.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -85,7 +85,7 @@ class Settings {
 	 * three services that offer both a tag and a file appear here; Yahoo and
 	 * Meta publish no file method, so they have nothing to choose.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var array<string, string>
 	 */
@@ -428,7 +428,7 @@ class Settings {
 	/**
 	 * Verification meta-tag code for one service on one domain.
 	 *
-	 * @since 0.5.0 Added the $host parameter.
+	 * @since 1.0.0 Added the $host parameter.
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $host   Normalized host, '' for the default domain.
@@ -451,7 +451,7 @@ class Settings {
 	 * Does not inherit the default domain, matching codes and files: a domain's
 	 * method is its own.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $host   Normalized host, '' for the default domain.
@@ -476,7 +476,7 @@ class Settings {
 	 * method here: records are keyed on normalized hosts, so a caller passing
 	 * `WWW.Example.com` must resolve the same record as `example.com`.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $host Host, normalized or not.
 	 * @return array<string, string> Record, empty when the domain has none.
@@ -501,7 +501,7 @@ class Settings {
 	 * field. Tracking IDs do inherit, because brands commonly share one
 	 * analytics property and re-typing it per domain is how they drift apart.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $key     Settings key.
 	 * @param string $host    Normalized host, '' for the default domain.
@@ -528,7 +528,7 @@ class Settings {
 	/**
 	 * GA4 measurement ID for one domain.
 	 *
-	 * @since 0.5.0 Added the $host parameter.
+	 * @since 1.0.0 Added the $host parameter.
 	 *
 	 * @param string $host Normalized host, '' for the default domain.
 	 * @return string ID or ''.
@@ -540,7 +540,7 @@ class Settings {
 	/**
 	 * Google Tag Manager container ID for one domain.
 	 *
-	 * @since 0.5.0 Added the $host parameter.
+	 * @since 1.0.0 Added the $host parameter.
 	 *
 	 * @param string $host Normalized host, '' for the default domain.
 	 * @return string ID or ''.
@@ -553,7 +553,7 @@ class Settings {
 	 * Meta Pixel ID for one domain. Returned as a string, never cast to int: a
 	 * leading zero is significant and casting would silently change the pixel.
 	 *
-	 * @since 0.5.0 Added the $host parameter.
+	 * @since 1.0.0 Added the $host parameter.
 	 *
 	 * @param string $host Normalized host, '' for the default domain.
 	 * @return string ID or ''.

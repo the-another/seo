@@ -106,9 +106,9 @@ class VerificationOutput {
 		 * only the services whose method is `meta` on the requested domain.
 		 *
 		 * @since 1.0.0
-		 * @since 0.5.0 Semantics changed: the value is now the requesting
+		 * @since 1.0.0 Semantics changed: the value is now the requesting
 		 *              domain's tags rather than the whole site's.
-		 * @since 0.5.0 Services on the file method are absent from the array.
+		 * @since 1.0.0 Services on the file method are absent from the array.
 		 *
 		 * @param array<string, string> $tags Meta name => verification code.
 		 */

@@ -59,7 +59,7 @@ class VerificationFileServer {
 	 * added here without an arm there serves nothing at all — deliberately,
 	 * rather than borrowing a neighbour's shape.
 	 *
-	 * @since 0.5.0 Validates the bare token rather than a stored filename.
+	 * @since 1.0.0 Validates the bare token rather than a stored filename.
 	 *
 	 * @var array<string, string>
 	 */
@@ -141,9 +141,9 @@ class VerificationFileServer {
 		 * keyed by the filename derived from their token.
 		 *
 		 * @since 1.0.0
-		 * @since 0.5.0 Semantics changed: the value is now the requesting
+		 * @since 1.0.0 Semantics changed: the value is now the requesting
 		 *              domain's files rather than the whole site's.
-		 * @since 0.5.0 Services on the meta method are absent from the array.
+		 * @since 1.0.0 Services on the meta method are absent from the array.
 		 *
 		 * @param array<string, array{content_type: string, body: string}> $files Files.
 		 */
@@ -245,7 +245,7 @@ class VerificationFileServer {
 	 * SettingsPage::verification_filename(), which builds the admin preview
 	 * link from the same tokens.
 	 *
-	 * @since 0.5.0 Builds from tokens and the per-service method.
+	 * @since 1.0.0 Builds from tokens and the per-service method.
 	 *
 	 * @param string $host Normalized host of the current request.
 	 * @return array<string, array{content_type: string, body: string}> Files.

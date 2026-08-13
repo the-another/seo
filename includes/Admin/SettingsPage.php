@@ -57,7 +57,7 @@ class SettingsPage {
 	 * MethodMigration::LEGACY_FILE_SHAPES is deliberately NOT part of that
 	 * agreement: it is frozen on the pre-0.5.0 storage format.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var array<string, array{pattern: string, prefix: string, suffix: string, lowercase: bool}>
 	 */
@@ -128,7 +128,7 @@ class SettingsPage {
 	 * collect_invalid_rows() treats everything under INVALID_TEMPLATE_CODE as
 	 * a template row key.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -1154,7 +1154,7 @@ class SettingsPage {
 	 * from the saved method by verification_placeholder(), so picking a radio
 	 * relabels nothing until the form is saved.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $method Saved method.
@@ -1187,7 +1187,7 @@ class SettingsPage {
 	 * Shared by the renderer and by the sanitizer's rejection notice, so a
 	 * discarded value is named on screen exactly as its own row is.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @return string Translated label, the slug itself for an unknown engine.
@@ -1213,7 +1213,7 @@ class SettingsPage {
 	 * a meta code under the file method discards it (see sanitize_token()),
 	 * which is why the field has to say what this mode expects.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $method Resolved method, Settings::METHOD_META for a
@@ -1244,7 +1244,7 @@ class SettingsPage {
 	 * Static so the renderer can show the link without reaching into the
 	 * server.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $token  Stored token.
@@ -1278,7 +1278,7 @@ class SettingsPage {
 	 * `<div class="clear">` is load-bearing: `.subsubsub` is `float: left`, so
 	 * without it the first `<h2>` wraps alongside the nav.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param array<int, string> $hosts        Registered hosts, default first.
 	 * @param string             $active       Host being edited.
@@ -1335,7 +1335,7 @@ class SettingsPage {
 	 * install's path from the request the same way on every domain, so a
 	 * `/blog` install serves the file at `scheme://host/blog/<filename>`.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $host     Normalized host.
 	 * @param string $filename Verification filename.
@@ -1363,7 +1363,7 @@ class SettingsPage {
 	 * placeholder shows what will actually fire. Without it "blank" reads as
 	 * "no tracking", which is the opposite of what happens.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $lookup        Active domain lookup key, '' for the default.
 	 * @param string $default_value The default domain's stored ID.
@@ -1579,7 +1579,7 @@ class SettingsPage {
 	 *   body a public request is answered with. Discarding the edit loses
 	 *   nothing that still exists.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $domain Posted domain field, '' when none was posted.
 	 * @return string|null Lookup key, or null to write nothing.
@@ -1862,7 +1862,7 @@ class SettingsPage {
 	 * Accepts what the operator is most likely to have on their clipboard: the
 	 * whole filename the service handed them, or the token alone.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $raw    Raw submitted value.

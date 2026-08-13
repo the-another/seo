@@ -3,7 +3,7 @@
  * Verification Migration Notice
  *
  * @package TheAnotherSEO
- * @since 0.5.0
+ * @since 1.0.0
  */
 
 namespace TheAnother\Plugin\SEO\Admin;
@@ -20,14 +20,14 @@ use TheAnother\Plugin\SEO\Verification\MethodMigration;
  * silently is how an operator discovers it months later from a de-verified
  * property.
  *
- * @since 0.5.0
+ * @since 1.0.0
  */
 class MigrationNotice {
 
 	/**
 	 * Register hooks.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param HookManager $hook_manager Hook manager.
 	 * @return void
@@ -40,7 +40,7 @@ class MigrationNotice {
 	/**
 	 * Print the notice when the migration recorded a loss.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @return void
 	 */
@@ -101,7 +101,7 @@ class MigrationNotice {
 	 * manage_options capability check. The link render() builds carries that
 	 * nonce via wp_nonce_url().
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param bool $do_exit Exit after redirect (false in tests).
 	 * @return void
@@ -132,7 +132,7 @@ class MigrationNotice {
 	 * __() — so the lookup lives here instead, matching the same three labels
 	 * SettingsPage's Webmaster Tools tab already shows for these engines.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @return string Translated label, or the raw slug when the engine is

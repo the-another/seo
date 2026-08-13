@@ -3,7 +3,7 @@
  * Verification Domain Registry
  *
  * @package TheAnotherSEO
- * @since 0.5.0
+ * @since 1.0.0
  */
 
 namespace TheAnother\Plugin\SEO\Domains;
@@ -20,7 +20,7 @@ namespace TheAnother\Plugin\SEO\Domains;
  * taseo_verification_domains filter. This plugin therefore knows nothing about
  * Brands, multi-site, or any particular domain-mapping scheme.
  *
- * @since 0.5.0
+ * @since 1.0.0
  */
 class DomainRegistry {
 
@@ -28,7 +28,7 @@ class DomainRegistry {
 	 * Memoized host list. The filter's subscribers are fixed for the life of
 	 * a request, so re-applying it per caller buys nothing.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var array<int, string>|null
 	 */
@@ -46,7 +46,7 @@ class DomainRegistry {
 	 * truncated — anything left holding a character outside `[a-z0-9.-]` is
 	 * junk, so internationalized domains must arrive as punycode.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $raw Raw hostname or URL.
 	 * @return string Normalized host, '' when nothing usable survives.
@@ -89,7 +89,7 @@ class DomainRegistry {
 	 * means "the flat keys" without taking a constructor dependency it would
 	 * otherwise need everywhere.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @return string Normalized host, '' when home_url() has none.
 	 */
@@ -104,7 +104,7 @@ class DomainRegistry {
 	 * so callers that ask repeatedly (every output class does) don't each pay
 	 * for re-applying it.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @return array<int, string> Normalized hosts.
 	 */
@@ -124,7 +124,7 @@ class DomainRegistry {
 		 * accepted. The site's own host is always present and always first;
 		 * removing or reordering it here has no effect.
 		 *
-		 * @since 0.5.0
+		 * @since 1.0.0
 		 *
 		 * @param array<int, string> $hosts Hosts, starting with the site's own.
 		 */
@@ -160,7 +160,7 @@ class DomainRegistry {
 	 * resolves to the default, which is exactly what every host got before
 	 * this feature existed. That is what keeps the change non-breaking.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @return string Normalized host.
 	 */

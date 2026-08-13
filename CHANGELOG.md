@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-13
+
 ### Added
 - Per-domain site verification and tracking. A multi-brand site whose brands live on separate domains can now hold its own Google Search Console, Bing Webmaster Tools, Yandex Webmaster, Yahoo and Meta verification codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.
 - `taseo_verification_domains` filter: push a host to give it its own codes. Values are normalized (lowercase, scheme/port/path and leading `www.` stripped) and de-duplicated, and the site's own host is always present and always first, so a filter cannot remove or reorder the default. The Another Multi-Brand Global Styles pushes every host from its published Brands' URL rules; with no subscribers the list is the site's own host and behaviour is unchanged.
@@ -82,7 +84,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/the-another/seo/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/the-another/seo/compare/v0.1.0...v0.2.0

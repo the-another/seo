@@ -3,7 +3,7 @@
  * Verification Method Migration
  *
  * @package TheAnotherSEO
- * @since 0.5.0
+ * @since 1.0.0
  */
 
 namespace TheAnother\Plugin\SEO\Verification;
@@ -22,14 +22,14 @@ use TheAnother\Plugin\SEO\Settings\Settings;
  * method issues a credential unrelated to its meta tag. Those losses are
  * reported rather than swallowed — see the `dropped` half of migrate()'s return.
  *
- * @since 0.5.0
+ * @since 1.0.0
  */
 class MethodMigration {
 
 	/**
 	 * Option flag: the conversion has already run.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -38,7 +38,7 @@ class MethodMigration {
 	/**
 	 * Option holding what the conversion had to drop, for the admin notice.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var string
 	 */
@@ -50,7 +50,7 @@ class MethodMigration {
 	 * Frozen, like LEGACY_FILE_SHAPES below: these are the keys pre-0.5.0
 	 * settings were written under, and nothing writes them any more.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var array<string, string>
 	 */
@@ -73,7 +73,7 @@ class MethodMigration {
 	 * every stored value and the conversion silently drops the settings of
 	 * exactly the sites that still need it.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @var array<string, array{pattern: string, prefix: string, suffix: string}>
 	 */
@@ -100,7 +100,7 @@ class MethodMigration {
 	 *
 	 * Pure: no options, no filters, no side effects. maybe_run() owns the I/O.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param array<string, mixed> $settings Raw taseo_settings array.
 	 * @return array{settings: array<string, mixed>, dropped: array<int, array{engine: string, domain: string}>}
@@ -131,7 +131,7 @@ class MethodMigration {
 	/**
 	 * Convert one flat record — either the top-level settings or one domain's.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param array<string, mixed>                              $record  Record.
 	 * @param string                                            $domain  Host, '' for the default domain.
@@ -193,7 +193,7 @@ class MethodMigration {
 	 * says what happened to the data, which is the thing that matters, and it
 	 * stays true across downgrades.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @return void
 	 */
@@ -226,7 +226,7 @@ class MethodMigration {
 	/**
 	 * Recover the bare token from a legacy file value.
 	 *
-	 * @since 0.5.0
+	 * @since 1.0.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $legacy Legacy stored value.
