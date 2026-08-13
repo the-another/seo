@@ -45,6 +45,18 @@ class SettingsPage {
 	 * Engine slug => pattern a file-mode token must match, and the prefix and
 	 * suffix stripped when an operator pastes a whole filename instead.
 	 *
+	 * Must be kept in agreement with VerificationFileServer::TOKEN_PATTERNS,
+	 * which re-validates the same tokens at output time, and with the filename
+	 * shapes in self::verification_filename() and
+	 * VerificationFileServer::build_files(). Adding a service means touching
+	 * all four plus the $services list in render_webmaster_tab() and the engine
+	 * loop in sanitize_settings(); both filename builders answer '' / serve
+	 * nothing for an engine they do not know, so an omission shows up as a
+	 * missing file rather than as another service's shape.
+	 *
+	 * MethodMigration::LEGACY_FILE_SHAPES is deliberately NOT part of that
+	 * agreement: it is frozen on the pre-0.5.0 storage format.
+	 *
 	 * @since 0.5.0
 	 *
 	 * @var array<string, array{pattern: string, prefix: string, suffix: string, lowercase: bool}>
@@ -1078,10 +1090,17 @@ class SettingsPage {
 				esc_attr( self::verification_placeholder( $engine, $method ) )
 			);
 
-			if ( $has_methods && Settings::METHOD_FILE === $method && '' !== $code ) {
+			// verification_filename() is the single guard here: it answers ''
+			// for an empty token and for one the server would refuse, so the
+			// link is offered only for a file this install actually serves.
+			$filename = Settings::METHOD_FILE === $method
+				? self::verification_filename( $engine, $code )
+				: '';
+
+			if ( '' !== $filename ) {
 				printf(
 					'<br /><a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
-					esc_url( $this->verification_file_url( $active, self::verification_filename( $engine, $code ) ) )
+					esc_url( $this->verification_file_url( $active, $filename ) )
 				);
 			}
 
@@ -1217,21 +1236,36 @@ class SettingsPage {
 	/**
 	 * The public filename a service's token is served at.
 	 *
-	 * Mirrors VerificationFileServer::build_files(). Static so the renderer can
-	 * show the link without reaching into the server.
+	 * Mirrors VerificationFileServer::build_files() — its filename shapes and
+	 * its token validation both. That validation is not redundant here: the
+	 * option is writable outside this page's sanitizer (WP-CLI, a migration,
+	 * a hand edit), and the server refuses to answer for a token that fails
+	 * its pattern, so an unchecked link would point at a guaranteed 404.
+	 * Static so the renderer can show the link without reaching into the
+	 * server.
 	 *
 	 * @since 0.5.0
 	 *
 	 * @param string $engine Engine slug.
 	 * @param string $token  Stored token.
-	 * @return string Filename.
+	 * @return string Filename, '' when the engine publishes no file method or
+	 *                the token is not one this plugin would serve.
 	 */
 	private static function verification_filename( string $engine, string $token ): string {
-		if ( 'bing' === $engine ) {
-			return VerificationFileServer::BING_FILENAME;
+		$shape = self::TOKEN_SHAPES[ $engine ] ?? null;
+
+		if ( null === $shape || 1 !== preg_match( $shape['pattern'], $token ) ) {
+			return '';
 		}
 
-		return 'yandex' === $engine ? 'yandex_' . $token . '.html' : 'google' . $token . '.html';
+		// Explicit default: a service added to TOKEN_SHAPES without an arm
+		// here shows no link, rather than a link built from Google's shape.
+		return match ( $engine ) {
+			'google' => 'google' . $token . '.html',
+			'bing'   => VerificationFileServer::BING_FILENAME,
+			'yandex' => 'yandex_' . $token . '.html',
+			default  => '',
+		};
 	}
 
 	/**

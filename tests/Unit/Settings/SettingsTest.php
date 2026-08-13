@@ -262,7 +262,14 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 'meta', $settings->get_verification_method( 'google', 'brandtwo.com' ) );
 	}
 
-	public function test_verification_method_is_empty_for_an_unknown_engine(): void {
+	/**
+	 * `meta` is the answer for every engine with no stored method, including
+	 * the two that publish no file method at all. VerificationOutput iterates
+	 * all five engines and skips the ones this returns METHOD_FILE for, so a
+	 * Yahoo or Meta tag prints only because this says `meta` here — returning
+	 * '' would stop both tags dead.
+	 */
+	public function test_verification_method_is_meta_for_a_service_with_no_file_method(): void {
 		Functions\when( 'get_option' )->justReturn( array() );
 
 		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'yahoo' ) );

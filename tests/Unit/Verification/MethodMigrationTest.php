@@ -227,6 +227,42 @@ class MethodMigrationTest extends TestCase {
 		$this->assertArrayNotHasKey( Settings::OPTION_NAME, $written );
 	}
 
+	/**
+	 * A fresh install has no taseo_settings row at all: get_option() returns
+	 * the array() default, which is_array() accepts, so the conversion would
+	 * write an empty array back and create the row. Nothing else does — the
+	 * plugin only writes that option when the settings page is saved — so the
+	 * migration must leave the site exactly as it found it and write only its
+	 * own flag.
+	 */
+	public function test_maybe_run_does_not_create_the_option_on_a_fresh_install(): void {
+		Functions\expect( 'get_option' )
+			->once()
+			->with( MethodMigration::VERSION_OPTION, '' )
+			->andReturn( '' );
+
+		Functions\expect( 'get_option' )
+			->once()
+			->with( Settings::OPTION_NAME, array() )
+			->andReturn( array() );
+
+		$written = array();
+
+		Functions\expect( 'update_option' )
+			->once()
+			->andReturnUsing(
+				function ( string $option, $value ) use ( &$written ): bool {
+					$written[ $option ] = $value;
+					return true;
+				}
+			);
+
+		( new MethodMigration() )->maybe_run();
+
+		$this->assertSame( '1', $written[ MethodMigration::VERSION_OPTION ] ?? null );
+		$this->assertArrayNotHasKey( Settings::OPTION_NAME, $written );
+	}
+
 	public function test_maybe_run_writes_the_dropped_notice_when_something_was_dropped(): void {
 		Functions\expect( 'get_option' )
 			->once()

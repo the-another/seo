@@ -268,10 +268,12 @@ test.describe( 'per-domain verification', () => {
 		);
 
 		// 301, not 404 — see the header comment's note on brand-domain hosts
-		// and redirect_canonical. The body check is the falsifiable half: a
-		// regression that left the file serving would return 200 with this
-		// exact content, which is the only way this assertion could fail to
-		// catch it.
+		// and redirect_canonical. The STATUS check is the one that bites: a
+		// regression that left the file serving answers 200 here, and this
+		// assertion fails on it. The body check below is a second look at the
+		// payload only — a failed Playwright assertion throws, so it never
+		// runs unless the status already matched. Do not delete the status
+		// check on the strength of the body check.
 		expect( onBrand.status ).toBe( 301 );
 		expect( onBrand.body ).not.toBe(
 			'google-site-verification: googlebrandtwo.html'

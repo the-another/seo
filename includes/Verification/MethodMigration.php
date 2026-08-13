@@ -47,6 +47,11 @@ class MethodMigration {
 	/**
 	 * Engine slug => legacy file key.
 	 *
+	 * Frozen, like LEGACY_FILE_SHAPES below: these are the keys pre-0.5.0
+	 * settings were written under, and nothing writes them any more.
+	 *
+	 * @since 0.5.0
+	 *
 	 * @var array<string, string>
 	 */
 	private const LEGACY_FILE_KEYS = array(
@@ -58,6 +63,17 @@ class MethodMigration {
 	/**
 	 * Engine slug => pattern the legacy file value had to match, and the
 	 * prefix/suffix stripped to recover the bare token.
+	 *
+	 * FROZEN. These patterns describe values already written to the database
+	 * by pre-0.5.0 installs — whole filenames, not the bare tokens this plugin
+	 * now stores — and this constant is the only surviving record of that
+	 * shape: the one it was derived from is gone. It must NOT be "aligned"
+	 * with SettingsPage::TOKEN_SHAPES or VerificationFileServer::TOKEN_PATTERNS,
+	 * however similar they look; doing so makes token_from_legacy() reject
+	 * every stored value and the conversion silently drops the settings of
+	 * exactly the sites that still need it.
+	 *
+	 * @since 0.5.0
 	 *
 	 * @var array<string, array{pattern: string, prefix: string, suffix: string}>
 	 */
@@ -188,7 +204,13 @@ class MethodMigration {
 
 		$stored = get_option( Settings::OPTION_NAME, array() );
 
-		if ( is_array( $stored ) ) {
+		// array() covers both a stored empty array and the default returned on
+		// a fresh install where the option has never been written. Converting
+		// it produces an empty array back, so the only effect of writing would
+		// be to create an option row the site does not have yet — and to make
+		// "taseo_settings does not exist until the settings page is saved"
+		// false for every reader downstream of it.
+		if ( is_array( $stored ) && array() !== $stored ) {
 			$result = self::migrate( $stored );
 
 			update_option( Settings::OPTION_NAME, $result['settings'] );

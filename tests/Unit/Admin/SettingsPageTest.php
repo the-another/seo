@@ -1095,9 +1095,49 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( '1a2b3c', $clean['verify_google'] );
 	}
 
+	/**
+	 * The lowercasing half of TOKEN_SHAPES' google entry, which an
+	 * already-lowercase input cannot exercise: with 'lowercase' => false this
+	 * paste keeps its capitals, so the 'google' prefix no longer matches, the
+	 * remainder fails /^[a-z0-9]+$/, and the field is blanked instead of
+	 * saved. A plausible paste — the filename as a title-cased document name.
+	 */
+	public function test_sanitize_lowercases_a_mixed_case_google_filename(): void {
+		// Stubbed, not left to fatal as elsewhere in this file: under the
+		// mutation this test exists to catch, the rejection notice fires, and
+		// the assertion below is the evidence worth reading — the credential
+		// came back blank.
+		Functions\when( 'add_settings_error' )->justReturn( null );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'Google1A2B3C.html', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
 	public function test_sanitize_normalizes_a_pasted_yandex_filename_to_its_token(): void {
 		$clean = $this->page->sanitize_settings(
 			array( 'verify_yandex' => 'yandex_abc123.html', 'verify_yandex_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'abc123', $clean['verify_yandex'] );
+	}
+
+	/**
+	 * The same one-directional gap on Yandex's entry — see the Google case
+	 * above.
+	 */
+	public function test_sanitize_lowercases_a_mixed_case_yandex_filename(): void {
+		// See the Google case above for why this one stub is here.
+		Functions\when( 'add_settings_error' )->justReturn( null );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_yandex' => 'Yandex_ABC123.html', 'verify_yandex_method' => 'file' ),
 			'webmaster',
 			''
 		);
@@ -1232,12 +1272,33 @@ class SettingsPageTest extends TestCase {
 		);
 	}
 
+	/**
+	 * Method `file` with an empty code, so the empty-token guard is the only
+	 * thing under test. With the service left on `meta` the assertion passes
+	 * whether or not that guard exists, and deleting it renders a link to
+	 * google.html — a URL the server refuses to answer for.
+	 */
 	public function test_webmaster_tab_omits_the_file_link_when_no_file_is_configured(): void {
-		$this->stub_webmaster_settings();
+		$this->stub_webmaster_settings( array(), array( 'google' => 'file' ) );
 
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'target="_blank"', $html );
+	}
+
+	/**
+	 * VerificationFileServer re-validates the stored token before serving, so
+	 * a token written outside this page's sanitizer — WP-CLI, a migration, a
+	 * hand edit — can be one the server will not answer for. Linking it hands
+	 * the operator a URL that 404s and reads as a broken feature.
+	 */
+	public function test_webmaster_tab_omits_the_file_link_for_a_token_the_server_would_refuse(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => 'NOT-A-FILE-TOKEN' ),
+			array( 'google' => 'file' )
+		);
+
+		$this->assertStringNotContainsString( 'target="_blank"', $this->render_webmaster_html() );
 	}
 
 	/**

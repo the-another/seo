@@ -52,6 +52,13 @@ class VerificationFileServer {
 	 * body and the filename an incoming request path is matched against.
 	 * Google and Yandex issue lowercase tokens; Bing's is case-sensitive.
 	 *
+	 * Must be kept in agreement with SettingsPage::TOKEN_SHAPES, which
+	 * validates the same tokens on save, and with the filename shapes in
+	 * self::build_files() and SettingsPage::verification_filename(). This
+	 * array doubles as the list of engines build_files() walks, so an engine
+	 * added here without an arm there serves nothing at all — deliberately,
+	 * rather than borrowing a neighbour's shape.
+	 *
 	 * @since 0.5.0 Validates the bare token rather than a stored filename.
 	 *
 	 * @var array<string, string>
@@ -234,6 +241,10 @@ class VerificationFileServer {
 	 * with the token in the body. That is why the settings screen asks for one
 	 * value per service rather than a code and a filename.
 	 *
+	 * The filename shapes must be kept in agreement with
+	 * SettingsPage::verification_filename(), which builds the admin preview
+	 * link from the same tokens.
+	 *
 	 * @since 0.5.0 Builds from tokens and the per-service method.
 	 *
 	 * @param string $host Normalized host of the current request.
@@ -253,29 +264,35 @@ class VerificationFileServer {
 				continue;
 			}
 
-			if ( 'google' === $engine ) {
-				$filename = 'google' . $token . '.html';
-
-				$files[ $filename ] = array(
+			// Explicit default: an engine listed in TOKEN_PATTERNS without an
+			// arm here contributes no file, rather than silently being served
+			// under Yandex's filename and body.
+			$file = match ( $engine ) {
+				'google' => array(
+					'filename'     => 'google' . $token . '.html',
 					'content_type' => 'text/html',
-					'body'         => 'google-site-verification: ' . $filename,
-				);
-
-				continue;
-			}
-
-			if ( 'bing' === $engine ) {
-				$files[ self::BING_FILENAME ] = array(
+					'body'         => 'google-site-verification: google' . $token . '.html',
+				),
+				'bing'   => array(
+					'filename'     => self::BING_FILENAME,
 					'content_type' => 'application/xml',
 					'body'         => "<?xml version=\"1.0\"?>\n<users>\n  <user>" . $token . "</user>\n</users>",
-				);
+				),
+				'yandex' => array(
+					'filename'     => 'yandex_' . $token . '.html',
+					'content_type' => 'text/html',
+					'body'         => "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">\n</head>\n<body>Verification: " . $token . "</body>\n</html>",
+				),
+				default  => null,
+			};
 
+			if ( null === $file ) {
 				continue;
 			}
 
-			$files[ 'yandex_' . $token . '.html' ] = array(
-				'content_type' => 'text/html',
-				'body'         => "<html>\n<head>\n<meta http-equiv=\"Content-Type\" content=\"text/html; charset=UTF-8\">\n</head>\n<body>Verification: " . $token . "</body>\n</html>",
+			$files[ $file['filename'] ] = array(
+				'content_type' => $file['content_type'],
+				'body'         => $file['body'],
 			);
 		}
 
