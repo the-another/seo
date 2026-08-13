@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-13
+
+### Added
+- Per-domain site verification and tracking. A multi-brand site whose brands live on separate domains can now hold its own Google Search Console, Bing Webmaster Tools, Yandex Webmaster, Yahoo and Meta verification codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.
+- `taseo_verification_domains` filter: push a host to give it its own codes. Values are normalized (lowercase, scheme/port/path and leading `www.` stripped) and de-duplicated, and the site's own host is always present and always first, so a filter cannot remove or reorder the default. The Another Multi-Brand Global Styles pushes every host from its published Brands' URL rules; with no subscribers the list is the site's own host and behaviour is unchanged.
+- Verification codes and verification files are per-domain with no inheritance — a webmaster property is verified on its own, and inheriting would guarantee a silently failed verification instead of an obviously empty field. Tracking IDs do inherit: a blank GA4 / Tag Manager / Meta Pixel field on a brand domain falls back to the default domain's, so brands sharing one analytics property need it typed once.
+- Requests arriving on an unrecognised host — a staging alias, a bare IP, a load balancer — resolve to the default domain, which is exactly what every host received before. Existing single-domain sites need no migration and see no output change: the default domain keeps using the settings keys it already had.
+- Verification method selection. Google Search Console, Bing Webmaster Tools and Yandex Webmaster each verify by **either** a meta tag or a file, chosen per service and per domain. Each service now has one input instead of two: paste the code, the file name, or the whole meta tag, and the plugin stores the bare token. The file name is derived from it — `google{token}.html`, `yandex_{token}.html`, and Bing's fixed `BingSiteAuth.xml` — so there is nothing to copy twice and nothing to keep in sync. Yahoo and Meta are unchanged; neither publishes a file method.
+
+### Changed
+- Verification settings collapsed from two keys per service to one token plus a method. A one-time migration converts existing settings, including every per-domain record, and runs before any output. Bing and Yandex are lossless — both keys held the same token. Google is the one service whose two methods use unrelated credentials, so a site that had **both** a Google meta code and a Google verification file keeps the file and loses the meta code; its `<meta>` tag stops printing after the upgrade. A dismissible admin notice names every service and domain this happened to, so nothing is discarded silently. Re-add a code from Search Console to switch back to the meta tag.
+- Switching a service's method and saving clears a stored value that does not fit the new method's shape — a Google meta code is not a Google file token, and vice versa. The save now says so: the field names the service whose value was discarded instead of reporting success over an empty box, and the input's placeholder shows which shape the selected method expects (`google1a2b3c.html` and `yandex_9f8e7d.html` in file mode, the token from `BingSiteAuth.xml` for Bing, the plain code in meta mode).
+
 ## [0.4.0] - 2026-08-11
 
 ### Added
@@ -71,7 +84,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/the-another/seo/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/the-another/seo/compare/v0.1.0...v0.2.0

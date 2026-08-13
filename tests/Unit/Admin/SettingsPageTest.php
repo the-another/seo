@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\TemplateVariables;
@@ -35,6 +36,7 @@ class SettingsPageTest extends TestCase {
 	private $custom_pages;
 	private $sitemap_families;
 	private $sitemap_assignment;
+	private $domains;
 	private SettingsPage $page;
 
 	protected function setUp(): void {
@@ -54,7 +56,20 @@ class SettingsPageTest extends TestCase {
 		Functions\when( 'esc_url_raw' )->returnArg();
 		Functions\when( 'absint' )->alias( fn( $v ) => abs( (int) $v ) );
 		Functions\when( 'add_query_arg' )->alias(
-			static fn( string $key, string $value, string $url ): string => $url . '&' . $key . '=' . $value
+			static function ( array|string $key, mixed $value = '', string $url = '' ): string {
+				if ( is_array( $key ) ) {
+					$args = $key;
+					$url  = (string) $value;
+				} else {
+					$args = array( $key => (string) $value );
+				}
+
+				foreach ( $args as $arg_key => $arg_value ) {
+					$url .= '&' . $arg_key . '=' . $arg_value;
+				}
+
+				return $url;
+			}
 		);
 		Functions\when( '__' )->returnArg();
 		Functions\when( 'esc_html__' )->returnArg();
@@ -87,6 +102,25 @@ class SettingsPageTest extends TestCase {
 		// only the sitemap-toggle tests below care about its value.
 		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
 
+		// DomainRegistry::default_host() is static and calls these directly.
+		// The sanitizer tests never render, so stub_render_functions()'s copy
+		// of home_url() doesn't run early enough for them.
+		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
+		Functions\when( 'wp_parse_url' )->alias(
+			static fn( string $url, int $component = -1 ) => parse_url( $url, $component )
+		);
+
+		$this->domains = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_hosts' )
+			->andReturn( array( 'example.com', 'brandtwo.com', 'brandthree.co' ) )
+			->byDefault();
+		// The sanitizer only reads this key when a non-default domain is
+		// posted; tests asserting on sibling records override it.
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array() )
+			->byDefault();
+
 		$this->page = new SettingsPage(
 			$this->settings,
 			$this->backfill,
@@ -97,7 +131,8 @@ class SettingsPageTest extends TestCase {
 			$this->custom_pages,
 			$this->sitemap_families,
 			$this->sitemap_assignment,
-			new PostSubtypes()
+			new PostSubtypes(),
+			$this->domains
 		);
 	}
 
@@ -547,41 +582,29 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( 'metatoken', $clean['verify_facebook'] );
 	}
 
-	public function test_accepts_valid_verification_filenames(): void {
+	/**
+	 * Path-traversal attempts pasted into a file-mode field must not survive
+	 * as a token: neither is alnum-only after prefix/suffix stripping, so
+	 * both fall through to sanitize_token()'s pattern check and come back
+	 * empty rather than partially normalized.
+	 */
+	public function test_sanitize_rejects_verification_filenames_containing_paths(): void {
+		// One per discarded value: a rejected verification value is reported,
+		// never swallowed under the "Settings saved" notice.
+		Functions\expect( 'add_settings_error' )->twice();
+
 		$clean = $this->page->sanitize_settings(
 			array(
-				'verify_google_file' => 'google1a2b3c.html',
-				'verify_bing_file'   => 'BINGTOKEN123',
-				'verify_yandex_file' => 'yandex_9f8e7d.html',
+				'verify_google'        => '../wp-config.php',
+				'verify_google_method' => 'file',
+				'verify_yandex'        => 'yandex_x.html/../../etc/passwd',
+				'verify_yandex_method' => 'file',
 			),
 			'webmaster'
 		);
 
-		$this->assertSame( 'google1a2b3c.html', $clean['verify_google_file'] );
-		$this->assertSame( 'BINGTOKEN123', $clean['verify_bing_file'] );
-		$this->assertSame( 'yandex_9f8e7d.html', $clean['verify_yandex_file'] );
-	}
-
-	public function test_rejects_verification_filenames_containing_paths(): void {
-		$clean = $this->page->sanitize_settings(
-			array(
-				'verify_google_file' => '../wp-config.php',
-				'verify_yandex_file' => 'yandex_x.html/../../etc/passwd',
-			),
-			'webmaster'
-		);
-
-		$this->assertSame( '', $clean['verify_google_file'] );
-		$this->assertSame( '', $clean['verify_yandex_file'] );
-	}
-
-	public function test_rejects_a_verification_filename_with_the_wrong_prefix(): void {
-		$clean = $this->page->sanitize_settings(
-			array( 'verify_google_file' => 'notgoogle123.html' ),
-			'webmaster'
-		);
-
-		$this->assertSame( '', $clean['verify_google_file'] );
+		$this->assertSame( '', $clean['verify_google'] );
+		$this->assertSame( '', $clean['verify_yandex'] );
 	}
 
 	public function test_normalizes_and_validates_tracking_ids(): void {
@@ -620,6 +643,120 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( '', $clean['verify_google'] );
 	}
 
+	public function test_sanitize_writes_the_flat_keys_for_the_default_domain(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'defaultcode' ),
+			'webmaster',
+			'example.com'
+		);
+
+		$this->assertSame( 'defaultcode', $clean['verify_google'] );
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
+	}
+
+	public function test_sanitize_writes_a_brand_domains_record(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google'    => 'brandcode',
+				'analytics_ga4_id' => 'g-brand123',
+			),
+			'webmaster',
+			'brandtwo.com'
+		);
+
+		$this->assertArrayNotHasKey( 'verify_google', $clean );
+		$this->assertSame( 'brandcode', $clean['verification_domains']['brandtwo.com']['verify_google'] );
+		$this->assertSame( 'G-BRAND123', $clean['verification_domains']['brandtwo.com']['analytics_ga4_id'] );
+	}
+
+	public function test_sanitize_leaves_sibling_domains_intact(): void {
+		// Overrides the byDefault() stub added in setUp().
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array( 'brandthree.co' => array( 'verify_google' => 'threecode' ) ) );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'twocode' ),
+			'webmaster',
+			'brandtwo.com'
+		);
+
+		$this->assertSame( 'threecode', $clean['verification_domains']['brandthree.co']['verify_google'] );
+		$this->assertSame( 'twocode', $clean['verification_domains']['brandtwo.com']['verify_google'] );
+	}
+
+	/**
+	 * An unregistered host writes nothing at all — not a record (a record key
+	 * decides which body a public request is answered with, so a crafted POST
+	 * must not be able to seed one) and not the flat keys either. Falling back
+	 * to the flat keys would make the posted values land on the DEFAULT domain,
+	 * which is data loss, not rejection.
+	 */
+	public function test_sanitize_discards_a_webmaster_save_for_an_unregistered_domain(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'injected' ),
+			'webmaster',
+			'attacker.example'
+		);
+
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
+		$this->assertArrayNotHasKey( 'verify_google', $clean );
+	}
+
+	/**
+	 * The sequence that makes this a data-loss bug rather than a hardening
+	 * detail: get_hosts() is dynamic, so an operator can open Webmaster Tools
+	 * on a brand domain, have that Brand's URL rule edited elsewhere, and press
+	 * Save — with no attacker involved. Every posted webmaster value must be
+	 * discarded, leaving both the default domain's flat keys and the stored
+	 * per-domain records exactly as they were (Settings::update() merges, so an
+	 * absent key is an untouched key).
+	 */
+	public function test_sanitize_for_an_unregistered_domain_touches_neither_flat_keys_nor_records(): void {
+		// Overrides the byDefault() stub added in setUp().
+		$this->settings->shouldReceive( 'get' )
+			->with( 'verification_domains', array() )
+			->andReturn( array( 'brandthree.co' => array( 'verify_google' => 'threecode' ) ) );
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'verify_google'        => 'brandcode',
+				'verify_bing'          => 'brandbing',
+				'verify_yandex'        => 'brandyandex',
+				'verify_yahoo'         => 'brandyahoo',
+				'verify_facebook'      => 'brandmeta',
+				'verify_google_method' => 'file',
+				'verify_bing_method'   => 'file',
+				'verify_yandex_method' => 'file',
+				'analytics_ga4_id'     => 'G-BRAND1234',
+				'analytics_gtm_id'     => 'GTM-BRAND12',
+				'meta_pixel_id'        => '123456789012345',
+			),
+			'webmaster',
+			'brandgone.example'
+		);
+
+		$posted = array(
+			'verify_google',
+			'verify_bing',
+			'verify_yandex',
+			'verify_yahoo',
+			'verify_facebook',
+			'verify_google_method',
+			'verify_bing_method',
+			'verify_yandex_method',
+			'analytics_ga4_id',
+			'analytics_gtm_id',
+			'meta_pixel_id',
+		);
+
+		foreach ( $posted as $key ) {
+			$this->assertArrayNotHasKey( $key, $clean );
+		}
+
+		$this->assertArrayNotHasKey( 'verification_domains', $clean );
+	}
+
 	public function test_save_redirect_preserves_the_active_tab(): void {
 		$_POST['taseo_settings_nonce'] = 'nonce';
 		$_POST['tab']                  = 'webmaster';
@@ -649,6 +786,78 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'tab=webmaster', $redirected );
 
 		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * The cosmetic tail of the same bug: the sanitizer discards a save aimed at
+	 * an unregistered domain, so the redirect must not advertise that domain
+	 * either — re-opening the form on it would suggest the values were stored.
+	 */
+	public function test_save_redirect_drops_a_domain_that_is_not_registered(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'webmaster';
+		$_POST['domain']               = 'brandgone.example';
+		$_POST['taseo_settings']       = array( 'verify_google' => 'googletoken' );
+
+		$redirected = '';
+
+		$this->stub_save_redirect_functions( $redirected );
+
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->page->handle_save( false );
+
+		$this->assertStringNotContainsString( 'domain=', $redirected );
+		$this->assertStringContainsString( 'tab=webmaster', $redirected );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['domain'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * A registered domain still round-trips, normalized into the same shape the
+	 * domain nav emits.
+	 */
+	public function test_save_redirect_keeps_and_normalizes_a_registered_domain(): void {
+		$_POST['taseo_settings_nonce'] = 'nonce';
+		$_POST['tab']                  = 'webmaster';
+		$_POST['domain']               = 'WWW.BrandTwo.com';
+		$_POST['taseo_settings']       = array( 'verify_google' => 'googletoken' );
+
+		$redirected = '';
+
+		$this->stub_save_redirect_functions( $redirected );
+
+		$this->settings->shouldReceive( 'update' )->once();
+
+		$this->page->handle_save( false );
+
+		$this->assertStringContainsString( 'domain=brandtwo.com', $redirected );
+
+		unset( $_POST['taseo_settings_nonce'], $_POST['tab'], $_POST['domain'], $_POST['taseo_settings'] );
+	}
+
+	/**
+	 * Stub the WP functions handle_save() calls on its way to the redirect,
+	 * capturing the location it lands on.
+	 *
+	 * @param string $redirected Receives the redirect target (by reference).
+	 * @return void
+	 */
+	private function stub_save_redirect_functions( string &$redirected ): void {
+		Functions\when( 'wp_verify_nonce' )->justReturn( true );
+		Functions\when( 'current_user_can' )->justReturn( true );
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\when( 'sanitize_key' )->returnArg();
+		Functions\when( 'sanitize_text_field' )->returnArg();
+		Functions\when( 'admin_url' )->alias( static fn( string $path ) => 'https://example.com/wp-admin/' . $path );
+		Functions\when( 'add_query_arg' )->alias(
+			static fn( string $key, string $value, string $url ) => $url . '&' . $key . '=' . $value
+		);
+		Functions\when( 'wp_safe_redirect' )->alias(
+			function ( string $location ) use ( &$redirected ): void {
+				$redirected = $location;
+			}
+		);
 	}
 
 	/**
@@ -720,21 +929,33 @@ class SettingsPageTest extends TestCase {
 
 	/**
 	 * Wire up Settings getter expectations for the webmaster tab, defaulting
-	 * every verification code/file and tracking ID to '' unless overridden.
+	 * every verification code to '', every method to meta, and every
+	 * tracking ID to '' unless overridden.
 	 *
-	 * @param array<string, string> $codes Verification codes keyed by engine.
-	 * @param array<string, string> $files Verification files keyed by engine.
+	 * @param array<string, string> $codes   Verification codes keyed by engine.
+	 * @param array<string, string> $methods Verification methods keyed by engine.
 	 * @param string                $ga4   GA4 measurement ID.
 	 * @param string                $gtm   GTM container ID.
 	 * @param string                $pixel Meta Pixel ID.
+	 * @param string                $host  Active domain lookup key passed to the
+	 *                                     non-inheriting getters, '' for the default.
+	 * @param array<string, string> $active Effective tracking IDs for the active
+	 *                                      domain — i.e. what the $host-taking
+	 *                                      getter form returns — keyed 'ga4' /
+	 *                                      'gtm' / 'pixel'. Defaults to the
+	 *                                      default domain's values, which is
+	 *                                      what inheritance really returns; pass
+	 *                                      them to make the two forms differ.
 	 * @return void
 	 */
 	private function stub_webmaster_settings(
 		array $codes = array(),
-		array $files = array(),
+		array $methods = array(),
 		string $ga4 = '',
 		string $gtm = '',
-		string $pixel = ''
+		string $pixel = '',
+		string $host = '',
+		array $active = array()
 	): void {
 		$codes = array_merge(
 			array(
@@ -747,26 +968,40 @@ class SettingsPageTest extends TestCase {
 			$codes
 		);
 
-		$files = array_merge(
+		$methods = array_merge(
 			array(
-				'google' => '',
-				'bing'   => '',
-				'yandex' => '',
+				'google' => 'meta',
+				'bing'   => 'meta',
+				'yandex' => 'meta',
 			),
-			$files
+			$methods
 		);
 
 		foreach ( $codes as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine )->andReturn( $value );
+			$this->settings->shouldReceive( 'get_verification_code' )->with( $engine, $host )->andReturn( $value );
 		}
 
-		foreach ( $files as $engine => $value ) {
-			$this->settings->shouldReceive( 'get_verification_file' )->with( $engine )->andReturn( $value );
+		foreach ( $methods as $engine => $method ) {
+			$this->settings->shouldReceive( 'get_verification_method' )
+				->with( $engine, $host )
+				->andReturn( $method );
 		}
 
-		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( $ga4 );
-		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( $gtm );
-		$this->settings->shouldReceive( 'get_meta_pixel_id' )->andReturn( $pixel );
+		// The renderer deliberately calls BOTH getter forms in one render and
+		// they mean different things: the argument-less form supplies the
+		// default domain's value for the inherit placeholder, while the $lookup
+		// form drives the double-tracking warning. Bound separately so the two
+		// call sites are distinguishable — a bare stub matches either, which
+		// would let the renderer swap them without failing a single test.
+		$this->settings->shouldReceive( 'get_ga4_id' )->withNoArgs()->andReturn( $ga4 );
+		$this->settings->shouldReceive( 'get_gtm_id' )->withNoArgs()->andReturn( $gtm );
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->withNoArgs()->andReturn( $pixel );
+
+		$this->settings->shouldReceive( 'get_ga4_id' )->with( $host )->andReturn( $active['ga4'] ?? $ga4 );
+		$this->settings->shouldReceive( 'get_gtm_id' )->with( $host )->andReturn( $active['gtm'] ?? $gtm );
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->with( $host )->andReturn( $active['pixel'] ?? $pixel );
+
+		$this->settings->shouldReceive( 'get_domain_record' )->andReturn( array() )->byDefault();
 	}
 
 	/**
@@ -774,20 +1009,211 @@ class SettingsPageTest extends TestCase {
 	 * the output. render_webmaster_tab() is private, so this drives it the
 	 * way the real admin screen does: through render_page()'s tab dispatch.
 	 *
+	 * @param string $domain Domain to request via ?domain=, '' to omit it.
+	 * @param string $home   Site home URL, for exercising a subdirectory install.
 	 * @return string Rendered HTML.
 	 */
-	private function render_webmaster_html(): string {
+	private function render_webmaster_html( string $domain = '', string $home = 'https://example.com' ): string {
 		$this->stub_render_functions();
 
+		// Redefines stub_render_functions()' own home_url(), which hardcodes
+		// the root-install form.
+		Functions\when( 'home_url' )->alias( static fn( string $path = '' ): string => $home . $path );
+
+		// A real equality check, not the blank stub other tabs use: the
+		// method radios' checked state is what several tests here assert on.
+		Functions\when( 'checked' )->alias(
+			static fn( $checked, $current = true, bool $echo = true ): string =>
+				(string) $checked === (string) $current ? ' checked="checked"' : ''
+		);
+
 		$_GET['tab'] = 'webmaster';
+
+		if ( '' !== $domain ) {
+			$_GET['domain'] = $domain;
+		}
 
 		ob_start();
 		$this->page->render_page();
 		$html = (string) ob_get_clean();
 
-		unset( $_GET['tab'] );
+		unset( $_GET['tab'], $_GET['domain'] );
 
 		return $html;
+	}
+
+	public function test_webmaster_tab_renders_a_method_radio_pair_per_service(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'name="taseo_settings[verify_google_method]"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_bing_method]"', $html );
+		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex_method]"', $html );
+		$this->assertStringNotContainsString( 'name="taseo_settings[verify_yahoo_method]"', $html );
+	}
+
+	public function test_webmaster_tab_checks_the_saved_method(): void {
+		$this->stub_webmaster_settings( array(), array( 'google' => 'file' ) );
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertMatchesRegularExpression(
+			'/name="taseo_settings\[verify_google_method\]" value="file"[^>]*checked/',
+			$html
+		);
+	}
+
+	public function test_sanitize_stores_a_valid_method(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => '1a2b3c', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'file', $clean['verify_google_method'] );
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
+	public function test_sanitize_falls_back_to_meta_for_an_unknown_method(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'abc', 'verify_google_method' => 'carrier-pigeon' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'meta', $clean['verify_google_method'] );
+	}
+
+	public function test_sanitize_normalizes_a_pasted_google_filename_to_its_token(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'google1a2b3c.html', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
+	/**
+	 * The lowercasing half of TOKEN_SHAPES' google entry, which an
+	 * already-lowercase input cannot exercise: with 'lowercase' => false this
+	 * paste keeps its capitals, so the 'google' prefix no longer matches, the
+	 * remainder fails /^[a-z0-9]+$/, and the field is blanked instead of
+	 * saved. A plausible paste — the filename as a title-cased document name.
+	 */
+	public function test_sanitize_lowercases_a_mixed_case_google_filename(): void {
+		// Stubbed, not left to fatal as elsewhere in this file: under the
+		// mutation this test exists to catch, the rejection notice fires, and
+		// the assertion below is the evidence worth reading — the credential
+		// came back blank.
+		Functions\when( 'add_settings_error' )->justReturn( null );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'Google1A2B3C.html', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '1a2b3c', $clean['verify_google'] );
+	}
+
+	public function test_sanitize_normalizes_a_pasted_yandex_filename_to_its_token(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_yandex' => 'yandex_abc123.html', 'verify_yandex_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'abc123', $clean['verify_yandex'] );
+	}
+
+	/**
+	 * The same one-directional gap on Yandex's entry — see the Google case
+	 * above.
+	 */
+	public function test_sanitize_lowercases_a_mixed_case_yandex_filename(): void {
+		// See the Google case above for why this one stub is here.
+		Functions\when( 'add_settings_error' )->justReturn( null );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_yandex' => 'Yandex_ABC123.html', 'verify_yandex_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'abc123', $clean['verify_yandex'] );
+	}
+
+	public function test_sanitize_rejects_a_file_token_of_the_wrong_shape(): void {
+		Functions\expect( 'add_settings_error' )->once();
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'has spaces!', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	/**
+	 * The credential-loss trap this reports on: a Google meta code is
+	 * [A-Za-z0-9_-]+ and its file token [a-z0-9]+, so flipping the method to
+	 * File and pressing Save discards the stored meta code. It still clears —
+	 * the value genuinely is not a file token — but the operator is told,
+	 * by service name, rather than shown a success notice over an empty field.
+	 */
+	public function test_a_meta_code_saved_under_the_file_method_is_reported_by_service_name(): void {
+		$message = '';
+		$type    = '';
+
+		Functions\when( 'add_settings_error' )->alias(
+			function ( string $slug, string $code, string $text, string $level ) use ( &$message, &$type ): void {
+				$message = $text;
+				$type    = $level;
+			}
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => 'AbC123_-xyz', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+		$this->assertStringContainsString( 'Google Search Console', $message );
+		$this->assertSame( 'error', $type );
+	}
+
+	/**
+	 * Emptying a field on purpose is not a rejection: it must not raise a
+	 * notice. add_settings_error() is deliberately left unstubbed here, so a
+	 * call would fatal rather than pass unnoticed.
+	 */
+	public function test_deliberately_clearing_a_verification_field_reports_nothing(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_google' => '   ', 'verify_google_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( '', $clean['verify_google'] );
+	}
+
+	/**
+	 * Bing's token is case-sensitive, unlike Google's and Yandex's: TOKEN_SHAPES
+	 * marks it 'lowercase' => false, and sanitize_token() must honour that
+	 * rather than applying one blanket case rule to all three services.
+	 */
+	public function test_sanitize_preserves_bing_token_case(): void {
+		$clean = $this->page->sanitize_settings(
+			array( 'verify_bing' => 'BingToKen123', 'verify_bing_method' => 'file' ),
+			'webmaster',
+			''
+		);
+
+		$this->assertSame( 'BingToKen123', $clean['verify_bing'] );
 	}
 
 	public function test_webmaster_tab_renders_an_input_for_every_verification_and_tracking_key(): void {
@@ -796,10 +1222,6 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		foreach ( array( 'verify_google', 'verify_bing', 'verify_yandex', 'verify_yahoo', 'verify_facebook' ) as $key ) {
-			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
-		}
-
-		foreach ( array( 'verify_google_file', 'verify_bing_file', 'verify_yandex_file' ) as $key ) {
 			$this->assertStringContainsString( 'name="taseo_settings[' . $key . ']"', $html );
 		}
 
@@ -817,11 +1239,7 @@ class SettingsPageTest extends TestCase {
 				'yahoo'    => 'yahootoken',
 				'facebook' => 'facebooktoken',
 			),
-			array(
-				'google' => 'google1a2b3c.html',
-				'bing'   => 'bingfiletoken',
-				'yandex' => 'yandex_9f8e7d.html',
-			),
+			array(),
 			'G-ABCD1234',
 			'GTM-ABCD123',
 			'123456789012345'
@@ -835,17 +1253,16 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'name="taseo_settings[verify_yahoo]" value="yahootoken"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[verify_facebook]" value="facebooktoken"', $html );
 
-		$this->assertStringContainsString( 'name="taseo_settings[verify_google_file]" value="google1a2b3c.html"', $html );
-		$this->assertStringContainsString( 'name="taseo_settings[verify_bing_file]" value="bingfiletoken"', $html );
-		$this->assertStringContainsString( 'name="taseo_settings[verify_yandex_file]" value="yandex_9f8e7d.html"', $html );
-
 		$this->assertStringContainsString( 'name="taseo_settings[analytics_ga4_id]" value="G-ABCD1234"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[analytics_gtm_id]" value="GTM-ABCD123"', $html );
 		$this->assertStringContainsString( 'name="taseo_settings[meta_pixel_id]" value="123456789012345"', $html );
 	}
 
 	public function test_webmaster_tab_links_a_configured_verification_file(): void {
-		$this->stub_webmaster_settings( array(), array( 'google' => 'google1a2b3c.html' ) );
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' )
+		);
 
 		$html = $this->render_webmaster_html();
 
@@ -855,16 +1272,145 @@ class SettingsPageTest extends TestCase {
 		);
 	}
 
+	/**
+	 * Method `file` with an empty code, so the empty-token guard is the only
+	 * thing under test. With the service left on `meta` the assertion passes
+	 * whether or not that guard exists, and deleting it renders a link to
+	 * google.html — a URL the server refuses to answer for.
+	 */
 	public function test_webmaster_tab_omits_the_file_link_when_no_file_is_configured(): void {
-		$this->stub_webmaster_settings();
+		$this->stub_webmaster_settings( array(), array( 'google' => 'file' ) );
 
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'target="_blank"', $html );
 	}
 
+	/**
+	 * VerificationFileServer re-validates the stored token before serving, so
+	 * a token written outside this page's sanitizer — WP-CLI, a migration, a
+	 * hand edit — can be one the server will not answer for. Linking it hands
+	 * the operator a URL that 404s and reads as a broken feature.
+	 */
+	public function test_webmaster_tab_omits_the_file_link_for_a_token_the_server_would_refuse(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => 'NOT-A-FILE-TOKEN' ),
+			array( 'google' => 'file' )
+		);
+
+		$this->assertStringNotContainsString( 'target="_blank"', $this->render_webmaster_html() );
+	}
+
+	/**
+	 * The two methods take unrelated credentials, so the shared input has to
+	 * say which one it is currently asking for. In file mode that is the
+	 * filename shape the service issues.
+	 */
+	public function test_webmaster_tab_placeholder_names_the_file_shape_in_file_mode(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array(
+				'google' => 'file',
+				'bing'   => 'file',
+				'yandex' => 'file',
+			)
+		);
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_google]" value="" class="regular-text" placeholder="File name, e.g. google1a2b3c.html"',
+			$html
+		);
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_bing]" value="" class="regular-text" placeholder="Token from BingSiteAuth.xml"',
+			$html
+		);
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_yandex]" value="" class="regular-text" placeholder="File name, e.g. yandex_9f8e7d.html"',
+			$html
+		);
+	}
+
+	public function test_webmaster_tab_placeholder_stays_generic_in_meta_mode(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_google]" value="" class="regular-text" placeholder="Verification code"',
+			$html
+		);
+		// Yahoo publishes no file method at all, so its hint never varies.
+		$this->assertStringContainsString(
+			'name="taseo_settings[verify_yahoo]" value="" class="regular-text" placeholder="Verification code"',
+			$html
+		);
+	}
+
+	/**
+	 * The host-swap branch of verification_file_url(): a non-default domain's
+	 * file link points at that domain, on the site's own scheme.
+	 */
+	public function test_webmaster_tab_links_a_brand_domains_file_on_that_domains_host(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' ),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$this->assertStringContainsString(
+			'<a href="https://brandtwo.com/google1a2b3c.html" target="_blank" rel="noreferrer noopener">https://brandtwo.com/google1a2b3c.html</a>',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	/**
+	 * VerificationFileServer strips the install's own path from the request the
+	 * same way on every domain, so on a subdirectory install the brand domain's
+	 * file really is served under that path. A path-less preview link would
+	 * point at a URL WordPress never sees.
+	 */
+	public function test_a_brand_domains_file_link_keeps_a_subdirectory_installs_path(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' ),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$this->assertStringContainsString(
+			'https://brandtwo.com/blog/google1a2b3c.html',
+			$this->render_webmaster_html( 'brandtwo.com', 'https://example.com/blog' )
+		);
+	}
+
+	/**
+	 * The default domain's own link keeps the subdirectory path too — the
+	 * branch this one goes through was already correct, and stays that way.
+	 */
+	public function test_the_default_domains_file_link_keeps_a_subdirectory_installs_path(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => '1a2b3c' ),
+			array( 'google' => 'file' )
+		);
+
+		$this->assertStringContainsString(
+			'https://example.com/blog/google1a2b3c.html',
+			$this->render_webmaster_html( '', 'https://example.com/blog' )
+		);
+	}
+
 	public function test_webmaster_tab_bing_file_link_uses_the_fixed_filename_not_the_stored_token(): void {
-		$this->stub_webmaster_settings( array(), array( 'bing' => 'BINGTOKEN123' ) );
+		$this->stub_webmaster_settings(
+			array( 'bing' => 'BINGTOKEN123' ),
+			array( 'bing' => 'file' )
+		);
 
 		$html = $this->render_webmaster_html();
 
@@ -902,6 +1448,114 @@ class SettingsPageTest extends TestCase {
 		$html = $this->render_webmaster_html();
 
 		$this->assertStringNotContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_renders_a_domain_nav_with_the_default_marked(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		$this->assertStringContainsString( 'class="subsubsub"', $html );
+		$this->assertStringContainsString( 'example.com (default)', $html );
+		$this->assertStringContainsString( 'brandtwo.com', $html );
+		$this->assertStringContainsString( '<input type="hidden" name="domain" value="example.com" />', $html );
+	}
+
+	public function test_webmaster_tab_reads_the_active_domains_record(): void {
+		$this->stub_webmaster_settings(
+			array( 'google' => 'brandtwocode' ),
+			array(),
+			'',
+			'',
+			'',
+			'brandtwo.com'
+		);
+
+		$html = $this->render_webmaster_html( 'brandtwo.com' );
+
+		$this->assertStringContainsString( '<input type="hidden" name="domain" value="brandtwo.com" />', $html );
+		$this->assertStringContainsString( 'brandtwocode', $html );
+	}
+
+	public function test_webmaster_tab_falls_back_to_the_default_for_an_unknown_domain(): void {
+		$this->stub_webmaster_settings();
+
+		$this->assertStringContainsString(
+			'<input type="hidden" name="domain" value="example.com" />',
+			$this->render_webmaster_html( 'attacker.example' )
+		);
+	}
+
+	public function test_webmaster_tab_advertises_an_inherited_tracking_id(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'placeholder="GTM-DEFAULT (inherited)"',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	/**
+	 * Rendering the inherited default straight into the value= attribute would
+	 * save it as this domain's own on the next submit, silently turning
+	 * inheritance into a copy that then drifts. The field must stay blank; only
+	 * the placeholder (covered above) is allowed to advertise the inherited ID.
+	 */
+	public function test_webmaster_tab_does_not_copy_an_inherited_tracking_id_into_the_value(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'<input type="text" name="taseo_settings[analytics_gtm_id]" value="" placeholder="GTM-DEFAULT (inherited)" />',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
+	}
+
+	/**
+	 * The two tracking getter forms drive two different things and must not be
+	 * swapped: the argument-less form feeds the inherit placeholder (the
+	 * DEFAULT domain's value), the $lookup form feeds the double-tracking
+	 * warning (the ACTIVE domain's effective value). Here the default has no
+	 * GTM at all while the brand domain has its own, so each call site fails
+	 * loudly if it reads the other one's value.
+	 */
+	public function test_webmaster_tab_keeps_the_default_and_active_tracking_lookups_apart(): void {
+		$this->stub_webmaster_settings(
+			array(),
+			array(),
+			'G-DEFAULT12',
+			'',
+			'',
+			'brandtwo.com',
+			array( 'gtm' => 'GTM-OWN123' )
+		);
+		$this->settings->shouldReceive( 'get_domain_record' )
+			->with( 'brandtwo.com' )
+			->andReturn( array( 'analytics_gtm_id' => 'GTM-OWN123' ) );
+
+		$html = $this->render_webmaster_html( 'brandtwo.com' );
+
+		// The default has no GTM to inherit, so the placeholder is the shape
+		// hint — not the active domain's own ID.
+		$this->assertStringContainsString(
+			'name="taseo_settings[analytics_gtm_id]" value="GTM-OWN123" placeholder="GTM-XXXXXXX"',
+			$html
+		);
+
+		// ...while the warning sees the active domain's GTM alongside the
+		// inherited GA4, so it fires.
+		$this->assertStringContainsString( 'counted twice', $html );
+	}
+
+	public function test_webmaster_tab_shows_the_active_domains_own_stored_tracking_value(): void {
+		$this->stub_webmaster_settings( array(), array(), '', 'GTM-DEFAULT', '', 'brandtwo.com' );
+		$this->settings->shouldReceive( 'get_domain_record' )
+			->with( 'brandtwo.com' )
+			->andReturn( array( 'analytics_gtm_id' => 'GTM-OWN123' ) );
+
+		$this->assertStringContainsString(
+			'name="taseo_settings[analytics_gtm_id]" value="GTM-OWN123"',
+			$this->render_webmaster_html( 'brandtwo.com' )
+		);
 	}
 
 	public function test_templates_tab_renders_a_pill_for_each_available_variable(): void {

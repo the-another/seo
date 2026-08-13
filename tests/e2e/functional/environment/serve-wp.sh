@@ -84,6 +84,82 @@ add_action(
 );
 PHP
 
+# A second verification domain, standing in for the multi-brand plugin (not
+# installed in this e2e environment). It registers through the same
+# taseo_verification_domains filter seam the real plugin uses, so
+# webmaster-domains.spec.ts can exercise per-domain verification end to end.
+cat > "$WP_DIR/wp-content/mu-plugins/taseo-domains-fixture.php" <<'PHP'
+<?php
+/**
+ * Plugin Name: TASEO e2e verification domains fixture
+ *
+ * Registers a second verification domain, standing in for the multi-brand
+ * plugin, which is not installed in the e2e environment.
+ */
+
+add_filter(
+	'taseo_verification_domains',
+	static function ( $domains ) {
+		$domains[] = 'brandtwo.test';
+
+		return $domains;
+	}
+);
+PHP
+
+# Pin home/siteurl against wp server's own router.php, which otherwise
+# defeats per-domain host resolution entirely. Root-caused by hand: WP-CLI's
+# server-command bundles a router.php that adds
+# `add_filter( 'option_home', fn () => 'http://' . $_SERVER['HTTP_HOST'], 20 )`
+# (and the same for option_siteurl) "to trick WordPress into using the URL
+# set by `wp server`, especially on multisite". That means ANY request's
+# Host header becomes home_url() for that request — so a request carrying
+# `Host: brandtwo.test` makes DomainRegistry::default_host() (which reads
+# wp_parse_url( home_url(), PHP_URL_HOST )) resolve to 'brandtwo.test'
+# too, collapsing the very default-vs-brand distinction the feature depends
+# on and serving the DEFAULT domain's file under the brand domain's request
+# (confirmed empirically: without this pin, requesting a brand-only
+# verification file with Host: brandtwo.test 404s, because
+# Settings::get_domain_value() sees host === default_host() and reads the
+# flat/default keys instead of the per-domain record). No real webserver in
+# front of PHP-FPM rewrites option_home from an incoming Host header this
+# way; this is purely router.php's own dev convenience for reaching the
+# built-in server via alternate hostnames/IPs. WordPress's own WP_HOME/
+# WP_SITEURL constant support (_config_wp_home()/_config_wp_siteurl() in
+# wp-includes/functions.php) is NOT a fix here — those hook the same
+# option_home/option_siteurl filters at the default priority (10), so
+# router.php's priority-20 closure still overrides them. The only thing
+# that wins is a filter on the same hooks at a HIGHER priority, which is
+# what this does — restoring the fixed, stable home_url() a production
+# install actually has, regardless of which Host a request arrives on.
+cat > "$WP_DIR/wp-content/mu-plugins/taseo-e2e-pin-home-url.php" <<PHP
+<?php
+/**
+ * Plugin Name: TASEO e2e — pin home/siteurl against wp server's router
+ * Description: Neutralizes wp-cli-server-command's router.php, which
+ * otherwise rewrites option_home/option_siteurl to match each request's
+ * Host header (priority 20) and so makes home_url() track the incoming
+ * Host instead of staying fixed — see the comment in serve-wp.sh above
+ * this heredoc.
+ */
+
+add_filter(
+	'option_home',
+	static function () {
+		return '$WP_SITE_URL';
+	},
+	21
+);
+
+add_filter(
+	'option_siteurl',
+	static function () {
+		return '$WP_SITE_URL';
+	},
+	21
+);
+PHP
+
 # Keep Action Scheduler's queue OFF the HTTP path. Its claim step
 # (ActionScheduler_DBStore::claim_actions) issues the MySQL-only
 # `UPDATE ... JOIN (...) ... FOR UPDATE` documented at the drain loop below,
@@ -142,16 +218,27 @@ wp rewrite flush --path="$WP_DIR" --allow-root
 # a key into that. Seed an empty array first so the inserts below have an
 # array to patch into.
 wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root || true
-wp option patch insert taseo_settings verify_google 'googlee2etoken' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google 'e2efile' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_google_method 'file' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_bing 'BINGE2ETOKEN' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings verify_bing_method 'file' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_yandex 'yandexe2etoken' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_yahoo 'yahooe2etoken' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_facebook 'metae2etoken' --path="$WP_DIR" --allow-root
-wp option patch insert taseo_settings verify_google_file 'googlee2efile.html' --path="$WP_DIR" --allow-root
-wp option patch insert taseo_settings verify_bing_file 'BINGFILETOKEN' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
+
+# The brand domain's own per-domain record (Settings::DOMAINS_KEY), keyed by
+# the normalized host the taseo-domains-fixture.php mu-plugin above pushes
+# through the taseo_verification_domains filter. verify_google/_method are set
+# so webmaster-domains.spec.ts can assert per-domain codes and files carry no
+# inheritance; analytics_gtm_id is deliberately left OUT of this record (only
+# analytics_ga4_id is set) so that same spec can assert a blank GTM field on
+# the brand domain inherits the default domain's analytics_gtm_id instead.
+wp option patch insert taseo_settings verification_domains --format=json \
+	'{"brandtwo.test":{"verify_google":"brandtwo","verify_google_method":"file","analytics_ga4_id":"G-BRAND2E2E"}}' \
+	--path="$WP_DIR" --allow-root
 
 # Drain the Action Scheduler queue: the initial indexable backfill runs as a
 # chain of async taseo_backfill_batch actions (each batch re-enqueues the

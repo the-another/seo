@@ -11,6 +11,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
 #[CoversClass( MetaPixelOutput::class )]
@@ -18,6 +19,7 @@ class MetaPixelOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $settings;
+	private $domains;
 	private MetaPixelOutput $output;
 
 	protected function setUp(): void {
@@ -27,7 +29,10 @@ class MetaPixelOutputTest extends TestCase {
 		$this->settings = Mockery::mock( Settings::class );
 		$this->settings->shouldReceive( 'get_meta_pixel_id' )->andReturn( '' )->byDefault();
 
-		$this->output = new MetaPixelOutput( $this->settings );
+		$this->domains = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
+
+		$this->output = new MetaPixelOutput( $this->settings, $this->domains );
 
 		Functions\when( 'is_admin' )->justReturn( false );
 		Functions\when( 'is_customize_preview' )->justReturn( false );
@@ -148,5 +153,16 @@ class MetaPixelOutputTest extends TestCase {
 		Filters\expectApplied( 'taseo_meta_pixel_should_print' )->once()->andReturn( false );
 
 		$this->assertSame( '', $this->head() );
+	}
+
+	public function test_uses_the_requested_domains_pixel_id(): void {
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
+
+		$this->settings->shouldReceive( 'get_meta_pixel_id' )->with( 'brandtwo.com' )->andReturn( '222222222222222' );
+
+		ob_start();
+		$this->output->print_head();
+
+		$this->assertStringContainsString( '222222222222222', (string) ob_get_clean() );
 	}
 }

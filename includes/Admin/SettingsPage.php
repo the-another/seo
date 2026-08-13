@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Admin;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
@@ -41,30 +42,44 @@ class SettingsPage {
 	private const SCHEMA_TYPE_CHOICES = array( 'None', 'WebPage', 'Article', 'Product' );
 
 	/**
-	 * Verification meta-tag settings keys.
+	 * Engine slug => pattern a file-mode token must match, and the prefix and
+	 * suffix stripped when an operator pastes a whole filename instead.
 	 *
-	 * @var array<int, string>
+	 * Must be kept in agreement with VerificationFileServer::TOKEN_PATTERNS,
+	 * which re-validates the same tokens at output time, and with the filename
+	 * shapes in self::verification_filename() and
+	 * VerificationFileServer::build_files(). Adding a service means touching
+	 * all four plus the $services list in render_webmaster_tab() and the engine
+	 * loop in sanitize_settings(); both filename builders answer '' / serve
+	 * nothing for an engine they do not know, so an omission shows up as a
+	 * missing file rather than as another service's shape.
+	 *
+	 * MethodMigration::LEGACY_FILE_SHAPES is deliberately NOT part of that
+	 * agreement: it is frozen on the pre-0.5.0 storage format.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @var array<string, array{pattern: string, prefix: string, suffix: string, lowercase: bool}>
 	 */
-	private const VERIFICATION_CODE_KEYS = array(
-		'verify_google',
-		'verify_bing',
-		'verify_yandex',
-		'verify_yahoo',
-		'verify_facebook',
-	);
-
-	/**
-	 * Verification file settings keys => validation pattern.
-	 *
-	 * Anchored, and allowing no slash or dot beyond the single extension:
-	 * these values are compared against an incoming request path.
-	 *
-	 * @var array<string, string>
-	 */
-	private const VERIFICATION_FILE_PATTERNS = array(
-		'verify_google_file' => '/^google[a-z0-9]+\.html$/',
-		'verify_bing_file'   => '/^[A-Za-z0-9]+$/',
-		'verify_yandex_file' => '/^yandex_[a-z0-9]+\.html$/',
+	private const TOKEN_SHAPES = array(
+		'google' => array(
+			'pattern'   => '/^[a-z0-9]+$/',
+			'prefix'    => 'google',
+			'suffix'    => '.html',
+			'lowercase' => true,
+		),
+		'bing'   => array(
+			'pattern'   => '/^[A-Za-z0-9]+$/',
+			'prefix'    => '',
+			'suffix'    => '',
+			'lowercase' => false,
+		),
+		'yandex' => array(
+			'pattern'   => '/^[a-z0-9]+$/',
+			'prefix'    => 'yandex_',
+			'suffix'    => '.html',
+			'lowercase' => true,
+		),
 	);
 
 	/**
@@ -106,6 +121,20 @@ class SettingsPage {
 	private const INVALID_TEMPLATE_CODE = 'taseo_invalid_template__';
 
 	/**
+	 * Settings-error code prefix for a verification value the sanitizer had to
+	 * discard. The settings key is appended, following INVALID_TEMPLATE_CODE's
+	 * convention, so one save can report several services and a reader of the
+	 * errors can tell which field failed. Deliberately a different prefix:
+	 * collect_invalid_rows() treats everything under INVALID_TEMPLATE_CODE as
+	 * a template row key.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @var string
+	 */
+	private const INVALID_VERIFICATION_CODE = 'taseo_invalid_verification__';
+
+	/**
 	 * Hook suffix of this settings page, for gating asset enqueue.
 	 *
 	 * @var string
@@ -135,6 +164,7 @@ class SettingsPage {
 	 * @param SitemapFamilies       $sitemap_families   External URL families registry.
 	 * @param SitemapAssignment     $sitemap_assignment Sitemap chunk assignment (family toggle transitions).
 	 * @param PostSubtypes          $post_subtypes      Post subtype registry (per-subtype rows).
+	 * @param DomainRegistry        $domains            Verification domain registry.
 	 */
 	public function __construct(
 		private readonly Settings $settings,
@@ -146,7 +176,8 @@ class SettingsPage {
 		private readonly CustomPages $custom_pages,
 		private readonly SitemapFamilies $sitemap_families,
 		private readonly SitemapAssignment $sitemap_assignment,
-		private readonly PostSubtypes $post_subtypes
+		private readonly PostSubtypes $post_subtypes,
+		private readonly DomainRegistry $domains
 	) {
 	}
 
@@ -1010,47 +1041,67 @@ class SettingsPage {
 	 * @return void
 	 */
 	private function render_webmaster_tab(): void {
+		$hosts = $this->domains->get_hosts();
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only domain switch.
+		$raw_domain = isset( $_GET['domain'] ) ? sanitize_text_field( wp_unslash( $_GET['domain'] ) ) : '';
+		$requested  = DomainRegistry::normalize_host( $raw_domain );
+		$active     = in_array( $requested, $hosts, true ) ? $requested : (string) ( $hosts[0] ?? '' );
+		$default    = DomainRegistry::default_host();
+
+		// '' is Settings' word for "the default domain", which is where the
+		// flat keys live. Everything below reads and writes through $lookup so
+		// the default domain keeps using them.
+		$lookup = $active === $default ? '' : $active;
+
+		$this->render_domain_nav( $hosts, $active, $default );
+
+		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
+
+		// Engine slug => whether the service publishes a file method. Labels
+		// come from verification_service_label(), which the sanitizer also
+		// uses, so a rejected value is named exactly as its row is.
 		$services = array(
-			'google'   => array( __( 'Google Search Console', 'the-another-seo' ), 'verify_google', 'verify_google_file', __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ) ),
-			'bing'     => array( __( 'Bing Webmaster Tools', 'the-another-seo' ), 'verify_bing', 'verify_bing_file', __( 'Token from BingSiteAuth.xml', 'the-another-seo' ) ),
-			'yandex'   => array( __( 'Yandex Webmaster', 'the-another-seo' ), 'verify_yandex', 'verify_yandex_file', __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ) ),
-			'yahoo'    => array( __( 'Yahoo', 'the-another-seo' ), 'verify_yahoo', '', '' ),
-			'facebook' => array( __( 'Meta Business Manager', 'the-another-seo' ), 'verify_facebook', '', '' ),
+			'google'   => true,
+			'bing'     => true,
+			'yandex'   => true,
+			'yahoo'    => false,
+			'facebook' => false,
 		);
 
 		echo '<h2>' . esc_html__( 'Site verification', 'the-another-seo' ) . '</h2>';
-		echo '<p>' . esc_html__( 'Paste the verification code or the whole meta tag — either works. Verification tags are printed on the front page only.', 'the-another-seo' ) . '</p>';
+		echo '<p>' . esc_html__( 'Paste the code or the file name — either works, and the file name is worked out for you. Each domain must be verified on its own; codes are never shared between domains.', 'the-another-seo' ) . '</p>';
 		echo '<table class="form-table">';
 
-		foreach ( $services as $engine => $service ) {
-			list( $label, $code_key, $file_key, $file_hint ) = $service;
+		foreach ( $services as $engine => $has_methods ) {
+			$code   = $this->settings->get_verification_code( $engine, $lookup );
+			$method = $has_methods ? $this->settings->get_verification_method( $engine, $lookup ) : Settings::METHOD_META;
+
+			printf( '<tr><th scope="row">%s</th><td>', esc_html( self::verification_service_label( $engine ) ) );
+
+			if ( $has_methods ) {
+				$this->render_method_radios( $engine, $method );
+			}
 
 			printf(
-				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" class="regular-text" placeholder="%4$s" />',
-				esc_html( $label ),
-				esc_attr( $code_key ),
-				esc_attr( $this->settings->get_verification_code( $engine ) ),
-				esc_attr__( 'Verification code', 'the-another-seo' )
+				'<input type="text" name="taseo_settings[verify_%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
+				esc_attr( $engine ),
+				esc_attr( $code ),
+				esc_attr( self::verification_placeholder( $engine, $method ) )
 			);
 
-			if ( '' !== $file_key ) {
-				$file_value = $this->settings->get_verification_file( $engine );
+			// verification_filename() is the single guard here: it answers ''
+			// for an empty token and for one the server would refuse, so the
+			// link is offered only for a file this install actually serves.
+			$filename = Settings::METHOD_FILE === $method
+				? self::verification_filename( $engine, $code )
+				: '';
 
+			if ( '' !== $filename ) {
 				printf(
-					'<br /><input type="text" name="taseo_settings[%1$s]" value="%2$s" class="regular-text" placeholder="%3$s" />',
-					esc_attr( $file_key ),
-					esc_attr( $file_value ),
-					esc_attr( $file_hint )
+					'<br /><a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
+					esc_url( $this->verification_file_url( $active, $filename ) )
 				);
-
-				if ( '' !== $file_value ) {
-					$filename = 'bing' === $engine ? VerificationFileServer::BING_FILENAME : $file_value;
-
-					printf(
-						' <a href="%1$s" target="_blank" rel="noreferrer noopener">%1$s</a>',
-						esc_url( home_url( '/' . $filename ) )
-					);
-				}
 			}
 
 			echo '</td></tr>';
@@ -1058,31 +1109,274 @@ class SettingsPage {
 
 		echo '</table>';
 
+		// Read the stored record directly rather than through the getters: they
+		// inherit, and rendering an inherited ID into the input would save it as
+		// this domain's own on the next submit, quietly turning inheritance into
+		// a copy that then drifts.
+		$record = '' === $lookup ? array() : $this->settings->get_domain_record( $active );
+
+		$tracking = array(
+			'analytics_ga4_id' => array( __( 'GA4 Measurement ID', 'the-another-seo' ), $this->settings->get_ga4_id(), 'G-XXXXXXXXXX' ),
+			'analytics_gtm_id' => array( __( 'Tag Manager Container ID', 'the-another-seo' ), $this->settings->get_gtm_id(), 'GTM-XXXXXXX' ),
+			'meta_pixel_id'    => array( __( 'Meta Pixel ID', 'the-another-seo' ), $this->settings->get_meta_pixel_id(), '123456789012345' ),
+		);
+
 		echo '<h2>' . esc_html__( 'Tracking', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_ga4_id]" value="%s" placeholder="G-XXXXXXXXXX" /></td></tr>',
-			esc_html__( 'GA4 Measurement ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_ga4_id() )
-		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[analytics_gtm_id]" value="%s" placeholder="GTM-XXXXXXX" /></td></tr>',
-			esc_html__( 'Tag Manager Container ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_gtm_id() )
-		);
-		printf(
-			'<tr><th scope="row">%s</th><td><input type="text" name="taseo_settings[meta_pixel_id]" value="%s" placeholder="123456789012345" /></td></tr>',
-			esc_html__( 'Meta Pixel ID', 'the-another-seo' ),
-			esc_attr( $this->settings->get_meta_pixel_id() )
-		);
+
+		foreach ( $tracking as $key => $field ) {
+			list( $label, $default_value, $hint ) = $field;
+
+			printf(
+				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" placeholder="%4$s" /></td></tr>',
+				esc_html( $label ),
+				esc_attr( $key ),
+				esc_attr( '' === $lookup ? $default_value : (string) ( $record[ $key ] ?? '' ) ),
+				esc_attr( $this->tracking_placeholder( $lookup, $default_value, $hint ) )
+			);
+		}
+
 		echo '</table>';
 
-		if ( '' !== $this->settings->get_ga4_id() && '' !== $this->settings->get_gtm_id() ) {
+		if ( '' !== $this->settings->get_ga4_id( $lookup ) && '' !== $this->settings->get_gtm_id( $lookup ) ) {
 			printf(
 				'<div class="notice notice-warning inline"><p>%s</p></div>',
 				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
 			);
 		}
+	}
+
+	/**
+	 * The method choice for one service.
+	 *
+	 * A fieldset with a screen-reader legend, matching how the Post Types tab
+	 * groups its checkboxes. No JavaScript: the input's placeholder is chosen
+	 * from the saved method by verification_placeholder(), so picking a radio
+	 * relabels nothing until the form is saved.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $method Saved method.
+	 * @return void
+	 */
+	private function render_method_radios( string $engine, string $method ): void {
+		$choices = array(
+			Settings::METHOD_META => __( 'Meta tag', 'the-another-seo' ),
+			Settings::METHOD_FILE => __( 'File', 'the-another-seo' ),
+		);
+
+		echo '<fieldset><legend class="screen-reader-text">' . esc_html__( 'Verification method', 'the-another-seo' ) . '</legend>';
+
+		foreach ( $choices as $value => $choice_label ) {
+			printf(
+				'<label style="margin-right:1em;"><input type="radio" name="taseo_settings[verify_%1$s_method]" value="%2$s"%3$s /> %4$s</label>',
+				esc_attr( $engine ),
+				esc_attr( $value ),
+				checked( $method, $value, false ),
+				esc_html( $choice_label )
+			);
+		}
+
+		echo '</fieldset>';
+	}
+
+	/**
+	 * Human name of a verification service.
+	 *
+	 * Shared by the renderer and by the sanitizer's rejection notice, so a
+	 * discarded value is named on screen exactly as its own row is.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @return string Translated label, the slug itself for an unknown engine.
+	 */
+	private static function verification_service_label( string $engine ): string {
+		return match ( $engine ) {
+			'google'   => __( 'Google Search Console', 'the-another-seo' ),
+			'bing'     => __( 'Bing Webmaster Tools', 'the-another-seo' ),
+			'yandex'   => __( 'Yandex Webmaster', 'the-another-seo' ),
+			'yahoo'    => __( 'Yahoo', 'the-another-seo' ),
+			'facebook' => __( 'Meta Business Manager', 'the-another-seo' ),
+			default    => $engine,
+		};
+	}
+
+	/**
+	 * Placeholder for a service's single verification input.
+	 *
+	 * The two methods take unrelated credentials — a Google meta token is
+	 * [A-Za-z0-9_-]+ and its file token [a-z0-9]+, issued separately by Search
+	 * Console — so one neutral hint under both radios tells the operator
+	 * nothing about which of the two the field is currently asking for. Saving
+	 * a meta code under the file method discards it (see sanitize_token()),
+	 * which is why the field has to say what this mode expects.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $method Resolved method, Settings::METHOD_META for a
+	 *                       service that publishes no file method.
+	 * @return string Placeholder text.
+	 */
+	private static function verification_placeholder( string $engine, string $method ): string {
+		if ( Settings::METHOD_FILE !== $method ) {
+			return __( 'Verification code', 'the-another-seo' );
+		}
+
+		return match ( $engine ) {
+			'google' => __( 'File name, e.g. google1a2b3c.html', 'the-another-seo' ),
+			'bing'   => __( 'Token from BingSiteAuth.xml', 'the-another-seo' ),
+			'yandex' => __( 'File name, e.g. yandex_9f8e7d.html', 'the-another-seo' ),
+			default  => __( 'Verification code', 'the-another-seo' ),
+		};
+	}
+
+	/**
+	 * The public filename a service's token is served at.
+	 *
+	 * Mirrors VerificationFileServer::build_files() — its filename shapes and
+	 * its token validation both. That validation is not redundant here: the
+	 * option is writable outside this page's sanitizer (WP-CLI, a migration,
+	 * a hand edit), and the server refuses to answer for a token that fails
+	 * its pattern, so an unchecked link would point at a guaranteed 404.
+	 * Static so the renderer can show the link without reaching into the
+	 * server.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $token  Stored token.
+	 * @return string Filename, '' when the engine publishes no file method or
+	 *                the token is not one this plugin would serve.
+	 */
+	private static function verification_filename( string $engine, string $token ): string {
+		$shape = self::TOKEN_SHAPES[ $engine ] ?? null;
+
+		if ( null === $shape || 1 !== preg_match( $shape['pattern'], $token ) ) {
+			return '';
+		}
+
+		// Explicit default: a service added to TOKEN_SHAPES without an arm
+		// here shows no link, rather than a link built from Google's shape.
+		return match ( $engine ) {
+			'google' => 'google' . $token . '.html',
+			'bing'   => VerificationFileServer::BING_FILENAME,
+			'yandex' => 'yandex_' . $token . '.html',
+			default  => '',
+		};
+	}
+
+	/**
+	 * The domain switcher for the Webmaster Tools tab.
+	 *
+	 * Core's own secondary-navigation pattern (`.subsubsub`, styled in
+	 * wp-admin/css/common.css), the same one the Titles & Templates tab uses.
+	 * Unlike that one these carry a `current` state, because they are separate
+	 * views of the tab rather than in-page anchors. The trailing
+	 * `<div class="clear">` is load-bearing: `.subsubsub` is `float: left`, so
+	 * without it the first `<h2>` wraps alongside the nav.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param array<int, string> $hosts        Registered hosts, default first.
+	 * @param string             $active       Host being edited.
+	 * @param string             $default_host Default host.
+	 * @return void
+	 */
+	private function render_domain_nav( array $hosts, string $active, string $default_host ): void {
+		echo '<ul class="subsubsub">';
+
+		$last = array_key_last( $hosts );
+
+		foreach ( $hosts as $index => $host ) {
+			$url = add_query_arg(
+				array(
+					'page'   => 'taseo',
+					'tab'    => 'webmaster',
+					'domain' => $host,
+				),
+				admin_url( 'options-general.php' )
+			);
+
+			if ( $host === $default_host ) {
+				/* translators: %s: hostname of the site's own domain. */
+				$label = sprintf( __( '%s (default)', 'the-another-seo' ), $host );
+			} else {
+				$label = $host;
+			}
+
+			printf(
+				'<li><a href="%s" class="%s">%s</a>%s</li>',
+				esc_url( $url ),
+				$host === $active ? 'current' : '',
+				esc_html( $label ),
+				$index === $last ? '' : ' |'
+			);
+		}
+
+		echo '</ul>';
+		echo '<div class="clear"></div>';
+
+		printf(
+			'<p class="description">%s</p>',
+			esc_html__( 'Domains come from your Brands. Add a URL rule to a Brand to add one here.', 'the-another-seo' )
+		);
+	}
+
+	/**
+	 * Public URL of a domain's verification file.
+	 *
+	 * Both branches start from home_url(), so a subdirectory install keeps its
+	 * path; other domains then swap only the host, since nothing here knows how
+	 * they are served. Dropping the path on the host-swap branch would produce
+	 * a link that never reaches WordPress: VerificationFileServer strips the
+	 * install's path from the request the same way on every domain, so a
+	 * `/blog` install serves the file at `scheme://host/blog/<filename>`.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $host     Normalized host.
+	 * @param string $filename Verification filename.
+	 * @return string URL.
+	 */
+	private function verification_file_url( string $host, string $filename ): string {
+		$url = (string) home_url( '/' . $filename );
+
+		if ( DomainRegistry::default_host() === $host ) {
+			return $url;
+		}
+
+		$parts  = wp_parse_url( $url );
+		$parts  = is_array( $parts ) ? $parts : array();
+		$scheme = isset( $parts['scheme'] ) ? (string) $parts['scheme'] : '';
+		$path   = isset( $parts['path'] ) ? (string) $parts['path'] : '/' . $filename;
+
+		return ( '' !== $scheme ? $scheme : 'https' ) . '://' . $host . $path;
+	}
+
+	/**
+	 * Placeholder for a tracking field.
+	 *
+	 * On a non-default domain a blank field inherits the default's ID, so the
+	 * placeholder shows what will actually fire. Without it "blank" reads as
+	 * "no tracking", which is the opposite of what happens.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $lookup        Active domain lookup key, '' for the default.
+	 * @param string $default_value The default domain's stored ID.
+	 * @param string $fallback      Shape hint used when there is nothing to inherit.
+	 * @return string Placeholder.
+	 */
+	private function tracking_placeholder( string $lookup, string $default_value, string $fallback ): string {
+		if ( '' === $lookup || '' === $default_value ) {
+			return $fallback;
+		}
+
+		/* translators: %s: the default domain's tracking ID. */
+		return sprintf( __( '%s (inherited)', 'the-another-seo' ), $default_value );
 	}
 
 	/**
@@ -1096,12 +1390,13 @@ class SettingsPage {
 			return;
 		}
 
-		$raw = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
-		$tab = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
+		$raw    = isset( $_POST['taseo_settings'] ) ? (array) wp_unslash( $_POST['taseo_settings'] ) : array(); // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- nonce verified via verify_request(); sanitized in sanitize_settings().
+		$tab    = isset( $_POST['tab'] ) ? sanitize_key( wp_unslash( $_POST['tab'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
+		$domain = isset( $_POST['domain'] ) ? sanitize_text_field( wp_unslash( $_POST['domain'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Missing -- nonce verified via verify_request().
 
 		$previously_disabled = $this->settings->get_disabled_sitemap_families();
 
-		$this->settings->update( $this->sanitize_settings( $raw, $tab ) );
+		$this->settings->update( $this->sanitize_settings( $raw, $tab, $domain ) );
 
 		if ( 'sitemap' === $tab ) {
 			$now_disabled = $this->settings->get_disabled_sitemap_families();
@@ -1127,6 +1422,18 @@ class SettingsPage {
 
 		if ( array_key_exists( $tab, self::TABS ) ) {
 			$redirect = add_query_arg( 'tab', $tab, $redirect );
+		}
+
+		if ( 'webmaster' === $tab ) {
+			// Only advertise a domain the save actually wrote to. Carrying the
+			// raw posted value through would re-open the form on a domain the
+			// sanitizer just rejected, and normalizing keeps the arg in the
+			// same shape the domain nav emits.
+			$host = DomainRegistry::normalize_host( $domain );
+
+			if ( '' !== $host && in_array( $host, $this->domains->get_hosts(), true ) ) {
+				$redirect = add_query_arg( 'domain', $host, $redirect );
+			}
 		}
 
 		$redirect = add_query_arg( 'settings-updated', 'true', $redirect );
@@ -1253,6 +1560,45 @@ class SettingsPage {
 	}
 
 	/**
+	 * Which domain a webmaster submission writes to.
+	 *
+	 * Three outcomes, and telling the last two apart is the whole point:
+	 *
+	 * - `''` — the default domain, i.e. the flat keys. This is what an absent
+	 *   `domain` field means, which covers every non-webmaster tab and any
+	 *   form rendered before the domain switcher existed.
+	 * - a host — that domain's record under Settings::DOMAINS_KEY.
+	 * - `null` — write nothing. The field carried a host that is not
+	 *   registered, and there is no safe place to put the values. Treating it
+	 *   as the default is the one genuinely destructive option: get_hosts() is
+	 *   dynamic (a Brand's URL rule edited in another tab changes it
+	 *   mid-session), so an operator can return to a stale Webmaster Tools
+	 *   screen and press Save with no attacker involved — and the posted
+	 *   codes would overwrite the site's own. Seeding a record on an
+	 *   unregistered host is rejected too, since a record key decides which
+	 *   body a public request is answered with. Discarding the edit loses
+	 *   nothing that still exists.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $domain Posted domain field, '' when none was posted.
+	 * @return string|null Lookup key, or null to write nothing.
+	 */
+	private function webmaster_target( string $domain ): ?string {
+		if ( '' === trim( $domain ) ) {
+			return '';
+		}
+
+		$host = DomainRegistry::normalize_host( $domain );
+
+		if ( DomainRegistry::default_host() === $host ) {
+			return '';
+		}
+
+		return in_array( $host, $this->domains->get_hosts(), true ) ? $host : null;
+	}
+
+	/**
 	 * Sanitize a raw settings submission.
 	 *
 	 * Boolean and checkbox-list keys owned by the submitted tab are force-set
@@ -1260,11 +1606,12 @@ class SettingsPage {
 	 * keys belonging to other tabs are merge-preserved by Settings::update(),
 	 * since a tab's form never submits fields it doesn't own.
 	 *
-	 * @param array<string, mixed> $raw Raw values.
-	 * @param string               $tab Active tab slug (from the posted 'tab' field).
+	 * @param array<string, mixed> $raw    Raw values.
+	 * @param string               $tab    Active tab slug (from the posted 'tab' field).
+	 * @param string               $domain Active domain (from the posted 'domain' field), '' for the default.
 	 * @return array<string, mixed> Clean values.
 	 */
-	public function sanitize_settings( array $raw, string $tab = '' ): array {
+	public function sanitize_settings( array $raw, string $tab = '', string $domain = '' ): array {
 		$clean = array();
 
 		foreach ( array( 'enabled_post_types', 'enabled_taxonomies' ) as $list_key ) {
@@ -1384,21 +1731,57 @@ class SettingsPage {
 			}
 		}
 
-		foreach ( self::VERIFICATION_CODE_KEYS as $code_key ) {
-			if ( isset( $raw[ $code_key ] ) ) {
-				$clean[ $code_key ] = VerificationOutput::sanitize_code( (string) $raw[ $code_key ] );
-			}
-		}
+		$target = $this->webmaster_target( $domain );
 
-		foreach ( self::VERIFICATION_FILE_PATTERNS as $file_key => $pattern ) {
-			if ( ! isset( $raw[ $file_key ] ) ) {
+		$webmaster = array();
+
+		foreach ( array( 'google', 'bing', 'yandex', 'yahoo', 'facebook' ) as $engine ) {
+			$code_key   = 'verify_' . $engine;
+			$method_key = $code_key . '_method';
+			$has_method = isset( self::TOKEN_SHAPES[ $engine ] );
+
+			$method = Settings::METHOD_META;
+
+			if ( $has_method && isset( $raw[ $method_key ] ) && Settings::METHOD_FILE === $raw[ $method_key ] ) {
+				$method = Settings::METHOD_FILE;
+			}
+
+			if ( $has_method && isset( $raw[ $method_key ] ) ) {
+				$webmaster[ $method_key ] = $method;
+			}
+
+			if ( ! isset( $raw[ $code_key ] ) ) {
 				continue;
 			}
 
-			$value = trim( (string) $raw[ $file_key ] );
-			$value = 'verify_bing_file' === $file_key ? $value : strtolower( $value );
+			// The method is read from $raw rather than from storage because the
+			// radios and the code input sit in the same row of the same form:
+			// a posted code always arrives with the method it was typed under.
+			// The METHOD_META fallback for a code posted without its radio is
+			// therefore not reachable from this screen.
+			$posted = (string) $raw[ $code_key ];
 
-			$clean[ $file_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $code_key ] = Settings::METHOD_FILE === $method
+				? self::sanitize_token( $engine, $posted )
+				: VerificationOutput::sanitize_code( $posted );
+
+			// A submitted value that sanitizes away is reported rather than
+			// swallowed. The two methods take unrelated credentials, so
+			// switching one and pressing Save clears the stored code — behind
+			// a "Settings saved" notice and an empty field, unless this says
+			// otherwise.
+			if ( '' === $webmaster[ $code_key ] && '' !== trim( $posted ) ) {
+				add_settings_error(
+					'taseo_messages',
+					self::INVALID_VERIFICATION_CODE . $code_key,
+					sprintf(
+						/* translators: %s: verification service name, such as Google Search Console. */
+						esc_html__( '%s: that verification value was not saved. It is not the shape the selected method expects — the field now shows an example of what to paste.', 'the-another-seo' ),
+						esc_html( self::verification_service_label( $engine ) )
+					),
+					'error'
+				);
+			}
 		}
 
 		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
@@ -1409,7 +1792,26 @@ class SettingsPage {
 			$value = trim( (string) $raw[ $id_key ] );
 			$value = 'meta_pixel_id' === $id_key ? $value : strtoupper( $value );
 
-			$clean[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+		}
+
+		// A null target means the submission named a domain that is not
+		// registered: nothing is written, so the values are simply discarded.
+		if ( array() !== $webmaster && null !== $target ) {
+			if ( '' === $target ) {
+				$clean = array_merge( $clean, $webmaster );
+			} else {
+				// Start from what is stored: this key holds every domain's
+				// record, so replacing it wholesale would discard the sibling
+				// domains the submitted form never carried.
+				$stored = $this->settings->get( Settings::DOMAINS_KEY, array() );
+				$rows   = is_array( $stored ) ? $stored : array();
+				$row    = isset( $rows[ $target ] ) && is_array( $rows[ $target ] ) ? $rows[ $target ] : array();
+
+				$rows[ $target ] = array_merge( $row, $webmaster );
+
+				$clean[ Settings::DOMAINS_KEY ] = $rows;
+			}
 		}
 
 		if ( 'social' === $tab ) {
@@ -1452,5 +1854,41 @@ class SettingsPage {
 		}
 
 		return $clean;
+	}
+
+	/**
+	 * Reduce a pasted file value to the bare token this plugin stores.
+	 *
+	 * Accepts what the operator is most likely to have on their clipboard: the
+	 * whole filename the service handed them, or the token alone.
+	 *
+	 * @since 1.0.0
+	 *
+	 * @param string $engine Engine slug.
+	 * @param string $raw    Raw submitted value.
+	 * @return string Token, '' when nothing valid survives.
+	 */
+	private static function sanitize_token( string $engine, string $raw ): string {
+		$shape = self::TOKEN_SHAPES[ $engine ] ?? null;
+
+		if ( null === $shape ) {
+			return '';
+		}
+
+		$value = trim( $raw );
+
+		if ( $shape['lowercase'] ) {
+			$value = strtolower( $value );
+		}
+
+		if ( '' !== $shape['prefix'] && str_starts_with( $value, $shape['prefix'] ) ) {
+			$value = substr( $value, strlen( $shape['prefix'] ) );
+		}
+
+		if ( '' !== $shape['suffix'] && str_ends_with( $value, $shape['suffix'] ) ) {
+			$value = substr( $value, 0, -strlen( $shape['suffix'] ) );
+		}
+
+		return 1 === preg_match( $shape['pattern'], $value ) ? $value : '';
 	}
 }

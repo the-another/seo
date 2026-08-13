@@ -9,6 +9,7 @@
 namespace TheAnother\Plugin\SEO;
 
 use TheAnother\Plugin\SEO\Admin\Metabox;
+use TheAnother\Plugin\SEO\Admin\MigrationNotice;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
 use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
 use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
@@ -16,6 +17,7 @@ use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
 use TheAnother\Plugin\SEO\Database\SitemapFilesTable;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
@@ -38,6 +40,7 @@ use TheAnother\Plugin\SEO\Sitemap\SitemapServer;
 use TheAnother\Plugin\SEO\Sitemap\SitemapStorage;
 use TheAnother\Plugin\SEO\Sitemap\SitemapSweeper;
 use TheAnother\Plugin\SEO\Social\SocialOutput;
+use TheAnother\Plugin\SEO\Verification\MethodMigration;
 use TheAnother\Plugin\SEO\Verification\VerificationFileServer;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
@@ -93,6 +96,7 @@ class Plugin {
 		SitemapFilesTable::maybe_upgrade();
 
 		$this->register_services();
+		$this->container->get( 'method_migration' )->maybe_run();
 		$this->init_services();
 		$this->maybe_dispatch_initial_backfill();
 		$this->maybe_flush_rewrites();
@@ -107,6 +111,8 @@ class Plugin {
 		$c = $this->container;
 
 		$c->register( 'settings', fn() => new Settings() );
+		$c->register( 'method_migration', fn() => new MethodMigration() );
+		$c->register( 'domain_registry', fn() => new DomainRegistry() );
 		$c->register( 'custom_pages', fn() => new CustomPages() );
 		$c->register( 'post_subtypes', fn() => new PostSubtypes() );
 		$c->register( 'template_resolver', fn() => new TemplateResolver() );
@@ -182,9 +188,11 @@ class Plugin {
 				$c->get( 'custom_pages' ),
 				$c->get( 'sitemap_families' ),
 				$c->get( 'sitemap_assignment' ),
-				$c->get( 'post_subtypes' )
+				$c->get( 'post_subtypes' ),
+				$c->get( 'domain_registry' )
 			)
 		);
+		$c->register( 'migration_notice', fn() => new MigrationNotice() );
 		$c->register( 'sitemap_file_repository', fn() => new SitemapFileRepository() );
 		$c->register( 'sitemap_storage', fn() => new SitemapStorage() );
 		$c->register(
@@ -229,19 +237,19 @@ class Plugin {
 		$c->register( 'blocks', fn() => new Blocks() );
 		$c->register(
 			'verification_output',
-			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new VerificationOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'verification_file_server',
-			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ) )
+			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'analytics_output',
-			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 		$c->register(
 			'meta_pixel_output',
-			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ) )
+			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
 	}
 
@@ -272,6 +280,7 @@ class Plugin {
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
 			$this->container->get( 'settings_page' )->init( $hook_manager );
+			$this->container->get( 'migration_notice' )->init( $hook_manager );
 		}
 	}
 

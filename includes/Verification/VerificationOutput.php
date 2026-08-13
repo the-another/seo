@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Verification;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -36,9 +37,13 @@ class VerificationOutput {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings $settings Settings.
+	 * @param Settings       $settings Settings.
+	 * @param DomainRegistry $domains  Domain registry.
 	 */
-	public function __construct( private readonly Settings $settings ) {
+	public function __construct(
+		private readonly Settings $settings,
+		private readonly DomainRegistry $domains
+	) {
 	}
 
 	/**
@@ -74,9 +79,14 @@ class VerificationOutput {
 		}
 
 		$tags = array();
+		$host = $this->domains->get_current_host();
 
 		foreach ( self::META_NAMES as $engine => $meta_name ) {
-			$code = $this->settings->get_verification_code( $engine );
+			if ( Settings::METHOD_FILE === $this->settings->get_verification_method( $engine, $host ) ) {
+				continue;
+			}
+
+			$code = $this->settings->get_verification_code( $engine, $host );
 
 			if ( '' !== $code ) {
 				$tags[ $meta_name ] = $code;
@@ -86,7 +96,19 @@ class VerificationOutput {
 		/**
 		 * Filters the verification tags, keyed by meta name.
 		 *
+		 * The tags are resolved for the domain the request arrived on, not for
+		 * the site as a whole: on a multi-domain install this filter runs once
+		 * per requesting domain and the incoming array differs between them.
+		 * The filter carries no host argument, so a subscriber that needs to
+		 * know which domain it is running for must resolve that itself.
+		 *
+		 * A service verifying by file contributes nothing here — the array holds
+		 * only the services whose method is `meta` on the requested domain.
+		 *
 		 * @since 1.0.0
+		 * @since 1.0.0 Semantics changed: the value is now the requesting
+		 *              domain's tags rather than the whole site's.
+		 * @since 1.0.0 Services on the file method are absent from the array.
 		 *
 		 * @param array<string, string> $tags Meta name => verification code.
 		 */

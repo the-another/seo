@@ -10,6 +10,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Settings\Settings;
 use TheAnother\Plugin\SEO\Verification\VerificationOutput;
 
@@ -18,6 +19,7 @@ class VerificationOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $settings;
+	private $domains;
 	private VerificationOutput $output;
 
 	protected function setUp(): void {
@@ -25,11 +27,17 @@ class VerificationOutputTest extends TestCase {
 		Monkey\setUp();
 
 		$this->settings = Mockery::mock( Settings::class );
-		$this->output   = new VerificationOutput( $this->settings );
+
+		$this->domains  = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
+
+		$this->output   = new VerificationOutput( $this->settings, $this->domains );
 
 		Functions\when( 'esc_attr' )->returnArg();
 		Functions\when( 'is_front_page' )->justReturn( true );
 		Functions\when( 'is_paged' )->justReturn( false );
+
+		$this->methods();
 	}
 
 	protected function tearDown(): void {
@@ -37,7 +45,7 @@ class VerificationOutputTest extends TestCase {
 		parent::tearDown();
 	}
 
-	private function codes( array $codes = array() ): void {
+	private function codes( array $codes = array(), string $host = 'example.com' ): void {
 		$defaults = array(
 			'google'   => '',
 			'bing'     => '',
@@ -48,8 +56,25 @@ class VerificationOutputTest extends TestCase {
 
 		foreach ( array_merge( $defaults, $codes ) as $engine => $code ) {
 			$this->settings->shouldReceive( 'get_verification_code' )
-				->with( $engine )
+				->with( $engine, $host )
 				->andReturn( $code );
+		}
+	}
+
+	private function methods( array $methods = array(), string $host = 'example.com' ): void {
+		$defaults = array(
+			'google'   => 'meta',
+			'bing'     => 'meta',
+			'yandex'   => 'meta',
+			'yahoo'    => 'meta',
+			'facebook' => 'meta',
+		);
+
+		foreach ( array_merge( $defaults, $methods ) as $engine => $method ) {
+			$this->settings->shouldReceive( 'get_verification_method' )
+				->with( $engine, $host )
+				->andReturn( $method )
+				->byDefault();
 		}
 	}
 
@@ -161,5 +186,30 @@ class VerificationOutputTest extends TestCase {
 
 	public function test_sanitize_code_strips_disallowed_characters(): void {
 		$this->assertSame( 'abc123', VerificationOutput::sanitize_code( ' ab"c<1>2 3 ' ) );
+	}
+
+	public function test_prints_the_codes_of_the_domain_the_request_arrived_on(): void {
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
+
+		$this->methods( array(), 'brandtwo.com' );
+		$this->codes( array( 'google' => 'brandtwocode' ), 'brandtwo.com' );
+
+		$this->assertStringContainsString(
+			'<meta name="google-site-verification" content="brandtwocode" />',
+			$this->render()
+		);
+	}
+
+	public function test_a_service_in_file_mode_prints_no_meta_tag(): void {
+		$this->methods( array( 'google' => 'file' ) );
+		$this->codes( array( 'google' => 'filetoken', 'bing' => 'bingcode' ) );
+
+		$html = $this->render();
+
+		$this->assertStringNotContainsString( 'google-site-verification', $html );
+		$this->assertStringContainsString(
+			'<meta name="msvalidate.01" content="bingcode" />',
+			$html
+		);
 	}
 }

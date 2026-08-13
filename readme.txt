@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 0.4.0
+Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,6 +64,16 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 == Changelog ==
 
+
+
+= 1.0.0 - 2026-08-13 =
+* Add: Per-domain site verification and tracking — a multi-brand site whose brands live on separate domains holds its own Google Search Console, Bing Webmaster Tools, Yandex, Yahoo, and Meta codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. Previously one set of codes was emitted on every domain, so only one could be verified at all. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.
+* Add: `taseo_verification_domains` filter — push a host to give it its own codes. Values are normalised and de-duplicated, and the site's own host can be neither removed nor reordered. The Another Multi-Brand Global Styles pushes every host from its published Brands' URL rules; with no subscribers the list is the site's own host and behaviour is unchanged.
+* Add: Verification method selection — Google, Bing, and Yandex each verify by either a meta tag or a file, chosen per service and per domain. Each service has one input instead of two: paste the code, the file name, or the whole meta tag, and the plugin stores the bare token and derives the file name from it. Yahoo and Meta are unchanged; neither publishes a file method.
+* Add: A verification value that does not fit the selected method's shape is reported rather than silently discarded — the save names the service whose value was dropped instead of reporting success over an emptied field, and each input's placeholder shows which shape its method expects.
+* Add: Tracking IDs inherit the default domain when left blank, so brands sharing one analytics property need it entered once. Verification codes and files never inherit: a property is verified on its own, and inheriting would guarantee a silently failed verification instead of an obviously empty field.
+* Refactor: Verification settings collapsed from two keys per service to one token plus a method. A one-time migration converts existing settings, including every per-domain record, and runs before any output. Bing and Yandex are lossless — both keys held the same token. Google is the exception, because its file method issues a credential unrelated to its meta tag: a site that had both keeps the file and loses the meta code, so its meta tag stops printing after the upgrade. A dismissible notice names every service and domain this happened to; re-add a code from Search Console to switch back to the meta tag.
+* Refactor: Requests arriving on an unrecognised host — a staging alias, a bare IP, a load balancer — resolve to the default domain, which is what every host received before. Single-domain sites need no migration and see no output change.
 
 = 0.4.0 - 2026-08-11 =
 * Add: Post subtypes — one post type can be split into several SEO subtypes via the `taseo_post_subtypes` and `taseo_post_subtype` filters, each with its own templates, schema type, and sitemap family. A store keeping auctions, catalogue items, and merchandise in a single `product` post type can now treat them as three things.

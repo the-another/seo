@@ -17,6 +17,11 @@ class SettingsTest extends TestCase {
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
+
+		Functions\when( 'home_url' )->justReturn( 'https://example.com' );
+		Functions\when( 'wp_parse_url' )->alias(
+			static fn( string $url, int $component = -1 ) => parse_url( $url, $component )
+		);
 	}
 
 	protected function tearDown(): void {
@@ -225,26 +230,49 @@ class SettingsTest extends TestCase {
 		$this->assertSame( '', ( new Settings() )->get_verification_code( 'duckduckgo' ) );
 	}
 
-	public function test_verification_file_returns_stored_value_per_engine(): void {
+	public function test_verification_method_defaults_to_meta(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_reads_a_stored_file_method(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_google_method' => 'file' ) );
+
+		$this->assertSame( 'file', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_rejects_an_unrecognised_value(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verify_google_method' => 'carrier-pigeon' ) );
+
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'google' ) );
+	}
+
+	public function test_verification_method_is_per_domain_and_does_not_inherit(): void {
 		Functions\when( 'get_option' )->justReturn(
 			array(
-				'verify_google_file' => 'google1a2b3c.html',
-				'verify_bing_file'   => 'BINGTOKEN123',
-				'verify_yandex_file' => 'yandex_9f8e7d.html',
+				'verify_google_method' => 'file',
+				'verification_domains' => array( 'brandtwo.com' => array() ),
 			)
 		);
 
 		$settings = new Settings();
 
-		$this->assertSame( 'google1a2b3c.html', $settings->get_verification_file( 'google' ) );
-		$this->assertSame( 'BINGTOKEN123', $settings->get_verification_file( 'bing' ) );
-		$this->assertSame( 'yandex_9f8e7d.html', $settings->get_verification_file( 'yandex' ) );
+		$this->assertSame( 'file', $settings->get_verification_method( 'google' ) );
+		$this->assertSame( 'meta', $settings->get_verification_method( 'google', 'brandtwo.com' ) );
 	}
 
-	public function test_verification_file_returns_empty_string_for_engine_without_file_method(): void {
-		Functions\when( 'get_option' )->justReturn( array( 'verify_facebook' => 'metatoken' ) );
+	/**
+	 * `meta` is the answer for every engine with no stored method, including
+	 * the two that publish no file method at all. VerificationOutput iterates
+	 * all five engines and skips the ones this returns METHOD_FILE for, so a
+	 * Yahoo or Meta tag prints only because this says `meta` here — returning
+	 * '' would stop both tags dead.
+	 */
+	public function test_verification_method_is_meta_for_a_service_with_no_file_method(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
 
-		$this->assertSame( '', ( new Settings() )->get_verification_file( 'facebook' ) );
+		$this->assertSame( 'meta', ( new Settings() )->get_verification_method( 'yahoo' ) );
 	}
 
 	public function test_tracking_ids_return_stored_values(): void {
@@ -327,5 +355,90 @@ class SettingsTest extends TestCase {
 		);
 
 		$this->assertSame( array(), ( new Settings() )->get_disabled_sitemap_families() );
+	}
+
+	public function test_verification_code_for_the_default_host_reads_the_flat_key(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google' ) );
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google', 'example.com' ) );
+		$this->assertSame( 'defaultcode', $settings->get_verification_code( 'google', 'WWW.Example.com' ) );
+	}
+
+	public function test_verification_code_for_another_host_reads_its_own_record(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$this->assertSame( 'brandcode', ( new Settings() )->get_verification_code( 'google', 'brandtwo.com' ) );
+	}
+
+	public function test_verification_code_does_not_inherit_the_default(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verify_google'        => 'defaultcode',
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => '' ) ),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( '', $settings->get_verification_code( 'google', 'brandtwo.com' ) );
+		$this->assertSame( '', $settings->get_verification_code( 'google', 'unconfigured.com' ) );
+	}
+
+	public function test_tracking_ids_inherit_the_default_when_blank(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'analytics_ga4_id'     => 'G-DEFAULT',
+				'analytics_gtm_id'     => 'GTM-DEFAULT',
+				'meta_pixel_id'        => '111111111111111',
+				'verification_domains' => array(
+					'brandtwo.com' => array( 'analytics_ga4_id' => 'G-BRAND' ),
+				),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'G-BRAND', $settings->get_ga4_id( 'brandtwo.com' ) );
+		$this->assertSame( 'GTM-DEFAULT', $settings->get_gtm_id( 'brandtwo.com' ) );
+		$this->assertSame( '111111111111111', $settings->get_meta_pixel_id( 'brandtwo.com' ) );
+	}
+
+	public function test_get_domain_record_returns_an_empty_array_for_an_unknown_host(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'verification_domains' => 'corrupt' ) );
+
+		$this->assertSame( array(), ( new Settings() )->get_domain_record( 'brandtwo.com' ) );
+	}
+
+	/**
+	 * Records are keyed on normalized hosts, so this public getter normalizes
+	 * its argument like every other host-taking method on this class — a caller
+	 * holding a raw `www.`/scheme/port form resolves the same record.
+	 */
+	public function test_get_domain_record_normalizes_its_host(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'verification_domains' => array( 'brandtwo.com' => array( 'verify_google' => 'brandcode' ) ),
+			)
+		);
+
+		$settings = new Settings();
+		$expected = array( 'verify_google' => 'brandcode' );
+
+		$this->assertSame( $expected, $settings->get_domain_record( 'brandtwo.com' ) );
+		$this->assertSame( $expected, $settings->get_domain_record( 'WWW.BrandTwo.com' ) );
+		$this->assertSame( $expected, $settings->get_domain_record( 'https://www.brandtwo.com:8443/shop' ) );
 	}
 }

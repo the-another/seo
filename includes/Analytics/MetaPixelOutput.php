@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Analytics;
 
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
@@ -34,9 +35,13 @@ class MetaPixelOutput {
 	/**
 	 * Constructor.
 	 *
-	 * @param Settings $settings Settings.
+	 * @param Settings       $settings Settings.
+	 * @param DomainRegistry $domains  Domain registry.
 	 */
-	public function __construct( private readonly Settings $settings ) {
+	public function __construct(
+		private readonly Settings $settings,
+		private readonly DomainRegistry $domains
+	) {
 	}
 
 	/**
@@ -110,7 +115,7 @@ class MetaPixelOutput {
 			return array();
 		}
 
-		$stored = $this->settings->get_meta_pixel_id();
+		$stored = $this->settings->get_meta_pixel_id( $this->domains->get_current_host() );
 		$ids    = '' === $stored ? array() : array( $stored );
 
 		/**
@@ -118,7 +123,15 @@ class MetaPixelOutput {
 		 *
 		 * Append an ID here to fire a secondary pixel on specific pages.
 		 *
+		 * The stored ID is resolved for the domain the request arrived on, not
+		 * for the site as a whole: on a multi-domain install this filter runs
+		 * once per requesting domain and the incoming array differs between
+		 * them. The filter carries no host argument, so a subscriber that needs
+		 * to know which domain it is running for must resolve that itself.
+		 *
 		 * @since 1.0.0
+		 * @since 1.0.0 Semantics changed: the value now starts from the
+		 *              requesting domain's ID rather than the whole site's.
 		 *
 		 * @param array<int, string> $ids Pixel IDs.
 		 */

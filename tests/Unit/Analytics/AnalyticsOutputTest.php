@@ -11,6 +11,7 @@ use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
+use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Settings\Settings;
 
 #[CoversClass( AnalyticsOutput::class )]
@@ -18,6 +19,7 @@ class AnalyticsOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $settings;
+	private $domains;
 	private AnalyticsOutput $output;
 
 	/**
@@ -45,7 +47,10 @@ class AnalyticsOutputTest extends TestCase {
 		$this->settings->shouldReceive( 'get_ga4_id' )->andReturn( '' )->byDefault();
 		$this->settings->shouldReceive( 'get_gtm_id' )->andReturn( '' )->byDefault();
 
-		$this->output = new AnalyticsOutput( $this->settings );
+		$this->domains = Mockery::mock( DomainRegistry::class );
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
+
+		$this->output = new AnalyticsOutput( $this->settings, $this->domains );
 
 		Functions\when( 'is_admin' )->justReturn( false );
 		Functions\when( 'is_customize_preview' )->justReturn( false );
@@ -207,5 +212,19 @@ class AnalyticsOutputTest extends TestCase {
 		$this->output->enqueue_gtag();
 
 		$this->assertSame( array(), $this->enqueued );
+	}
+
+	public function test_enqueues_gtag_with_the_requested_domains_measurement_id(): void {
+		$this->domains->shouldReceive( 'get_current_host' )->andReturn( 'brandtwo.com' );
+
+		$this->settings->shouldReceive( 'get_ga4_id' )->with( 'brandtwo.com' )->andReturn( 'G-BRANDTWO' );
+
+		$this->output->enqueue_gtag();
+
+		$this->assertSame(
+			'https://www.googletagmanager.com/gtag/js?id=G-BRANDTWO',
+			$this->enqueued['taseo-gtag']
+		);
+		$this->assertStringContainsString( "gtag('config', 'G-BRANDTWO')", $this->inline['taseo-gtag'] );
 	}
 }
