@@ -82,9 +82,65 @@ class OrphanCleanerTest extends TestCase {
 	 * @param array<int, array<string, mixed>> $rows
 	 */
 	private function stub_row_scan( array $rows ): void {
+		$this->stub_row_scan_batches( array( $rows ) );
+	}
+
+	/**
+	 * Serve the row scan one batch per iteration, then run dry.
+	 *
+	 * @param array<int, array<int, array<string, mixed>>> $batches Successive batches.
+	 * @param array<int, string>                           $order   Category call order, appended to by reference.
+	 */
+	private function stub_row_scan_batches( array $batches, ?array &$order = null ): void {
 		$this->wpdb->shouldReceive( 'get_results' )
 			->with( Mockery::on( static fn( string $sql ): bool => str_contains( $sql, 'SELECT id, object_type' ) ), ARRAY_A )
-			->andReturn( $rows, array() );
+			->andReturnUsing(
+				static function () use ( &$batches, &$order ): array {
+					if ( null !== $order ) {
+						$order[] = 'rows';
+					}
+
+					return array_shift( $batches ) ?? array();
+				}
+			);
+	}
+
+	/**
+	 * Serve the duplicate scan one batch per iteration, then run dry.
+	 *
+	 * @param array<int, array<int, int>> $batches Successive batches.
+	 * @param array<int, string>          $order   Category call order, appended to by reference.
+	 */
+	private function stub_duplicate_scan_batches( array $batches, ?array &$order = null ): void {
+		$this->wpdb->shouldReceive( 'get_col' )
+			->with( Mockery::on( static fn( string $sql ): bool => str_contains( $sql, 'COUNT(DISTINCT object_subtype) > 1' ) ) )
+			->andReturnUsing(
+				static function () use ( &$batches, &$order ): array {
+					if ( null !== $order ) {
+						$order[] = 'duplicates';
+					}
+
+					return array_shift( $batches ) ?? array();
+				}
+			);
+	}
+
+	/**
+	 * Capture the arguments each $wpdb->prepare() call binds.
+	 *
+	 * The default stub throws them away, which is exactly why the ID cursor
+	 * — a Global Constraint of this class — had no coverage at all.
+	 *
+	 * @param array<int, array<int, mixed>> $captured Bindings, appended to by reference.
+	 */
+	private function capture_prepared_bindings( array &$captured ): void {
+		$this->wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $sql, ...$args ) use ( &$captured ): string {
+				$captured[] = $args;
+
+				return $sql;
+			}
+		);
 	}
 
 	public function test_deletes_rows_whose_post_is_gone(): void {
@@ -321,9 +377,7 @@ class OrphanCleanerTest extends TestCase {
 	 * @param array<int, int> $ids
 	 */
 	private function stub_duplicate_scan( array $ids ): void {
-		$this->wpdb->shouldReceive( 'get_col' )
-			->with( Mockery::on( static fn( string $sql ): bool => str_contains( $sql, 'COUNT(DISTINCT object_subtype) > 1' ) ) )
-			->andReturn( $ids, array() );
+		$this->stub_duplicate_scan_batches( array( $ids ) );
 	}
 
 	public function test_purges_duplicate_subtype_rows_keeping_the_resolved_subtype(): void {
@@ -485,5 +539,105 @@ class OrphanCleanerTest extends TestCase {
 		$this->storage->shouldReceive( 'is_stream_wrapped' )->once()->andReturn( false );
 
 		$this->assertSame( array(), $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['skipped'] );
+	}
+
+	public function test_the_default_run_covers_all_three_categories_rows_first(): void {
+		// `wp taseo cleanup` with no arguments takes this path, and every
+		// other test in this file passes an explicit category — so dropping
+		// the `null === $only` disjunct from any branch would leave the whole
+		// suite green while the default invocation deleted nothing.
+		$order = array();
+
+		$this->stub_row_scan_batches(
+			array(
+				array( array( 'id' => 1, 'object_type' => 'post', 'object_subtype' => 'post', 'object_id' => 10 ) ),
+			),
+			$order
+		);
+		$this->stub_duplicate_scan_batches( array( array( 77 ) ), $order );
+
+		$post            = Mockery::mock( 'WP_Post' );
+		$post->ID        = 77;
+		$post->post_type = 'product';
+
+		// Post 10 is gone so the row pass removes it; post 77 survives so the
+		// duplicate pass has something to collapse.
+		Monkey\Functions\when( 'get_post' )->alias(
+			static fn( int $id ) => 10 === $id ? null : $post
+		);
+
+		$this->repository->shouldReceive( 'delete' )->once()->with( 'post', 'post', 10 );
+		$this->subtypes->shouldReceive( 'resolve' )->once()->with( $post )->andReturn( 'aucteeno_item' );
+		$this->repository->shouldReceive( 'purge_stale_subtypes' )->once()->with( 'post', 'aucteeno_item', 77 );
+
+		$this->use_real_listable_predicate();
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'gone-sitemap-1.xml' ) );
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'gone', 'chunk_number' => 1 ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( null );
+		$this->storage->shouldReceive( 'modified_time' )->andReturn( time() - OrphanCleaner::MIN_FILE_AGE - 1 );
+		$this->storage->shouldReceive( 'delete' )->once();
+
+		$result = $this->cleaner->clean( false, null );
+
+		$this->assertSame( 1, $result['rows'] );
+		$this->assertSame( 1, $result['duplicates'] );
+		$this->assertSame( 1, $result['files'] );
+
+		// Rows before duplicates, documented and load-bearing:
+		// clean_duplicates() skips objects whose post is gone because
+		// clean_rows() has already handled them.
+		$this->assertSame( array( 'rows', 'duplicates' ), $order );
+	}
+
+	public function test_the_row_scan_resumes_from_the_last_id_of_the_previous_batch(): void {
+		// "Batch by ascending ID cursor, never OFFSET" is a Global Constraint
+		// of this class. Every other stub returns a short batch, so the loop
+		// exits after one pass and never advances the cursor at all; drop
+		// `$last_id = (int) $row['id']` and production re-reads batch one
+		// forever on any table with BATCH_SIZE or more rows.
+		$full = array();
+
+		for ( $i = 1; $i <= OrphanCleaner::BATCH_SIZE; $i++ ) {
+			// system_page rows are never orphans, so the scan walks the whole
+			// batch without needing a get_post() stub per row.
+			$full[] = array( 'id' => $i * 2, 'object_type' => 'system_page', 'object_subtype' => 'search', 'object_id' => 0 );
+		}
+
+		$short = array(
+			array( 'id' => 9001, 'object_type' => 'system_page', 'object_subtype' => 'search', 'object_id' => 0 ),
+		);
+
+		$bindings = array();
+		$this->capture_prepared_bindings( $bindings );
+		$this->stub_row_scan_batches( array( $full, $short ) );
+
+		$this->cleaner->clean( true, OrphanCleaner::ONLY_ROWS );
+
+		$this->assertCount( 2, $bindings );
+		$this->assertSame( array( 0, OrphanCleaner::BATCH_SIZE ), $bindings[0] );
+		$this->assertSame( array( OrphanCleaner::BATCH_SIZE * 2, OrphanCleaner::BATCH_SIZE ), $bindings[1] );
+	}
+
+	public function test_the_duplicate_scan_resumes_from_the_last_id_of_the_previous_batch(): void {
+		$full = array();
+
+		for ( $i = 1; $i <= OrphanCleaner::BATCH_SIZE; $i++ ) {
+			$full[] = $i * 2;
+		}
+
+		$bindings = array();
+		$this->capture_prepared_bindings( $bindings );
+		$this->stub_duplicate_scan_batches( array( $full, array( 9001 ) ) );
+
+		// Every post gone: the cursor must still advance, since it is set
+		// before the existence check precisely so a batch of dead IDs cannot
+		// stall the scan.
+		Monkey\Functions\when( 'get_post' )->justReturn( null );
+
+		$this->cleaner->clean( true, OrphanCleaner::ONLY_DUPLICATES );
+
+		$this->assertCount( 2, $bindings );
+		$this->assertSame( array( 0, OrphanCleaner::BATCH_SIZE ), $bindings[0] );
+		$this->assertSame( array( OrphanCleaner::BATCH_SIZE * 2, OrphanCleaner::BATCH_SIZE ), $bindings[1] );
 	}
 }
