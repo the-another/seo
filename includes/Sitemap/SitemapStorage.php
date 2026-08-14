@@ -60,6 +60,85 @@ class SitemapStorage {
 	}
 
 	/**
+	 * Split a chunk file name back into the subtype and number that built it.
+	 *
+	 * The inverse of get_file_name(), and deliberately next to it: this class
+	 * is the only place that knows the {subtype}-sitemap-{n}.xml convention,
+	 * and a second copy of the pattern elsewhere would be free to drift from
+	 * the one that writes the files.
+	 *
+	 * The subtype group is greedy so that a key which itself contains
+	 * "-sitemap-{n}" round-trips to the same chunk rather than to a shorter
+	 * prefix. The character class matches SitemapServer::PATTERN_CHUNK.
+	 *
+	 * @since 1.1.0
+	 * @param string $file_name Bare file name.
+	 * @return array{object_subtype: string, chunk_number: int}|null Chunk
+	 *               identity in the shape delete()/exists() accept, or null
+	 *               when the name is not a chunk file.
+	 */
+	public function parse_file_name( string $file_name ): ?array {
+		if ( 1 !== preg_match( '/^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$/', $file_name, $matches ) ) {
+			return null;
+		}
+
+		$number = (int) $matches[2];
+
+		if ( $number < 1 ) {
+			// Chunk numbers start at 1; a zero can only come from a hand-made
+			// file name, never from get_file_name().
+			return null;
+		}
+
+		return array(
+			'object_subtype' => $matches[1],
+			'chunk_number'   => $number,
+		);
+	}
+
+	/**
+	 * Every file name present in the sitemap directory.
+	 *
+	 * Goes through WP_Filesystem rather than glob()/scandir() for the same
+	 * reason write() does: the directory may be a stream wrapper, and an
+	 * unlistable directory has to be indistinguishable from a failure here,
+	 * not a fatal.
+	 *
+	 * @since 1.1.0
+	 * @return array<int, string> Bare file names, unsorted; empty when the
+	 *               directory is absent or cannot be listed.
+	 */
+	public function list_files(): array {
+		global $wp_filesystem;
+
+		if ( ! function_exists( 'WP_Filesystem' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+
+		if ( ! WP_Filesystem() || ! $wp_filesystem ) {
+			return array();
+		}
+
+		$listing = $wp_filesystem->dirlist( $this->get_directory_path() );
+
+		if ( ! is_array( $listing ) ) {
+			return array();
+		}
+
+		$names = array();
+
+		foreach ( $listing as $name => $entry ) {
+			if ( is_array( $entry ) && isset( $entry['type'] ) && 'f' !== $entry['type'] ) {
+				continue;
+			}
+
+			$names[] = (string) $name;
+		}
+
+		return $names;
+	}
+
+	/**
 	 * Absolute path of a chunk's file.
 	 *
 	 * @since 0.3.0
