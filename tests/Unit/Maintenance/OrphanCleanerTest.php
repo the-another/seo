@@ -50,6 +50,11 @@ class OrphanCleanerTest extends TestCase {
 		$this->storage    = Mockery::mock( SitemapStorage::class );
 		$this->settings   = Mockery::mock( Settings::class );
 
+		// Both table scans suspend cache addition for their duration so a
+		// per-row get_post() cannot grow the object cache's runtime array
+		// without limit over a 121k-row table.
+		Monkey\Functions\when( 'wp_suspend_cache_addition' )->justReturn( false );
+
 		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post', 'product' ) )->byDefault();
 		$this->settings->shouldReceive( 'get_enabled_taxonomies' )->andReturn( array( 'category' ) )->byDefault();
 		$this->families->shouldReceive( 'all' )->andReturn( array( 'vendor_store' => 'Stores' ) )->byDefault();
@@ -153,6 +158,78 @@ class OrphanCleanerTest extends TestCase {
 		$this->repository->shouldNotReceive( 'delete' );
 
 		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_ROWS )['rows'] );
+	}
+
+	public function test_suspends_cache_addition_for_the_length_of_the_row_scan(): void {
+		$calls = array();
+		Monkey\Functions\when( 'wp_suspend_cache_addition' )->alias(
+			static function ( bool $suspend ) use ( &$calls ): bool {
+				$calls[] = $suspend;
+
+				return $suspend;
+			}
+		);
+
+		$this->stub_row_scan(
+			array(
+				array( 'id' => 1, 'object_type' => 'post', 'object_subtype' => 'post', 'object_id' => 10 ),
+			)
+		);
+
+		Monkey\Functions\when( 'get_post' )->justReturn( null );
+		$this->repository->shouldReceive( 'delete' );
+
+		$this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS );
+
+		// Without this every get_post() miss wp_cache_add()s a full WP_Post
+		// into a runtime array that is never trimmed, so a 121k-row scan
+		// holds 121k post bodies in memory at once.
+		$this->assertSame( array( true, false ), $calls );
+	}
+
+	public function test_restores_cache_addition_when_the_scan_throws(): void {
+		$calls = array();
+		Monkey\Functions\when( 'wp_suspend_cache_addition' )->alias(
+			static function ( bool $suspend ) use ( &$calls ): bool {
+				$calls[] = $suspend;
+
+				return $suspend;
+			}
+		);
+
+		$this->wpdb->shouldReceive( 'get_results' )->andThrow( new RuntimeException( 'server has gone away' ) );
+
+		try {
+			$this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS );
+			$this->fail( 'Expected the scan failure to propagate.' );
+		} catch ( RuntimeException $e ) {
+			$this->assertSame( 'server has gone away', $e->getMessage() );
+		}
+
+		// A leaked suspension would silently disable cache writes for the
+		// rest of a long-lived CLI process.
+		$this->assertSame( array( true, false ), $calls );
+	}
+
+	public function test_resolves_each_distinct_subtype_once_rather_than_once_per_row(): void {
+		$this->stub_row_scan(
+			array(
+				array( 'id' => 1, 'object_type' => 'post', 'object_subtype' => 'aucteeno_item', 'object_id' => 10 ),
+				array( 'id' => 2, 'object_type' => 'post', 'object_subtype' => 'aucteeno_item', 'object_id' => 11 ),
+				array( 'id' => 3, 'object_type' => 'post', 'object_subtype' => 'aucteeno_item', 'object_id' => 12 ),
+				array( 'id' => 4, 'object_type' => 'post', 'object_subtype' => 'post', 'object_id' => 13 ),
+			)
+		);
+
+		Monkey\Functions\when( 'get_post' )->justReturn( (object) array( 'ID' => 1 ) );
+
+		// post_type_for() calls all(), which re-runs the taseo_post_subtypes
+		// filter plus get_post_types() and get_taxonomies(). Once per row
+		// would be a full registry walk per row on the site this exists for.
+		$this->subtypes->shouldReceive( 'post_type_for' )->once()->with( 'aucteeno_item' )->andReturn( 'product' );
+		$this->subtypes->shouldReceive( 'post_type_for' )->once()->with( 'post' )->andReturn( 'post' );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS )['rows'] );
 	}
 
 	public function test_aborts_when_no_families_are_registered_but_pushed_rows_exist(): void {

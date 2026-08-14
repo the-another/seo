@@ -165,45 +165,67 @@ class OrphanCleaner {
 		$removed    = 0;
 		$batch_size = 0;
 
-		do {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$rows = $wpdb->get_results(
-				$wpdb->prepare(
-					"SELECT id, object_type, object_subtype, object_id FROM {$table}
-					WHERE id > %d
-					ORDER BY id ASC
-					LIMIT %d",
-					$last_id,
-					self::BATCH_SIZE
-				),
-				ARRAY_A
-			);
-			// phpcs:enable
+		// Subtype => owning post type. post_type_for() walks all(), which
+		// re-runs the taseo_post_subtypes filter and both registry reads on
+		// every call; the answer cannot change mid-scan, so it is resolved
+		// once per distinct subtype rather than once per row.
+		$owning_post_type = array();
 
-			$rows       = is_array( $rows ) ? $rows : array();
-			$batch_size = count( $rows );
+		// A CLI scan walks every row on the table, and get_post() below
+		// wp_cache_add()s each post it loads. Every object cache backend, the
+		// default one included, keeps those in a runtime array — so without
+		// this an unbounded scan accumulates one full WP_Post, post_content
+		// and all, per row for the life of the process. --dry-run reads the
+		// same rows, so previewing does not avoid it. Deletes still
+		// invalidate: wp_cache_delete() is unaffected by suspension.
+		wp_suspend_cache_addition( true );
 
-			foreach ( $rows as $row ) {
-				$last_id = (int) $row['id'];
+		try {
+			do {
+				// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$rows = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT id, object_type, object_subtype, object_id FROM {$table}
+						WHERE id > %d
+						ORDER BY id ASC
+						LIMIT %d",
+						$last_id,
+						self::BATCH_SIZE
+					),
+					ARRAY_A
+				);
+				// phpcs:enable
 
-				if ( ! $this->is_orphan_row( $row, $post_types, $taxonomies ) ) {
-					continue;
+				$rows       = is_array( $rows ) ? $rows : array();
+				$batch_size = count( $rows );
+
+				foreach ( $rows as $row ) {
+					$last_id = (int) $row['id'];
+
+					if ( ! $this->is_orphan_row( $row, $post_types, $taxonomies, $owning_post_type ) ) {
+						continue;
+					}
+
+					++$removed;
+
+					if ( ! $dry_run ) {
+						// Through the repository, never a bulk DELETE: the
+						// taseo_indexable_deleting listener releases the chunk
+						// slot while the row's pointer is still readable.
+						$this->repository->delete(
+							(string) $row['object_type'],
+							(string) $row['object_subtype'],
+							(int) $row['object_id']
+						);
+					}
 				}
-
-				++$removed;
-
-				if ( ! $dry_run ) {
-					// Through the repository, never a bulk DELETE: the
-					// taseo_indexable_deleting listener releases the chunk
-					// slot while the row's pointer is still readable.
-					$this->repository->delete(
-						(string) $row['object_type'],
-						(string) $row['object_subtype'],
-						(int) $row['object_id']
-					);
-				}
-			}
-		} while ( self::BATCH_SIZE === $batch_size );
+			} while ( self::BATCH_SIZE === $batch_size );
+		} finally {
+			// finally, not a trailing call: an exception mid-scan would
+			// otherwise leave cache addition suspended for the rest of the
+			// process, silently disabling caching for every later command.
+			wp_suspend_cache_addition( false );
+		}
 
 		return $removed;
 	}
@@ -211,12 +233,13 @@ class OrphanCleaner {
 	/**
 	 * Whether one row's object is gone or out of scope.
 	 *
-	 * @param array<string, mixed> $row        Row (object_type, object_subtype, object_id).
-	 * @param array<int, string>   $post_types Enabled post types.
-	 * @param array<int, string>   $taxonomies Enabled taxonomies.
+	 * @param array<string, mixed>  $row              Row (object_type, object_subtype, object_id).
+	 * @param array<int, string>    $post_types       Enabled post types.
+	 * @param array<int, string>    $taxonomies       Enabled taxonomies.
+	 * @param array<string, string> $owning_post_type Subtype => post type, memoised across the scan.
 	 * @return bool True when the row should go.
 	 */
-	private function is_orphan_row( array $row, array $post_types, array $taxonomies ): bool {
+	private function is_orphan_row( array $row, array $post_types, array $taxonomies, array &$owning_post_type ): bool {
 		$type    = (string) $row['object_type'];
 		$subtype = (string) $row['object_subtype'];
 		$id      = (int) $row['object_id'];
@@ -228,7 +251,11 @@ class OrphanCleaner {
 			// subtype row on the site. post_type_for() returns its argument
 			// unchanged for an undeclared key, which is right for the
 			// unsplit case.
-			if ( ! in_array( $this->subtypes->post_type_for( $subtype ), $post_types, true ) ) {
+			if ( ! isset( $owning_post_type[ $subtype ] ) ) {
+				$owning_post_type[ $subtype ] = $this->subtypes->post_type_for( $subtype );
+			}
+
+			if ( ! in_array( $owning_post_type[ $subtype ], $post_types, true ) ) {
 				return true;
 			}
 
@@ -281,41 +308,50 @@ class OrphanCleaner {
 		$collapsed  = 0;
 		$batch_size = 0;
 
-		do {
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
-			$ids = $wpdb->get_col(
-				$wpdb->prepare(
-					"SELECT object_id FROM {$table}
-					WHERE object_type = 'post' AND object_id > %d
-					GROUP BY object_id
-					HAVING COUNT(DISTINCT object_subtype) > 1
-					ORDER BY object_id ASC
-					LIMIT %d",
-					$last_id,
-					self::BATCH_SIZE
-				)
-			);
-			// phpcs:enable
+		// Same reason as clean_rows(): one get_post() per row over an
+		// unbounded scan otherwise grows the object cache's runtime array
+		// without limit.
+		wp_suspend_cache_addition( true );
 
-			$ids        = is_array( $ids ) ? $ids : array();
-			$batch_size = count( $ids );
+		try {
+			do {
+				// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				$ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT object_id FROM {$table}
+						WHERE object_type = 'post' AND object_id > %d
+						GROUP BY object_id
+						HAVING COUNT(DISTINCT object_subtype) > 1
+						ORDER BY object_id ASC
+						LIMIT %d",
+						$last_id,
+						self::BATCH_SIZE
+					)
+				);
+				// phpcs:enable
 
-			foreach ( $ids as $object_id ) {
-				$object_id = (int) $object_id;
-				$last_id   = $object_id;
-				$post      = get_post( $object_id );
+				$ids        = is_array( $ids ) ? $ids : array();
+				$batch_size = count( $ids );
 
-				if ( ! $post ) {
-					continue;
+				foreach ( $ids as $object_id ) {
+					$object_id = (int) $object_id;
+					$last_id   = $object_id;
+					$post      = get_post( $object_id );
+
+					if ( ! $post ) {
+						continue;
+					}
+
+					++$collapsed;
+
+					if ( ! $dry_run ) {
+						$this->repository->purge_stale_subtypes( 'post', $this->subtypes->resolve( $post ), $object_id );
+					}
 				}
-
-				++$collapsed;
-
-				if ( ! $dry_run ) {
-					$this->repository->purge_stale_subtypes( 'post', $this->subtypes->resolve( $post ), $object_id );
-				}
-			}
-		} while ( self::BATCH_SIZE === $batch_size );
+			} while ( self::BATCH_SIZE === $batch_size );
+		} finally {
+			wp_suspend_cache_addition( false );
+		}
 
 		return $collapsed;
 	}
