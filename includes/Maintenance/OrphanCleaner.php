@@ -97,6 +97,10 @@ class OrphanCleaner {
 			$result['duplicates'] = $this->clean_duplicates( $dry_run );
 		}
 
+		if ( null === $only || self::ONLY_FILES === $only ) {
+			$result['files'] = $this->clean_files( $dry_run, $result['skipped'] );
+		}
+
 		return $result;
 	}
 
@@ -314,5 +318,61 @@ class OrphanCleaner {
 		} while ( self::BATCH_SIZE === $batch_size );
 
 		return $collapsed;
+	}
+
+	/**
+	 * Delete XML files with no live chunk behind them.
+	 *
+	 * Three cases, all of which serve a stale 200 to crawlers: no registry
+	 * row at all; a tombstoned row (link_count 0) whose unlink failed, e.g.
+	 * storage was unwritable at the time; and a suspended family's leftover,
+	 * where suspend_subtype_chunks() nulled generated_at to hide the chunk
+	 * from the root index and expected the file gone.
+	 *
+	 * Names that do not parse are left alone. The directory belongs to this
+	 * plugin, but deleting a file it did not write is not this command's
+	 * business.
+	 *
+	 * @param bool               $dry_run Count without deleting.
+	 * @param array<int, string> $skipped Skip reasons, appended to by reference.
+	 * @return int Files removed.
+	 */
+	private function clean_files( bool $dry_run, array &$skipped ): int {
+		$names = $this->storage->list_files();
+
+		if ( array() === $names ) {
+			if ( $this->storage->is_stream_wrapped() ) {
+				// An object store that cannot be listed is indistinguishable
+				// from an empty directory, so say so rather than reporting a
+				// clean scan that never happened.
+				$skipped[] = 'Filesystem scan skipped: uploads are stream-wrapped and the sitemap directory returned no listing.';
+			}
+
+			return 0;
+		}
+
+		$removed = 0;
+
+		foreach ( $names as $name ) {
+			$chunk = $this->storage->parse_file_name( $name );
+
+			if ( null === $chunk ) {
+				continue;
+			}
+
+			$row = $this->files->get_by_subtype_and_number( $chunk['object_subtype'], $chunk['chunk_number'] );
+
+			if ( null !== $row && 0 < (int) $row['link_count'] && ! empty( $row['generated_at'] ) ) {
+				continue;
+			}
+
+			++$removed;
+
+			if ( ! $dry_run ) {
+				$this->storage->delete( $chunk );
+			}
+		}
+
+		return $removed;
 	}
 }

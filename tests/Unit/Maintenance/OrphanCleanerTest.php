@@ -219,4 +219,67 @@ class OrphanCleanerTest extends TestCase {
 
 		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_DUPLICATES )['duplicates'] );
 	}
+
+	public function test_deletes_files_with_no_live_chunk_behind_them(): void {
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn(
+			array(
+				'gone-sitemap-1.xml',      // no registry row.
+				'tombstoned-sitemap-2.xml', // link_count 0.
+				'suspended-sitemap-3.xml',  // generated_at null.
+				'live-sitemap-4.xml',       // keep.
+				'notes.txt',                // unparseable, keep.
+			)
+		);
+
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturnUsing(
+			static function ( string $name ): ?array {
+				if ( 1 !== preg_match( '/^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$/', $name, $m ) ) {
+					return null;
+				}
+
+				return array( 'object_subtype' => $m[1], 'chunk_number' => (int) $m[2] );
+			}
+		);
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->with( 'gone', 1 )->andReturn( null );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->with( 'tombstoned', 2 )
+			->andReturn( array( 'link_count' => 0, 'generated_at' => '2026-08-01 00:00:00' ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->with( 'suspended', 3 )
+			->andReturn( array( 'link_count' => 12, 'generated_at' => null ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->with( 'live', 4 )
+			->andReturn( array( 'link_count' => 12, 'generated_at' => '2026-08-01 00:00:00' ) );
+
+		$this->storage->shouldReceive( 'delete' )->once()->with( array( 'object_subtype' => 'gone', 'chunk_number' => 1 ) );
+		$this->storage->shouldReceive( 'delete' )->once()->with( array( 'object_subtype' => 'tombstoned', 'chunk_number' => 2 ) );
+		$this->storage->shouldReceive( 'delete' )->once()->with( array( 'object_subtype' => 'suspended', 'chunk_number' => 3 ) );
+
+		$this->assertSame( 3, $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['files'] );
+	}
+
+	public function test_dry_run_counts_files_without_deleting(): void {
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'gone-sitemap-1.xml' ) );
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'gone', 'chunk_number' => 1 ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( null );
+		$this->storage->shouldNotReceive( 'delete' );
+
+		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_FILES )['files'] );
+	}
+
+	public function test_reports_a_skip_when_stream_wrapped_storage_cannot_be_listed(): void {
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array() );
+		$this->storage->shouldReceive( 'is_stream_wrapped' )->once()->andReturn( true );
+
+		$result = $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES );
+
+		$this->assertSame( 0, $result['files'] );
+		$this->assertCount( 1, $result['skipped'] );
+		$this->assertStringContainsString( 'stream-wrapped', $result['skipped'][0] );
+	}
+
+	public function test_reports_no_skip_for_a_genuinely_empty_directory(): void {
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array() );
+		$this->storage->shouldReceive( 'is_stream_wrapped' )->once()->andReturn( false );
+
+		$this->assertSame( array(), $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['skipped'] );
+	}
 }
