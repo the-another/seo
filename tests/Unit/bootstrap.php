@@ -156,6 +156,10 @@ if ( ! class_exists( 'WP_CLI' ) ) {
 			self::$lines[] = $message;
 		}
 
+		public static function log( string $message ): void {
+			self::$lines[] = $message;
+		}
+
 		/**
 		 * @param mixed                $value   Value.
 		 * @param array<string, mixed> $options Options.

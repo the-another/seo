@@ -99,9 +99,12 @@ class CleanupCommand {
 
 		$prefix = $dry_run ? '[dry run] would remove' : 'removed';
 
-		WP_CLI::line( sprintf( '%s %d indexable rows whose object is gone', $prefix, $report['rows'] ) );
-		WP_CLI::line( sprintf( '%s duplicate subtype rows for %d objects', $prefix, $report['duplicates'] ) );
-		WP_CLI::line( sprintf( '%s %d sitemap files with no live chunk', $prefix, $report['files'] ) );
+		// Use log() instead of line() so these detail lines share the logger channel with
+		// the success() call below. line() uses PHP's output buffer, which flushes last,
+		// causing the summary to overtake the details regardless of call order.
+		WP_CLI::log( sprintf( '%s %d indexable rows whose object is gone', $prefix, $report['rows'] ) );
+		WP_CLI::log( sprintf( '%s duplicate subtype rows for %d objects', $prefix, $report['duplicates'] ) );
+		WP_CLI::log( sprintf( '%s %d sitemap files with no live chunk', $prefix, $report['files'] ) );
 
 		foreach ( $report['skipped'] as $reason ) {
 			WP_CLI::warning( (string) $reason );
