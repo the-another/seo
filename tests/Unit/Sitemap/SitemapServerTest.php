@@ -34,6 +34,15 @@ class SitemapServerTest extends TestCase {
 		Functions\when( 'home_url' )->alias( fn( string $path = '' ): string => 'https://example.com' . $path );
 		Functions\when( 'esc_url' )->returnArg();
 
+		// The real predicate. The root index and orphan cleanup must agree on
+		// what "live" means — they used to state it separately and could drift
+		// — so this exercises the shared implementation rather than a mock
+		// that would happily agree with a broken one.
+		$real_files = new SitemapFileRepository();
+		$this->files->shouldReceive( 'is_listable' )->andReturnUsing(
+			static fn( ?array $chunk ): bool => $real_files->is_listable( $chunk )
+		)->byDefault();
+
 		$this->server = new SitemapServer( $this->files, $this->storage, $this->settings );
 	}
 

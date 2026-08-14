@@ -322,6 +322,23 @@ class SitemapFileRepository {
 	}
 
 	/**
+	 * Whether a chunk row is live: it has members and its file has been written.
+	 *
+	 * The single owner of this rule. The root index lists exactly the chunks
+	 * this returns true for, and orphan cleanup keeps exactly their files —
+	 * two readings of the same two columns, so they must not drift apart.
+	 *
+	 * @since 1.1.0
+	 * @param array<string, mixed>|null $chunk Registry row, or null when absent.
+	 * @return bool True when the chunk is live.
+	 */
+	public function is_listable( ?array $chunk ): bool {
+		return null !== $chunk
+			&& 0 < (int) ( $chunk['link_count'] ?? 0 )
+			&& ! empty( $chunk['generated_at'] );
+	}
+
+	/**
 	 * Clear the dirty flag after a successful file write.
 	 *
 	 * @param int         $chunk_id      Chunk row ID.

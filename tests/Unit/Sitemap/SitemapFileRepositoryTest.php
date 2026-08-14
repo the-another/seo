@@ -34,6 +34,21 @@ class SitemapFileRepositoryTest extends TestCase {
 		parent::tearDown();
 	}
 
+	public function test_is_listable_requires_members_and_a_written_file(): void {
+		// The single owner of the liveness rule: the root index lists exactly
+		// these chunks and orphan cleanup keeps exactly their files. Both
+		// callers read the same two columns through here so they cannot drift.
+		$this->assertTrue( $this->files->is_listable( array( 'link_count' => '12', 'generated_at' => '2026-08-01 00:00:00' ) ) );
+
+		// Claimed but never written: listing it would 404 during backfill.
+		$this->assertFalse( $this->files->is_listable( array( 'link_count' => '12', 'generated_at' => null ) ) );
+		// Tombstoned.
+		$this->assertFalse( $this->files->is_listable( array( 'link_count' => '0', 'generated_at' => '2026-08-01 00:00:00' ) ) );
+		// Absent row, and a row missing the columns entirely.
+		$this->assertFalse( $this->files->is_listable( null ) );
+		$this->assertFalse( $this->files->is_listable( array() ) );
+	}
+
 	public function test_find_lowest_open_chunk_orders_by_chunk_number(): void {
 		$this->wpdb->shouldReceive( 'prepare' )
 			->once()

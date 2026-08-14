@@ -64,7 +64,9 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 == Changelog ==
 
-
+= Unreleased =
+* Add: WP-CLI commands — `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, `wp taseo cleanup`. Rescan and regenerate take `--wait` to block until the background queue drains.
+* Add: `wp taseo cleanup` removes indexable rows and sitemap files with nothing behind them — deleted posts and terms, disabled types, unregistered families, objects indexed under two subtypes at once, and XML files left by a removed chunk. Deletes by default; `--dry-run` previews and `--only` scopes the run.
 
 = 1.0.0 - 2026-08-13 =
 * Add: Per-domain site verification and tracking — a multi-brand site whose brands live on separate domains holds its own Google Search Console, Bing Webmaster Tools, Yandex, Yahoo, and Meta codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. Previously one set of codes was emitted on every domain, so only one could be verified at all. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.

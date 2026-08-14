@@ -133,3 +133,54 @@ if ( ! function_exists( 'esc_sql' ) ) {
 		return $data;
 	}
 }
+
+if ( ! class_exists( 'WP_CLI' ) ) {
+	class WP_CLI {
+
+		/** @var array<int, string> */
+		public static array $lines = array();
+
+		public static function error( string $message ): void {
+			throw new RuntimeException( $message );
+		}
+
+		public static function warning( string $message ): void {
+			self::$lines[] = 'warning: ' . $message;
+		}
+
+		public static function success( string $message ): void {
+			self::$lines[] = 'success: ' . $message;
+		}
+
+		public static function line( string $message = '' ): void {
+			self::$lines[] = $message;
+		}
+
+		public static function log( string $message ): void {
+			self::$lines[] = $message;
+		}
+
+		/**
+		 * @param mixed                $value   Value.
+		 * @param array<string, mixed> $options Options.
+		 */
+		public static function print_value( $value, array $options = array() ): void {
+			self::$lines[] = (string) wp_json_encode( $value );
+		}
+
+		/**
+		 * @param array<string, mixed> $options Options.
+		 * @return mixed
+		 */
+		public static function runcommand( string $command, array $options = array() ) {
+			self::$lines[] = 'runcommand: ' . $command;
+
+			return null;
+		}
+	}
+}
+
+// \WP_CLI\Utils\get_flag_value(), which the commands use to tell --flag from
+// --no-flag. Lives in its own file because a braced namespace cannot coexist
+// with the un-namespaced code above it.
+require_once __DIR__ . '/stubs/wp-cli-utils.php';

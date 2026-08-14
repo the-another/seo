@@ -159,6 +159,10 @@ class IndexableRepository {
 	 * row removed behind its back would leak the slot and leave a permanently
 	 * over-counted chunk.
 	 *
+	 * Public so maintenance tooling can drive the same purge over rows that
+	 * drifted before this ran on their own sync. There is exactly one
+	 * implementation of "drop the stale rows" and this is it.
+	 *
 	 * Scoped to posts. A term cannot change taxonomy, and custom_page ids are
 	 * provider-chosen and collide across families by design — vendor_store:42
 	 * and vendor_items:42 are one vendor's two URLs, and purging by
@@ -169,7 +173,7 @@ class IndexableRepository {
 	 * @param int    $object_id      Object ID.
 	 * @return void
 	 */
-	private function purge_stale_subtypes( string $object_type, string $object_subtype, int $object_id ): void {
+	public function purge_stale_subtypes( string $object_type, string $object_subtype, int $object_id ): void {
 		if ( 'post' !== $object_type ) {
 			return;
 		}
