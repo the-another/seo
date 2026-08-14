@@ -297,7 +297,21 @@ class OrphanCleanerTest extends TestCase {
 		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_DUPLICATES )['duplicates'] );
 	}
 
+	/**
+	 * The real is_listable(), so these tests exercise the shared predicate
+	 * rather than a mock that could agree with a broken one.
+	 *
+	 * @return void
+	 */
+	private function use_real_listable_predicate(): void {
+		$this->files->shouldReceive( 'is_listable' )->andReturnUsing(
+			static fn( ?array $chunk ): bool => ( new SitemapFileRepository() )->is_listable( $chunk )
+		);
+	}
+
 	public function test_deletes_files_with_no_live_chunk_behind_them(): void {
+		$this->use_real_listable_predicate();
+		$this->storage->shouldReceive( 'modified_time' )->andReturn( time() - OrphanCleaner::MIN_FILE_AGE - 1 );
 		$this->storage->shouldReceive( 'list_files' )->once()->andReturn(
 			array(
 				'gone-sitemap-1.xml',      // no registry row.
@@ -334,12 +348,58 @@ class OrphanCleanerTest extends TestCase {
 	}
 
 	public function test_dry_run_counts_files_without_deleting(): void {
+		$this->use_real_listable_predicate();
+		$this->storage->shouldReceive( 'modified_time' )->andReturn( time() - OrphanCleaner::MIN_FILE_AGE - 1 );
 		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'gone-sitemap-1.xml' ) );
 		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'gone', 'chunk_number' => 1 ) );
 		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( null );
 		$this->storage->shouldNotReceive( 'delete' );
 
 		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_FILES )['files'] );
+	}
+
+	public function test_keeps_a_file_written_inside_the_grace_period(): void {
+		// SitemapFileWriter::rebuild() writes the file, then stamps
+		// generated_at. A cleanup landing in that window sees an unstamped
+		// row behind a live file — indistinguishable from a suspended
+		// family's leftover — and deleting it would 404 the URL forever,
+		// because the row is stamped clean straight afterwards and nothing
+		// would ever mark it dirty again.
+		$this->use_real_listable_predicate();
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'rebuilding-sitemap-1.xml' ) );
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'rebuilding', 'chunk_number' => 1 ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( array( 'link_count' => 12, 'generated_at' => null ) );
+		$this->storage->shouldReceive( 'modified_time' )->once()->andReturn( time() - 5 );
+		$this->storage->shouldNotReceive( 'delete' );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['files'] );
+	}
+
+	public function test_keeps_a_file_whose_modification_time_is_unreadable(): void {
+		$this->use_real_listable_predicate();
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'gone-sitemap-1.xml' ) );
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'gone', 'chunk_number' => 1 ) );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( null );
+		$this->storage->shouldReceive( 'modified_time' )->once()->andReturn( null );
+		$this->storage->shouldNotReceive( 'delete' );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['files'] );
+	}
+
+	public function test_asks_the_repository_whether_a_chunk_is_live(): void {
+		// The predicate has one owner: the root index lists exactly the
+		// chunks it returns true for, and this keeps exactly their files.
+		// A local re-statement here is what let the two drift apart.
+		$this->storage->shouldReceive( 'list_files' )->once()->andReturn( array( 'live-sitemap-4.xml' ) );
+		$this->storage->shouldReceive( 'parse_file_name' )->andReturn( array( 'object_subtype' => 'live', 'chunk_number' => 4 ) );
+
+		$row = array( 'link_count' => 12, 'generated_at' => '2026-08-01 00:00:00' );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->andReturn( $row );
+		$this->files->shouldReceive( 'is_listable' )->once()->with( $row )->andReturn( true );
+
+		$this->storage->shouldNotReceive( 'delete' );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_FILES )['files'] );
 	}
 
 	public function test_reports_a_skip_when_stream_wrapped_storage_cannot_be_listed(): void {

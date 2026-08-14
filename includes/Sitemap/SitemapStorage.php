@@ -250,6 +250,25 @@ class SitemapStorage {
 	}
 
 	/**
+	 * Modification time of a chunk's file.
+	 *
+	 * @since 1.1.0
+	 * @param array<string, mixed> $chunk Registry row.
+	 * @return int|null Unix timestamp, or null when the file is absent or unreadable.
+	 */
+	public function modified_time( array $chunk ): ?int {
+		$path = $this->get_file_path( $chunk );
+
+		if ( ! file_exists( $path ) ) {
+			return null;
+		}
+
+		$modified = filemtime( $path );
+
+		return false === $modified ? null : $modified;
+	}
+
+	/**
 	 * Stream a chunk's file to the output buffer.
 	 *
 	 * @since 0.3.0

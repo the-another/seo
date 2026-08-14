@@ -168,6 +168,38 @@ class SitemapStorageTest extends TestCase {
 		$this->assertNull( $storage->parse_file_name( 'vendor-sitemap-1.xml.bak' ) );
 	}
 
+	public function test_modified_time_reports_the_files_mtime_and_null_when_absent(): void {
+		$basedir = rtrim( sys_get_temp_dir(), '/' ) . '/taseo-mtime-' . getmypid();
+		$dir     = $basedir . '/' . SitemapStorage::DIRECTORY;
+
+		if ( ! is_dir( $dir ) ) {
+			mkdir( $dir, 0777, true );
+		}
+
+		$this->stub_uploads( $basedir );
+
+		$storage = new SitemapStorage();
+		$chunk   = array( 'object_subtype' => 'product', 'chunk_number' => 1 );
+		$path    = $storage->get_file_path( $chunk );
+
+		file_put_contents( $path, '<urlset/>' );
+		touch( $path, 1754000000 );
+
+		try {
+			// Delta, not identity: some filesystems store mtimes at two-second
+			// granularity. The guard that reads this compares against a
+			// 900-second threshold, so seconds of slack are immaterial.
+			$this->assertEqualsWithDelta( 1754000000, $storage->modified_time( $chunk ), 2 );
+			// Orphan cleanup reads null as "unknown, do not delete", so the
+			// absent case must not report an age of zero.
+			$this->assertNull( $storage->modified_time( array( 'object_subtype' => 'product', 'chunk_number' => 99 ) ) );
+		} finally {
+			unlink( $path );
+			rmdir( $dir );
+			rmdir( $basedir );
+		}
+	}
+
 	public function test_list_files_returns_only_files(): void {
 		$this->stub_uploads( '/srv/uploads' );
 

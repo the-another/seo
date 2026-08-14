@@ -168,7 +168,7 @@ class SitemapServer {
 		$xml .= '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
 
 		foreach ( $this->files->get_all_chunks() as $chunk ) {
-			if ( (int) $chunk['link_count'] < 1 || empty( $chunk['generated_at'] ) ) {
+			if ( ! $this->files->is_listable( $chunk ) ) {
 				// A chunk can be claimed (link_count > 0) before the sweep has
 				// ever written its file — listing it here would 404 during
 				// the initial backfill window.

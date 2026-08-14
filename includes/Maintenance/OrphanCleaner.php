@@ -52,6 +52,19 @@ class OrphanCleaner {
 	public const ONLY_FILES      = 'files';
 
 	/**
+	 * A file younger than this is never removed.
+	 *
+	 * SitemapFileWriter writes a chunk's file before stamping generated_at on
+	 * its row, so a chunk mid-rebuild briefly looks exactly like a suspended
+	 * family's leftover. Deleting one then would strand the URL at 404 with a
+	 * row that reads clean, so nothing would ever rebuild it. Skipping anything
+	 * recently written costs one extra sweep and removes the whole class of race.
+	 *
+	 * @var int
+	 */
+	public const MIN_FILE_AGE = 900;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param IndexableRepository   $repository Indexable repository.
@@ -367,7 +380,8 @@ class OrphanCleaner {
 	 *
 	 * Names that do not parse are left alone. The directory belongs to this
 	 * plugin, but deleting a file it did not write is not this command's
-	 * business.
+	 * business. Files written within MIN_FILE_AGE are left alone too — see
+	 * that constant for the rebuild race they would otherwise lose.
 	 *
 	 * @param bool               $dry_run Count without deleting.
 	 * @param array<int, string> $skipped Skip reasons, appended to by reference.
@@ -398,7 +412,20 @@ class OrphanCleaner {
 
 			$row = $this->files->get_by_subtype_and_number( $chunk['object_subtype'], $chunk['chunk_number'] );
 
-			if ( null !== $row && 0 < (int) $row['link_count'] && ! empty( $row['generated_at'] ) ) {
+			if ( $this->files->is_listable( $row ) ) {
+				// The repository owns this rule because the root index reads
+				// the same two columns to decide what to list; a file behind
+				// a listed chunk must never be removed, so both sides have to
+				// ask the same question.
+				continue;
+			}
+
+			$modified = $this->storage->modified_time( $chunk );
+
+			if ( null === $modified || ( time() - $modified ) < self::MIN_FILE_AGE ) {
+				// Too fresh to distinguish from a rebuild in flight, or an
+				// mtime we could not read at all. Either way the next sweep
+				// gets another chance; deleting on a guess does not.
 				continue;
 			}
 
