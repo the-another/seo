@@ -22,6 +22,7 @@ use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Indexable\IndexableRepository;
 use TheAnother\Plugin\SEO\Indexable\IndexableSync;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
+use TheAnother\Plugin\SEO\Maintenance\OrphanCleaner;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
 use TheAnother\Plugin\SEO\Meta\MetaOutput;
@@ -232,6 +233,17 @@ class Plugin {
 				$c->get( 'indexable_repository' ),
 				$c->get( 'sitemap_file_repository' ),
 				$c->get( 'sitemap_storage' )
+			)
+		);
+		$c->register(
+			'orphan_cleaner',
+			fn( Container $c ) => new OrphanCleaner(
+				$c->get( 'indexable_repository' ),
+				$c->get( 'post_subtypes' ),
+				$c->get( 'sitemap_families' ),
+				$c->get( 'sitemap_file_repository' ),
+				$c->get( 'sitemap_storage' ),
+				$c->get( 'settings' )
 			)
 		);
 		$c->register( 'blocks', fn() => new Blocks() );
