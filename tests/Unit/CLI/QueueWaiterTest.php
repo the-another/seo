@@ -33,9 +33,10 @@ class QueueWaiterTest extends TestCase {
 			}
 		);
 
-		$runs      = 0;
-		$reported  = array();
-		$percents  = array( 40, 100 );
+		$runs     = 0;
+		$sleeps   = 0;
+		$reported = array();
+		$percents = array( 40, 100 );
 
 		$waiter = new QueueWaiter(
 			static function ( string $group ) use ( &$runs ): void {
@@ -43,6 +44,9 @@ class QueueWaiterTest extends TestCase {
 			},
 			static function ( int $percent, bool $done ) use ( &$reported ): void {
 				$reported[] = array( $percent, $done );
+			},
+			static function () use ( &$sleeps ): void {
+				++$sleeps;
 			}
 		);
 
@@ -53,6 +57,31 @@ class QueueWaiterTest extends TestCase {
 		$this->assertSame( 2, $runs );
 		$this->assertSame( array( 40, false ), $reported[0] );
 		$this->assertSame( array( 100, true ), $reported[ count( $reported ) - 1 ] );
+
+		// One pause per iteration. Without it, a runner that processed
+		// nothing — another runner holds the Action Scheduler claim, so
+		// `action-scheduler run` takes no batch while due work remains —
+		// leaves this loop spinning at full CPU.
+		$this->assertSame( 2, $sleeps );
+	}
+
+	public function test_never_sleeps_when_the_queue_was_already_empty(): void {
+		Monkey\Functions\when( 'as_get_datetime_object' )->justReturn( 'NOW' );
+		Monkey\Functions\when( 'as_get_scheduled_actions' )->justReturn( array() );
+
+		$sleeps = 0;
+
+		$waiter = new QueueWaiter(
+			static function ( string $group ): void {},
+			static function ( int $percent, bool $done ): void {},
+			static function () use ( &$sleeps ): void {
+				++$sleeps;
+			}
+		);
+
+		$waiter->wait( 'taseo', static fn(): int => 100 );
+
+		$this->assertSame( 0, $sleeps );
 	}
 
 	public function test_require_action_scheduler_errors_when_unavailable(): void {
@@ -84,7 +113,8 @@ class QueueWaiterTest extends TestCase {
 			},
 			static function ( int $percent, bool $done ) use ( &$reported ): void {
 				$reported[] = array( $percent, $done );
-			}
+			},
+			static function (): void {}
 		);
 
 		$waiter->wait( 'taseo', static fn(): int => 100 );
@@ -114,7 +144,8 @@ class QueueWaiterTest extends TestCase {
 
 		$waiter = new QueueWaiter(
 			static function ( string $group ): void {},
-			static function ( int $percent, bool $done ): void {}
+			static function ( int $percent, bool $done ): void {},
+			static function (): void {}
 		);
 
 		$waiter->wait( 'taseo', static fn(): int => 100 );

@@ -79,7 +79,10 @@ class CleanupCommand {
 	 * @return void
 	 */
 	public function __invoke( array $args, array $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- WP-CLI invokable signature.
-		$dry_run = isset( $assoc_args['dry-run'] );
+		// get_flag_value(), not isset(): --no-dry-run sets the key to false,
+		// which isset() reads as "flag present" and would turn a preview into
+		// a delete. --only carries a value, so its isset() is correct.
+		$dry_run = (bool) \WP_CLI\Utils\get_flag_value( $assoc_args, 'dry-run', false );
 		$only    = isset( $assoc_args['only'] ) ? (string) $assoc_args['only'] : null;
 
 		if ( null !== $only && ! in_array( $only, self::CATEGORIES, true ) ) {

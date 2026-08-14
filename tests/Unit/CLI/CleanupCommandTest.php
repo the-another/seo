@@ -57,6 +57,17 @@ class CleanupCommandTest extends TestCase {
 		$this->assertStringContainsStringIgnoringCase( 'dry run', implode( "\n", \WP_CLI::$lines ) );
 	}
 
+	public function test_no_dry_run_still_deletes(): void {
+		// --no-dry-run sets the key to false. isset() reads that as a
+		// preview, which would silently turn a requested delete into a
+		// no-op; get_flag_value() is what tells the two apart.
+		$this->cleaner->shouldReceive( 'clean' )->once()->with( false, null )->andReturn( $this->report( 3, 2, 1 ) );
+
+		$this->command->__invoke( array(), array( 'dry-run' => false ) );
+
+		$this->assertStringNotContainsString( 'dry run', implode( "\n", \WP_CLI::$lines ) );
+	}
+
 	public function test_only_scopes_the_run(): void {
 		$this->cleaner->shouldReceive( 'clean' )->once()->with( false, OrphanCleaner::ONLY_FILES )->andReturn( $this->report( 0, 0, 4 ) );
 

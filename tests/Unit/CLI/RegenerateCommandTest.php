@@ -51,6 +51,8 @@ class RegenerateCommandTest extends TestCase {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true )->byDefault();
 		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
 		$this->storage->shouldReceive( 'is_writable' )->andReturn( true )->byDefault();
+
+		\WP_CLI::$lines = array();
 	}
 
 	protected function tearDown(): void {
@@ -114,5 +116,40 @@ class RegenerateCommandTest extends TestCase {
 		);
 
 		$this->command->__invoke( array(), array( 'wait' => true ) );
+	}
+
+	public function test_no_wait_does_not_drive_the_queue(): void {
+		// --no-wait sets the key to false. isset() reads that as "wait", so
+		// the flag has to go through get_flag_value().
+		$this->sweeper->shouldReceive( 'dispatch_full_regeneration' )->once();
+		$this->waiter->shouldNotReceive( 'wait' );
+
+		$this->command->__invoke( array(), array( 'wait' => false ) );
+	}
+
+	public function test_warns_instead_of_succeeding_when_chunks_are_still_dirty(): void {
+		// handle_sweep() only chains the next batch when a full batch fully
+		// succeeded, so one failed rebuild ends the chain with the backlog
+		// still dirty and nothing due for wait() to see.
+		$this->sweeper->shouldReceive( 'dispatch_full_regeneration' )->once();
+		$this->files->shouldReceive( 'count_dirty' )->andReturn( 40, 7 );
+		$this->waiter->shouldReceive( 'wait' )->once();
+
+		$this->command->__invoke( array(), array( 'wait' => true ) );
+
+		$output = implode( "\n", \WP_CLI::$lines );
+
+		$this->assertStringContainsString( 'warning: The queue drained with 7 chunks still dirty', $output );
+		$this->assertStringNotContainsString( 'regeneration complete', $output );
+	}
+
+	public function test_reports_success_when_the_backlog_fully_drained(): void {
+		$this->sweeper->shouldReceive( 'dispatch_full_regeneration' )->once();
+		$this->files->shouldReceive( 'count_dirty' )->andReturn( 40, 0 );
+		$this->waiter->shouldReceive( 'wait' )->once();
+
+		$this->command->__invoke( array(), array( 'wait' => true ) );
+
+		$this->assertStringContainsString( 'success: Sitemap regeneration complete.', implode( "\n", \WP_CLI::$lines ) );
 	}
 }

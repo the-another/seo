@@ -42,14 +42,23 @@ class QueueWaiter {
 	private $reporter;
 
 	/**
+	 * Pauses between iterations.
+	 *
+	 * @var callable|null
+	 */
+	private $sleeper;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param callable|null $runner   Batch runner; null uses Action Scheduler's WP-CLI command.
 	 * @param callable|null $reporter Progress reporter; null uses a WP-CLI progress bar.
+	 * @param callable|null $sleeper  Inter-iteration pause; null sleeps one second.
 	 */
-	public function __construct( ?callable $runner = null, ?callable $reporter = null ) {
+	public function __construct( ?callable $runner = null, ?callable $reporter = null, ?callable $sleeper = null ) {
 		$this->runner   = $runner;
 		$this->reporter = $reporter;
+		$this->sleeper  = $sleeper;
 	}
 
 	/**
@@ -62,10 +71,12 @@ class QueueWaiter {
 	public function wait( string $group, callable $progress ): void {
 		$runner   = $this->runner ?? $this->default_runner();
 		$reporter = $this->reporter ?? $this->default_reporter();
+		$sleeper  = $this->sleeper ?? $this->default_sleeper();
 
 		while ( $this->has_pending( $group ) ) {
 			call_user_func( $runner, $group );
 			call_user_func( $reporter, (int) call_user_func( $progress ), false );
+			call_user_func( $sleeper );
 		}
 
 		call_user_func( $reporter, (int) call_user_func( $progress ), true );
@@ -115,6 +126,23 @@ class QueueWaiter {
 					'exit_error' => false,
 				)
 			);
+		};
+	}
+
+	/**
+	 * Pause between iterations.
+	 *
+	 * A runner that processed nothing still returns immediately: another
+	 * runner (WP-Cron, a second CLI process) holding the Action Scheduler
+	 * claim leaves `action-scheduler run` with no batch to take while
+	 * has_pending() still reports due work. Without a pause the loop then
+	 * burns a core doing nothing until the other runner finishes.
+	 *
+	 * @return callable Sleeper.
+	 */
+	private function default_sleeper(): callable {
+		return static function (): void {
+			sleep( 1 );
 		};
 	}
 

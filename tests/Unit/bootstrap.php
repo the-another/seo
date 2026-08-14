@@ -175,3 +175,8 @@ if ( ! class_exists( 'WP_CLI' ) ) {
 		}
 	}
 }
+
+// \WP_CLI\Utils\get_flag_value(), which the commands use to tell --flag from
+// --no-flag. Lives in its own file because a braced namespace cannot coexist
+// with the un-namespaced code above it.
+require_once __DIR__ . '/stubs/wp-cli-utils.php';

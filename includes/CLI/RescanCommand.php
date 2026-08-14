@@ -102,7 +102,9 @@ class RescanCommand {
 
 		WP_CLI::success( sprintf( 'Rescan dispatched in %s mode.', $mode ) );
 
-		if ( ! isset( $assoc_args['wait'] ) ) {
+		// get_flag_value(), not isset(): --no-wait sets the key to false, and
+		// isset() would read that as a request to wait.
+		if ( ! \WP_CLI\Utils\get_flag_value( $assoc_args, 'wait', false ) ) {
 			return;
 		}
 
@@ -110,6 +112,23 @@ class RescanCommand {
 			IndexableBackfill::GROUP,
 			fn(): int => (int) $this->backfill->get_progress()['percentage']
 		);
+
+		// The queue going quiet is not the work finishing. A failed backfill
+		// action ends the chain with progress short, and wait() returns as
+		// soon as nothing is due — so the only honest completion signal is
+		// the progress figure itself.
+		$percentage = (int) $this->backfill->get_progress()['percentage'];
+
+		if ( $percentage < 100 ) {
+			WP_CLI::warning(
+				sprintf(
+					'The queue drained at %d%%: the chain stopped before finishing, most likely on a failed action. Check the Action Scheduler log and run again.',
+					$percentage
+				)
+			);
+
+			return;
+		}
 
 		WP_CLI::success( 'Rescan complete.' );
 	}

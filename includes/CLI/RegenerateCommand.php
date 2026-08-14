@@ -82,7 +82,9 @@ class RegenerateCommand {
 
 		WP_CLI::success( 'Sitemap regeneration dispatched.' );
 
-		if ( ! isset( $assoc_args['wait'] ) ) {
+		// get_flag_value(), not isset(): --no-wait sets the key to false, and
+		// isset() would read that as a request to wait.
+		if ( ! \WP_CLI\Utils\get_flag_value( $assoc_args, 'wait', false ) ) {
 			return;
 		}
 
@@ -100,6 +102,23 @@ class RegenerateCommand {
 				return (int) floor( ( ( $backlog - $remaining ) / $backlog ) * 100 );
 			}
 		);
+
+		// The queue going quiet is not the backlog draining.
+		// SitemapSweeper::handle_sweep() only chains the next batch when a
+		// full batch fully succeeded, so a single failed rebuild ends the
+		// chain with chunks still dirty and nothing left due to wait on.
+		$remaining = $this->files->count_dirty( $disabled );
+
+		if ( $remaining > 0 ) {
+			WP_CLI::warning(
+				sprintf(
+					'The queue drained with %d chunks still dirty: the sweep chain stopped before finishing, most likely on a failed rebuild. Check the Action Scheduler log and run again.',
+					$remaining
+				)
+			);
+
+			return;
+		}
 
 		WP_CLI::success( 'Sitemap regeneration complete.' );
 	}
