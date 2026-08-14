@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- WP-CLI commands for the plugin's operational surface: `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, and `wp taseo cleanup`. The first two dispatch the same Action Scheduler chains the admin buttons do, and take `--wait` to drive the queue and block until it drains. `wp taseo rescan --mode=permalink` runs the chain that fires `taseo_permalinks_rebuilt` on completion, which the admin button does not — that is the one that re-triggers integrations after a store base or permalink structure moves.
+- `wp taseo cleanup` removes indexable rows and sitemap files that no longer correspond to anything: rows for deleted posts and terms, for post types and taxonomies no longer enabled, and for sitemap families no longer registered; objects holding rows under two subtypes at once, which publishes one URL from two sitemap files; and XML files left behind by a tombstoned or suspended chunk, which otherwise keep answering 200 forever. It deletes by default — `--dry-run` reports the same counts without touching anything, and `--only=<rows|duplicates|files>` scopes a run. It refuses to run when no sitemap families are registered but pushed URL rows exist, since that means a provider plugin is inactive rather than that its rows became garbage.
+
+### Changed
+- `IndexableRepository::purge_stale_subtypes()` is now public, so maintenance tooling drives the same purge the sync path does instead of carrying a second copy of it.
+
 ## [1.0.0] - 2026-08-13
 
 ### Added

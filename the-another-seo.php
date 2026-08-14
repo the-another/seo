@@ -130,3 +130,48 @@ add_action(
 		}
 	}
 );
+
+// WP-CLI commands. Registered on plugins_loaded at priority 20 so the
+// container is populated by Plugin::start() at the default priority first.
+// A registration failure warns and leaves the rest of the plugin working.
+if ( defined( 'WP_CLI' ) && WP_CLI ) {
+	add_action(
+		'plugins_loaded',
+		function () {
+			try {
+				$container = Container::get_instance();
+
+				\WP_CLI::add_command(
+					'taseo rescan',
+					new CLI\RescanCommand( $container->get( 'indexable_backfill' ), new CLI\QueueWaiter() )
+				);
+				\WP_CLI::add_command(
+					'taseo regenerate',
+					new CLI\RegenerateCommand(
+						$container->get( 'sitemap_sweeper' ),
+						$container->get( 'sitemap_file_repository' ),
+						$container->get( 'sitemap_storage' ),
+						$container->get( 'settings' ),
+						new CLI\QueueWaiter()
+					)
+				);
+				\WP_CLI::add_command(
+					'taseo status',
+					new CLI\StatusCommand(
+						$container->get( 'indexable_backfill' ),
+						$container->get( 'sitemap_file_repository' ),
+						$container->get( 'sitemap_storage' ),
+						$container->get( 'settings' )
+					)
+				);
+				\WP_CLI::add_command(
+					'taseo cleanup',
+					new CLI\CleanupCommand( $container->get( 'orphan_cleaner' ) )
+				);
+			} catch ( \Throwable $e ) {
+				\WP_CLI::warning( 'The Another SEO: failed to register CLI commands - ' . $e->getMessage() );
+			}
+		},
+		20
+	);
+}
