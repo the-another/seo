@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,9 +64,15 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 == Changelog ==
 
-= Unreleased =
-* Add: WP-CLI commands — `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, `wp taseo cleanup`. Rescan and regenerate take `--wait` to block until the background queue drains.
-* Add: `wp taseo cleanup` removes indexable rows and sitemap files with nothing behind them — deleted posts and terms, disabled types, unregistered families, objects indexed under two subtypes at once, and XML files left by a removed chunk. Deletes by default; `--dry-run` previews and `--only` scopes the run.
+= 1.1.0 - 2026-08-14 =
+* Add: WP-CLI commands — `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, and `wp taseo cleanup`. Rescan and regenerate dispatch the same background jobs the admin buttons do, and take `--wait` to drive the queue and block until it drains.
+* Add: `wp taseo rescan --mode=permalink` runs the rebuild that fires `taseo_permalinks_rebuilt` when it finishes, which the admin button does not. That is the one that re-seeds integrations after a store base or permalink structure moves.
+* Add: `wp taseo status` reports index progress and per-content-type sitemap file and link counts — the fastest way to see whether a content type is in the sitemap at all, and how much of it.
+* Add: `wp taseo cleanup` removes indexable rows and sitemap files with nothing behind them: rows for deleted posts and terms, for post types and taxonomies no longer enabled, and for sitemap families no longer registered; objects indexed under two subtypes at once, which publishes one URL from two sitemap files; and XML files left by a removed or suspended chunk, which otherwise keep answering 200 forever. It deletes by default — `--dry-run` reports the same counts without touching anything, and `--only=<rows|duplicates|files>` scopes a run.
+* Add: Cleanup refuses to run when a plugin that owns existing rows looks inactive — no sitemap families registered while pushed URLs exist, or no post subtypes registered while rows carry one. Either means a provider was deactivated, not that thousands of rows became garbage. Sitemap files written in the last 15 minutes are also left alone, since a chunk being rebuilt is briefly indistinguishable from a leftover.
+* Add: `--wait` reports what actually finished. A job chain that stops early on a failure leaves the queue quiet but the work incomplete, so both commands warn with the remaining progress or dirty-file count instead of claiming success.
+* Refactor: The rule for whether a sitemap file is live now has a single owner shared by the sitemap index and cleanup. The two had drifted into independently written opposites of the same rule, which could have left a stale file served indefinitely.
+* Refactor: The `{type}-sitemap-{n}.xml` naming pattern is defined once and referenced by the URL rewrite, the Apache rules, and the file reader, instead of being spelled out in three places.
 
 = 1.0.0 - 2026-08-13 =
 * Add: Per-domain site verification and tracking — a multi-brand site whose brands live on separate domains holds its own Google Search Console, Bing Webmaster Tools, Yandex, Yahoo, and Meta codes, its own verification files, and its own GA4 / Tag Manager / Meta Pixel IDs for each domain. Previously one set of codes was emitted on every domain, so only one could be verified at all. The Webmaster Tools tab gains a domain switcher; the site's own host is always the default and always first.
