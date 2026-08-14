@@ -3,7 +3,7 @@
  * Plugin Name: The Another SEO
  * Plugin URI: https://theanother.org/plugin/seo/
  * Description: Performance-first SEO for WordPress at catalog scale — template-driven titles and meta, Open Graph and Twitter Cards, Schema.org JSON-LD, and breadcrumbs.
- * Version: 1.0.0
+ * Version: 1.1.0
  * Author: The Another
  * Author URI: https://theanother.org
  * Requires at least: 6.9
@@ -24,7 +24,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'THE_ANOTHER_SEO_VERSION', '1.0.0' );
+define( 'THE_ANOTHER_SEO_VERSION', '1.1.0' );
 define( 'THE_ANOTHER_SEO_PLUGIN_FILE', __FILE__ );
 define( 'THE_ANOTHER_SEO_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'THE_ANOTHER_SEO_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

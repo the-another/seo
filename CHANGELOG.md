@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-14
+
 ### Added
 - WP-CLI commands for the plugin's operational surface: `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, and `wp taseo cleanup`. The first two dispatch the same Action Scheduler chains the admin buttons do, and take `--wait` to drive the queue and block until it drains. `wp taseo rescan --mode=permalink` runs the chain that fires `taseo_permalinks_rebuilt` on completion, which the admin button does not — that is the one that re-triggers integrations after a store base or permalink structure moves. `--wait` reports what actually finished: a chain that stops early on a failed action leaves the queue quiet but the work incomplete, and both commands warn with the remaining backfill percentage or dirty-chunk count rather than claiming success.
 - `wp taseo cleanup` removes indexable rows and sitemap files that no longer correspond to anything: rows for deleted posts and terms, for post types and taxonomies no longer enabled, and for sitemap families no longer registered; objects holding rows under two subtypes at once, which publishes one URL from two sitemap files; and XML files left behind by a tombstoned or suspended chunk, which otherwise keep answering 200 forever. It deletes by default — `--dry-run` reports the same counts without touching anything, and `--only=<rows|duplicates|files>` scopes a run. It refuses to run when a plugin that owns existing rows looks inactive: no sitemap families registered while pushed URL rows exist, or no post subtypes registered while rows carry a subtype that is neither a post type nor a taxonomy. Either means a provider is deactivated rather than that its rows became garbage. Sitemap files written in the last 15 minutes are also left alone, because a chunk being rebuilt is briefly indistinguishable from a suspended family's leftover.
@@ -91,7 +93,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/the-another/seo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/the-another/seo/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/the-another/seo/compare/v0.2.0...v0.3.0
