@@ -90,7 +90,7 @@ class OrphanCleaner {
 	 * @param bool        $dry_run Count without deleting.
 	 * @param string|null $only    One category key, or null for all.
 	 * @return array{rows: int, duplicates: int, files: int, skipped: array<int, string>} Counts.
-	 * @throws RuntimeException When no families are registered but pushed rows exist.
+	 * @throws RuntimeException When a provider owning existing rows looks inactive.
 	 */
 	public function clean( bool $dry_run = false, ?string $only = null ): array {
 		$result = array(
@@ -102,6 +102,7 @@ class OrphanCleaner {
 
 		if ( null === $only || self::ONLY_ROWS === $only ) {
 			$this->assert_families_available();
+			$this->assert_subtypes_available();
 
 			$result['rows'] = $this->clean_rows( $dry_run );
 		}
@@ -157,6 +158,71 @@ class OrphanCleaner {
 				sprintf(
 					'No sitemap families are registered, but %d pushed URL rows exist. A provider plugin is probably inactive; refusing to delete rows only that plugin can rebuild.',
 					$pushed
+				)
+			)
+		);
+	}
+
+	/**
+	 * Refuse to run while the plugin declaring post subtypes looks inactive.
+	 *
+	 * The same failure as assert_families_available(), one table over, and
+	 * easier to hit: PostSubtypes::all() drops any bucket whose owning post
+	 * type is not registered on this request, so deactivating the declaring
+	 * plugin (or WooCommerce underneath it) empties the registry. Then
+	 * post_type_for( 'aucteeno_item' ) returns 'aucteeno_item' unchanged,
+	 * which is not an enabled post type, and every one of those rows reads
+	 * as an orphan — deleted in one pass, releasing every chunk slot on the
+	 * way, with only that plugin's own backfill able to rebuild them.
+	 *
+	 * The count is deliberately narrow: a subtype that is a registered post
+	 * type or taxonomy is explainable without a missing declaration, so only
+	 * rows carrying neither are evidence of one.
+	 *
+	 * @return void
+	 * @throws RuntimeException When the registry is empty and undeclarable subtype rows exist.
+	 */
+	private function assert_subtypes_available(): void {
+		if ( array() !== $this->subtypes->all() ) {
+			return;
+		}
+
+		$known = array_values(
+			array_unique(
+				array_merge(
+					array_keys( get_post_types() ),
+					array_keys( get_taxonomies() )
+				)
+			)
+		);
+
+		if ( array() === $known ) {
+			return;
+		}
+
+		global $wpdb;
+
+		$table        = IndexablesTable::get_table_name();
+		$placeholders = implode( ',', array_fill( 0, count( $known ), '%s' ) );
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber
+		$undeclared = (int) $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT COUNT(*) FROM {$table} WHERE object_type = 'post' AND object_subtype NOT IN ({$placeholders})",
+				$known
+			)
+		);
+		// phpcs:enable
+
+		if ( 0 === $undeclared ) {
+			return;
+		}
+
+		throw new RuntimeException(
+			esc_html(
+				sprintf(
+					'No post subtypes are registered, but %d indexable rows carry a subtype that is neither a registered post type nor a taxonomy. A provider plugin is probably inactive; refusing to delete rows only that plugin can rebuild.',
+					$undeclared
 				)
 			)
 		);

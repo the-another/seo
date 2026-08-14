@@ -58,6 +58,7 @@ class OrphanCleanerTest extends TestCase {
 		$this->settings->shouldReceive( 'get_enabled_post_types' )->andReturn( array( 'post', 'product' ) )->byDefault();
 		$this->settings->shouldReceive( 'get_enabled_taxonomies' )->andReturn( array( 'category' ) )->byDefault();
 		$this->families->shouldReceive( 'all' )->andReturn( array( 'vendor_store' => 'Stores' ) )->byDefault();
+		$this->subtypes->shouldReceive( 'all' )->andReturn( array( 'product' => array( 'aucteeno_item' => 'Item' ) ) )->byDefault();
 		$this->subtypes->shouldReceive( 'post_type_for' )->andReturnUsing(
 			static fn( string $subtype ): string => 'aucteeno_item' === $subtype ? 'product' : $subtype
 		)->byDefault();
@@ -248,6 +249,72 @@ class OrphanCleanerTest extends TestCase {
 		$this->stub_row_scan( array() );
 
 		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS )['rows'] );
+	}
+
+	/**
+	 * Registered post types and taxonomies, as the subtype guard reads them.
+	 *
+	 * @return void
+	 */
+	private function stub_registries(): void {
+		Monkey\Functions\when( 'get_post_types' )->justReturn( array( 'post' => 'post', 'page' => 'page' ) );
+		Monkey\Functions\when( 'get_taxonomies' )->justReturn( array( 'category' => 'category' ) );
+	}
+
+	public function test_aborts_when_no_subtypes_are_registered_but_undeclarable_rows_exist(): void {
+		// WooCommerce (or whatever declares aucteeno_item) is deactivated, so
+		// PostSubtypes::all() is empty and post_type_for() hands every such
+		// row back its own key — which is not an enabled post type, so every
+		// one of them reads as an orphan.
+		$this->subtypes->shouldReceive( 'all' )->andReturn( array() );
+		$this->stub_registries();
+		$this->wpdb->shouldReceive( 'get_var' )->once()->andReturn( '121000' );
+
+		$this->expectException( RuntimeException::class );
+		$this->expectExceptionMessageMatches( '/121000/' );
+		$this->expectExceptionMessageMatches( '/inactive/' );
+
+		$this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS );
+	}
+
+	public function test_does_not_abort_when_the_subtype_registry_is_populated(): void {
+		// Non-empty registry: the declaring plugin is present, so subtype rows
+		// resolve normally and there is nothing to protect them from.
+		$this->wpdb->shouldNotReceive( 'get_var' );
+		$this->stub_row_scan( array() );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS )['rows'] );
+	}
+
+	public function test_does_not_abort_when_no_undeclarable_subtype_rows_exist(): void {
+		// Empty registry on a site that never split anything: every post row
+		// carries a real post type, so nothing is unexplained.
+		$this->subtypes->shouldReceive( 'all' )->andReturn( array() );
+		$this->stub_registries();
+		$this->wpdb->shouldReceive( 'get_var' )->once()->andReturn( '0' );
+		$this->stub_row_scan( array() );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS )['rows'] );
+	}
+
+	public function test_counts_only_subtypes_that_are_neither_a_post_type_nor_a_taxonomy(): void {
+		$this->subtypes->shouldReceive( 'all' )->andReturn( array() );
+		$this->stub_registries();
+
+		$bindings = array();
+		$this->wpdb->shouldReceive( 'prepare' )->andReturnUsing(
+			static function ( string $sql, $args = array() ) use ( &$bindings ): string {
+				$bindings[] = $args;
+
+				return $sql;
+			}
+		);
+		$this->wpdb->shouldReceive( 'get_var' )->once()->andReturn( '0' );
+		$this->stub_row_scan( array() );
+
+		$this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS );
+
+		$this->assertSame( array( 'post', 'page', 'category' ), $bindings[0] );
 	}
 
 	/**
