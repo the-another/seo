@@ -53,7 +53,7 @@ class SitemapServer {
 	 *
 	 * @var string
 	 */
-	public const PATTERN_CHUNK = '^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$';
+	public const PATTERN_CHUNK = SitemapStorage::CHUNK_NAME_PATTERN;
 
 	/**
 	 * Constructor.
@@ -314,7 +314,7 @@ class SitemapServer {
 		$snippet .= "<IfModule mod_rewrite.c>\n";
 		$snippet .= "RewriteEngine On\n";
 		$snippet .= 'RewriteCond %{DOCUMENT_ROOT}' . $directory . '/$1-sitemap-$2.xml -f' . "\n";
-		$snippet .= 'RewriteRule ^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$ ' . $directory . '/$1-sitemap-$2.xml [L]' . "\n";
+		$snippet .= 'RewriteRule ' . self::PATTERN_CHUNK . ' ' . $directory . '/$1-sitemap-$2.xml [L]' . "\n";
 		$snippet .= "</IfModule>\n";
 		$snippet .= "# END The Another SEO sitemap files\n\n";
 

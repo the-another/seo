@@ -37,6 +37,21 @@ class SitemapStorage {
 	public const DIRECTORY = 'taseo-sitemaps';
 
 	/**
+	 * Regex pattern for chunk file names: {subtype}-sitemap-{n}.xml
+	 *
+	 * Declared without PCRE delimiters so both preg_match() (which needs them)
+	 * and Apache RewriteRule directives (which use bare patterns) can reference
+	 * the single owner of the {subtype}-sitemap-{n}.xml naming convention that
+	 * get_file_name() produces. SitemapServer::PATTERN_CHUNK aliases this
+	 * constant for the WP rewrite API, and the .htaccess Apache block uses it
+	 * directly via self::PATTERN_CHUNK.
+	 *
+	 * @since 1.1.0
+	 * @var string
+	 */
+	public const CHUNK_NAME_PATTERN = '^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$';
+
+	/**
 	 * Absolute path of the sitemap directory.
 	 *
 	 * @since 0.3.0
@@ -69,7 +84,9 @@ class SitemapStorage {
 	 *
 	 * The subtype group is greedy so that a key which itself contains
 	 * "-sitemap-{n}" round-trips to the same chunk rather than to a shorter
-	 * prefix. The character class matches SitemapServer::PATTERN_CHUNK.
+	 * prefix. The pattern is shared with SitemapServer::PATTERN_CHUNK and the
+	 * Apache .htaccess block via CHUNK_NAME_PATTERN, ensuring all three
+	 * consumers stay synchronized.
 	 *
 	 * @since 1.1.0
 	 * @param string $file_name Bare file name.
@@ -78,7 +95,7 @@ class SitemapStorage {
 	 *               when the name is not a chunk file.
 	 */
 	public function parse_file_name( string $file_name ): ?array {
-		if ( 1 !== preg_match( '/^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$/', $file_name, $matches ) ) {
+		if ( 1 !== preg_match( '/' . self::CHUNK_NAME_PATTERN . '/', $file_name, $matches ) ) {
 			return null;
 		}
 
