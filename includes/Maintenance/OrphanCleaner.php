@@ -93,6 +93,10 @@ class OrphanCleaner {
 			$result['rows'] = $this->clean_rows( $dry_run );
 		}
 
+		if ( null === $only || self::ONLY_DUPLICATES === $only ) {
+			$result['duplicates'] = $this->clean_duplicates( $dry_run );
+		}
+
 		return $result;
 	}
 
@@ -245,5 +249,70 @@ class OrphanCleaner {
 		// meta-override path reads, and system_page rows are excluded from
 		// sitemap membership entirely. Neither is an orphan.
 		return false;
+	}
+
+	/**
+	 * Collapse objects holding rows under more than one subtype.
+	 *
+	 * Posts only. A term cannot change taxonomy, and custom_page IDs collide
+	 * across families by design — vendor_store:42 and vendor_items:42 are one
+	 * vendor's two URLs, so grouping by object_id there would delete one of
+	 * every pair. IndexableRepository::purge_stale_subtypes() documents the
+	 * same scoping.
+	 *
+	 * A post that no longer exists is skipped: clean_rows() owns that case,
+	 * which is why the categories run in that order.
+	 *
+	 * Counted per object collapsed, not per row deleted, so the number
+	 * matches the number of URLs that stopped being published twice.
+	 *
+	 * @param bool $dry_run Count without purging.
+	 * @return int Objects collapsed.
+	 */
+	private function clean_duplicates( bool $dry_run ): int {
+		global $wpdb;
+
+		$table      = IndexablesTable::get_table_name();
+		$last_id    = 0;
+		$collapsed  = 0;
+		$batch_size = 0;
+
+		do {
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT object_id FROM {$table}
+					WHERE object_type = 'post' AND object_id > %d
+					GROUP BY object_id
+					HAVING COUNT(DISTINCT object_subtype) > 1
+					ORDER BY object_id ASC
+					LIMIT %d",
+					$last_id,
+					self::BATCH_SIZE
+				)
+			);
+			// phpcs:enable
+
+			$ids        = is_array( $ids ) ? $ids : array();
+			$batch_size = count( $ids );
+
+			foreach ( $ids as $object_id ) {
+				$object_id = (int) $object_id;
+				$last_id   = $object_id;
+				$post      = get_post( $object_id );
+
+				if ( ! $post ) {
+					continue;
+				}
+
+				++$collapsed;
+
+				if ( ! $dry_run ) {
+					$this->repository->purge_stale_subtypes( 'post', $this->subtypes->resolve( $post ), $object_id );
+				}
+			}
+		} while ( self::BATCH_SIZE === $batch_size );
+
+		return $collapsed;
 	}
 }

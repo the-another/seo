@@ -172,4 +172,51 @@ class OrphanCleanerTest extends TestCase {
 
 		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_ROWS )['rows'] );
 	}
+
+	/**
+	 * @param array<int, int> $ids
+	 */
+	private function stub_duplicate_scan( array $ids ): void {
+		$this->wpdb->shouldReceive( 'get_col' )
+			->with( Mockery::on( static fn( string $sql ): bool => str_contains( $sql, 'COUNT(DISTINCT object_subtype) > 1' ) ) )
+			->andReturn( $ids, array() );
+	}
+
+	public function test_purges_duplicate_subtype_rows_keeping_the_resolved_subtype(): void {
+		$this->stub_duplicate_scan( array( 77 ) );
+
+		$post            = Mockery::mock( 'WP_Post' );
+		$post->ID        = 77;
+		$post->post_type = 'product';
+		Monkey\Functions\when( 'get_post' )->justReturn( $post );
+
+		$this->subtypes->shouldReceive( 'resolve' )->once()->with( $post )->andReturn( 'aucteeno_item' );
+		$this->repository->shouldReceive( 'purge_stale_subtypes' )->once()->with( 'post', 'aucteeno_item', 77 );
+
+		$this->assertSame( 1, $this->cleaner->clean( false, OrphanCleaner::ONLY_DUPLICATES )['duplicates'] );
+	}
+
+	public function test_skips_duplicates_whose_post_is_gone(): void {
+		$this->stub_duplicate_scan( array( 77 ) );
+
+		Monkey\Functions\when( 'get_post' )->justReturn( null );
+
+		$this->repository->shouldNotReceive( 'purge_stale_subtypes' );
+
+		$this->assertSame( 0, $this->cleaner->clean( false, OrphanCleaner::ONLY_DUPLICATES )['duplicates'] );
+	}
+
+	public function test_dry_run_counts_duplicates_without_purging(): void {
+		$this->stub_duplicate_scan( array( 77 ) );
+
+		$post            = Mockery::mock( 'WP_Post' );
+		$post->ID        = 77;
+		$post->post_type = 'product';
+		Monkey\Functions\when( 'get_post' )->justReturn( $post );
+
+		$this->subtypes->shouldReceive( 'resolve' )->andReturn( 'aucteeno_item' );
+		$this->repository->shouldNotReceive( 'purge_stale_subtypes' );
+
+		$this->assertSame( 1, $this->cleaner->clean( true, OrphanCleaner::ONLY_DUPLICATES )['duplicates'] );
+	}
 }
