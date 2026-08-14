@@ -26,6 +26,7 @@ class QueueWaiterTest extends TestCase {
 	public function test_runs_batches_until_the_group_is_empty(): void {
 		$pending = array( array( 1 ), array( 1 ), array() );
 
+		Monkey\Functions\when( 'as_get_datetime_object' )->justReturn( 'NOW' );
 		Monkey\Functions\when( 'as_get_scheduled_actions' )->alias(
 			static function () use ( &$pending ): array {
 				return array_shift( $pending ) ?? array();
@@ -71,6 +72,7 @@ class QueueWaiterTest extends TestCase {
 	}
 
 	public function test_reports_completion_without_running_when_nothing_is_pending(): void {
+		Monkey\Functions\when( 'as_get_datetime_object' )->justReturn( 'NOW' );
 		Monkey\Functions\when( 'as_get_scheduled_actions' )->justReturn( array() );
 
 		$runs     = 0;
@@ -89,5 +91,36 @@ class QueueWaiterTest extends TestCase {
 
 		$this->assertSame( 0, $runs );
 		$this->assertSame( array( array( 100, true ) ), $reported );
+	}
+
+	public function test_only_counts_actions_that_are_already_due(): void {
+		// Every group this plugin uses (IndexableBackfill::GROUP,
+		// SitemapSweeper::GROUP, SitemapAssignment::GROUP) is the same
+		// 'taseo' string, and SitemapSweeper::ensure_recurring() keeps a
+		// recurring action permanently pending in that group, 300s in the
+		// future. An unfiltered "any pending action" query would count that
+		// recurrence as work forever, so wait() would never see the queue
+		// as drained. The query must restrict to actions already due.
+		$captured_args = array();
+
+		Monkey\Functions\when( 'as_get_datetime_object' )->justReturn( 'NOW' );
+		Monkey\Functions\when( 'as_get_scheduled_actions' )->alias(
+			static function ( array $args ) use ( &$captured_args ): array {
+				$captured_args[] = $args;
+
+				return array();
+			}
+		);
+
+		$waiter = new QueueWaiter(
+			static function ( string $group ): void {},
+			static function ( int $percent, bool $done ): void {}
+		);
+
+		$waiter->wait( 'taseo', static fn(): int => 100 );
+
+		$this->assertNotEmpty( $captured_args );
+		$this->assertArrayHasKey( 'date', $captured_args[0] );
+		$this->assertSame( '<=', $captured_args[0]['date_compare'] );
 	}
 }

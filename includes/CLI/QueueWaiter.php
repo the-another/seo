@@ -78,15 +78,21 @@ class QueueWaiter {
 	 * @return bool True when work remains.
 	 */
 	private function has_pending( string $group ): bool {
-		if ( ! function_exists( 'as_get_scheduled_actions' ) ) {
+		if ( ! function_exists( 'as_get_scheduled_actions' ) || ! function_exists( 'as_get_datetime_object' ) ) {
 			return false;
 		}
 
+		// Only actions that are actually DUE count as work to wait for. Every
+		// group this plugin uses also carries SitemapSweeper's recurring
+		// action, whose next occurrence is permanently pending 300s in the
+		// future — without this filter the loop could never exit.
 		$pending = as_get_scheduled_actions(
 			array(
-				'group'    => $group,
-				'status'   => 'pending',
-				'per_page' => 1,
+				'group'        => $group,
+				'status'       => 'pending',
+				'date'         => as_get_datetime_object(),
+				'date_compare' => '<=',
+				'per_page'     => 1,
 			),
 			'ids'
 		);
