@@ -3,7 +3,7 @@
 	"description": "Performance-first SEO for WordPress at catalog scale: template-driven titles and meta, Open Graph and Twitter Cards, Schema.org JSON-LD, breadcrumbs, and an indexable table built for millions of objects.",
 	"type": "wordpress-plugin",
 	"license": "GPL-2.0-or-later",
-	"version": "1.2.1",
+	"version": "1.2.2",
 	"authors": [
 		{
 			"name": "The Another",

@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.2.1
+Stable tag: 1.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -65,6 +65,10 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 == Changelog ==
 
 
+
+
+= 1.2.2 - 2026-08-17 =
+* Fix: A product with no price no longer emits an Offer stating an empty one. WooCommerce reports no price for anything with neither a regular nor a sale price — catalogue-only listings, "call for price" items, external and quote-driven products — and the Product schema passed that empty value straight through as the offer price, beside a real currency and stock status. Search engines read a blank price as malformed rather than absent, and report the page for it, so the offer is now left out entirely: a currency and a stock status with nothing to buy at are not an offer either. Products with a price are unchanged.
 
 = 1.2.1 - 2026-08-16 =
 * Fix: On a site with a static front page, the home request resolved as a plain page instead of the Home Page system page — a static front page satisfies `is_singular()` as well as `is_front_page()`, and the singular branch ran first. The Home Page title and description templates were unreachable, so the home title silently rendered from the front page's own post title through the page fallback template. The front-page check now runs before the singular one, the same priority custom pages already have over it and for the same reason.
