@@ -102,6 +102,33 @@ class SitemapStorageTest extends TestCase {
 		unlink( $dir . '/taseo-sitemaps/product-sitemap-3.xml' );
 	}
 
+	public function test_read_returns_file_contents(): void {
+		$dir = sys_get_temp_dir() . '/taseo-storage-test-uploads';
+
+		if ( ! is_dir( $dir . '/taseo-sitemaps' ) ) {
+			mkdir( $dir . '/taseo-sitemaps', 0777, true );
+		}
+
+		file_put_contents( $dir . '/taseo-sitemaps/product-sitemap-7.xml', '<urlset>read-me</urlset>' );
+
+		$this->stub_uploads( $dir );
+
+		$this->assertSame(
+			'<urlset>read-me</urlset>',
+			( new SitemapStorage() )->read( array( 'object_subtype' => 'product', 'chunk_number' => 7 ) )
+		);
+
+		unlink( $dir . '/taseo-sitemaps/product-sitemap-7.xml' );
+	}
+
+	public function test_read_returns_null_for_missing_file(): void {
+		$this->stub_uploads( '/srv/uploads' );
+
+		$this->assertNull(
+			( new SitemapStorage() )->read( array( 'object_subtype' => 'post', 'chunk_number' => 99 ) )
+		);
+	}
+
 	public function test_stream_returns_false_for_missing_file(): void {
 		$this->stub_uploads( '/srv/uploads' );
 

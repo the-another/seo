@@ -143,7 +143,7 @@ class SitemapServer {
 		if ( 'index' === $kind ) {
 			status_header( 200 );
 			$this->send_xml_headers();
-			echo $this->render_root_index(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped during rendering.
+			echo $this->filter_xml( $this->render_root_index() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped during rendering.
 		} elseif ( 'chunk' === $kind ) {
 			$this->serve_chunk();
 		} else {
@@ -221,7 +221,21 @@ class SitemapServer {
 			'chunk_number'   => $number,
 		);
 
-		if ( $this->storage->exists( $chunk ) ) {
+		if ( has_filter( 'taseo_sitemap_xml' ) ) {
+			// A subscriber may need to transform the XML per request (a
+			// multi-domain plugin rewriting hosts), so the file is read into
+			// memory instead of streamed. read() doubling as the existence
+			// check keeps this path's miss handling identical to stream()'s.
+			$xml = $this->storage->read( $chunk );
+
+			if ( null !== $xml ) {
+				status_header( 200 );
+				$this->send_xml_headers();
+				echo $this->filter_xml( $xml ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped when the file was rendered.
+
+				return;
+			}
+		} elseif ( $this->storage->exists( $chunk ) ) {
 			status_header( 200 );
 			$this->send_xml_headers();
 			$this->storage->stream( $chunk );
@@ -239,6 +253,38 @@ class SitemapServer {
 		}
 
 		status_header( 404 );
+	}
+
+	/**
+	 * Pass a served XML document through the taseo_sitemap_xml filter.
+	 *
+	 * Both egresses (the live root index and the chunk fallback) route through
+	 * here, so a subscriber sees every sitemap byte this plugin serves via
+	 * PHP. Fails open: a subscriber returning a non-string is ignored rather
+	 * than corrupting the document.
+	 *
+	 * @since 1.2.0
+	 * @param string $xml XML document about to be served.
+	 * @return string XML document, possibly transformed.
+	 */
+	private function filter_xml( string $xml ): string {
+		/**
+		 * Filters a sitemap XML document as it is served.
+		 *
+		 * Runs on the root index and on every chunk served through the WP
+		 * fallback. This plugin itself always renders canonical-host URLs;
+		 * a multi-domain plugin can subscribe to rewrite them to the host
+		 * actually being browsed. The Apache/LiteSpeed static-serve rules are
+		 * host-scoped to the canonical host so any other host reaches this
+		 * filter instead of the raw file.
+		 *
+		 * @since 1.2.0
+		 *
+		 * @param string $xml XML document about to be served.
+		 */
+		$filtered = apply_filters( 'taseo_sitemap_xml', $xml );
+
+		return is_string( $filtered ) ? $filtered : $xml;
 	}
 
 	/**
@@ -313,6 +359,19 @@ class SitemapServer {
 		$snippet  = "# BEGIN The Another SEO sitemap files\n";
 		$snippet .= "<IfModule mod_rewrite.c>\n";
 		$snippet .= "RewriteEngine On\n";
+
+		$host = strtolower( (string) wp_parse_url( (string) home_url(), PHP_URL_HOST ) );
+		$host = (string) preg_replace( '/^www\./', '', $host );
+
+		if ( '' !== $host ) {
+			// Static serving is host-scoped to the canonical home host (www
+			// and apex forms): the raw file always carries canonical-host
+			// URLs, so a request on any other domain this install answers on
+			// (a multi-domain/Brand host) must fall through to the WP
+			// fallback, where the taseo_sitemap_xml filter can rewrite them.
+			$snippet .= 'RewriteCond %{HTTP_HOST} ^(?:www\.)?' . preg_quote( $host, '#' ) . '(?::\d+)?$ [NC]' . "\n";
+		}
+
 		$snippet .= 'RewriteCond %{DOCUMENT_ROOT}' . $directory . '/$1-sitemap-$2.xml -f' . "\n";
 		$snippet .= 'RewriteRule ' . self::PATTERN_CHUNK . ' ' . $directory . '/$1-sitemap-$2.xml [L]' . "\n";
 		$snippet .= "</IfModule>\n";

@@ -93,6 +93,113 @@ class SitemapServerTest extends TestCase {
 		$this->assertStringContainsString( '<sitemapindex', $output );
 	}
 
+	public function test_root_index_output_passes_through_sitemap_xml_filter(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->storage->shouldReceive( 'get_file_name' )->andReturn( 'page-sitemap-1.xml' );
+		$this->files->shouldReceive( 'get_all_chunks' )->once()->andReturn(
+			array(
+				array( 'object_subtype' => 'page', 'chunk_number' => '1', 'link_count' => '10', 'last_modified' => null, 'generated_at' => '2026-07-03 09:00:00' ),
+			)
+		);
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => 'taseo_sitemap' === $var ? 'index' : ''
+		);
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		Monkey\Filters\expectApplied( 'taseo_sitemap_xml' )
+			->once()
+			->andReturnUsing( static fn( string $xml ): string => str_replace( 'example.com', 'brand.test', $xml ) );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( '<loc>https://brand.test/page-sitemap-1.xml</loc>', $output );
+		$this->assertStringNotContainsString( 'example.com', $output );
+	}
+
+	public function test_root_index_ignores_non_string_filter_return(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->files->shouldReceive( 'get_all_chunks' )->once()->andReturn( array() );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => 'taseo_sitemap' === $var ? 'index' : ''
+		);
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		Monkey\Filters\expectApplied( 'taseo_sitemap_xml' )->once()->andReturn( null );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertStringContainsString( '<sitemapindex', $output );
+	}
+
+	public function test_chunk_output_passes_through_sitemap_xml_filter_when_subscribed(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\when( 'has_filter' )->justReturn( true );
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+
+		$this->storage->shouldReceive( 'read' )
+			->once()
+			->with( $expected_chunk )
+			->andReturn( '<urlset><loc>https://example.com/x.html</loc></urlset>' );
+		$this->storage->shouldNotReceive( 'stream' );
+
+		Monkey\Filters\expectApplied( 'taseo_sitemap_xml' )
+			->once()
+			->andReturnUsing( static fn( string $xml ): string => str_replace( 'example.com', 'brand.test', $xml ) );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '<urlset><loc>https://brand.test/x.html</loc></urlset>', $output );
+	}
+
+	public function test_chunk_read_miss_with_subscriber_falls_back_to_registry_status(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\when( 'has_filter' )->justReturn( true );
+		Functions\expect( 'status_header' )->once()->with( 410 );
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+
+		$this->storage->shouldReceive( 'read' )->once()->with( $expected_chunk )->andReturn( null );
+		$this->storage->shouldNotReceive( 'stream' );
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )
+			->andReturn( array( 'id' => '3', 'link_count' => '0' ) );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
 	public function test_maybe_serve_ignores_normal_requests(): void {
 		Functions\when( 'get_query_var' )->justReturn( '' );
 		Functions\expect( 'status_header' )->never();
@@ -290,6 +397,27 @@ class SitemapServerTest extends TestCase {
 		$this->assertStringContainsString( 'RewriteRule ^([a-z0-9_-]+)-sitemap-([0-9]+)\.xml$ /wp-content/uploads/taseo-sitemaps/$1-sitemap-$2.xml [L]', $rules );
 		// Our block comes BEFORE WP's catch-all.
 		$this->assertLessThan( strpos( $rules, '# WP rules' ), strpos( $rules, 'RewriteRule ^([a-z0-9_-]+)-sitemap-' ) );
+	}
+
+	public function test_apache_rules_scope_static_serving_to_canonical_host(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->storage->shouldReceive( 'is_stream_wrapped' )->andReturn( false );
+
+		Functions\when( 'wp_upload_dir' )->justReturn(
+			array( 'basedir' => '/var/www/wp-content/uploads', 'baseurl' => 'https://example.com/wp-content/uploads', 'error' => false )
+		);
+		Functions\when( 'wp_parse_url' )->alias( fn( string $url, int $component ) => parse_url( $url, $component ) );
+
+		$rules = $this->server->prepend_apache_static_rules( "# WP rules\n" );
+
+		// A request on any other host (a Brand domain) must fall through to
+		// the WP fallback, where the taseo_sitemap_xml filter can run.
+		$host_cond = 'RewriteCond %{HTTP_HOST} ^(?:www\.)?example\.com(?::\d+)?$ [NC]';
+		$this->assertStringContainsString( $host_cond, $rules );
+		$this->assertLessThan(
+			strpos( $rules, 'RewriteCond %{DOCUMENT_ROOT}' ),
+			strpos( $rules, $host_cond )
+		);
 	}
 
 	public function test_apache_rules_untouched_when_disabled(): void {

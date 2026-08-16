@@ -269,6 +269,30 @@ class SitemapStorage {
 	}
 
 	/**
+	 * Read a chunk's file into a string.
+	 *
+	 * The in-memory sibling of stream(), for serve paths that must transform
+	 * the XML before echoing (the taseo_sitemap_xml egress filter). Bounded by
+	 * the chunk cap — at most ~1000 <url> entries — so the copy is small.
+	 *
+	 * @since 1.2.0
+	 * @param array<string, mixed> $chunk Registry row.
+	 * @return string|null Contents, or null when the file is absent or unreadable.
+	 */
+	public function read( array $chunk ): ?string {
+		$path = $this->get_file_path( $chunk );
+
+		if ( ! file_exists( $path ) ) {
+			return null;
+		}
+
+		// Never generated here — only reads what the sweep already built.
+		$contents = file_get_contents( $path ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents, WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown -- reading a plugin-generated file (local or stream-wrapped) for the filtered serve path.
+
+		return false === $contents ? null : $contents;
+	}
+
+	/**
 	 * Stream a chunk's file to the output buffer.
 	 *
 	 * @since 0.3.0
