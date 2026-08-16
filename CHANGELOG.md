@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-08-16
+
+### Fixed
+- On a site with a static front page, the home request resolved as `post:page` instead of `system_page:home`: a static front page is a real WordPress page, so it satisfies `is_singular()`, and that branch ran first — leaving the `system_page:home` title and description templates unreachable. The home title silently rendered through the `post:page` fallback (`%%title%% %%sep%% %%sitename%%`) as the front page's post title. The front-page/home branch now resolves before the singular one, the same priority custom pages already have over the singular branch and for the same reason.
+
 ## [1.2.0] - 2026-08-16
 
 ### Added
@@ -101,7 +106,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/the-another/seo/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/the-another/seo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/the-another/seo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/the-another/seo/compare/v0.4.0...v1.0.0

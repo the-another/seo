@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.2.0
+Stable tag: 1.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -64,6 +64,10 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 == Changelog ==
 
+
+
+= 1.2.1 - 2026-08-16 =
+* Fix: On a site with a static front page, the home request resolved as a plain page instead of the Home Page system page — a static front page satisfies `is_singular()` as well as `is_front_page()`, and the singular branch ran first. The Home Page title and description templates were unreachable, so the home title silently rendered from the front page's own post title through the page fallback template. The front-page check now runs before the singular one, the same priority custom pages already have over it and for the same reason.
 
 = 1.2.0 - 2026-08-16 =
 * Add: `taseo_sitemap_xml` filter — every sitemap document served through PHP (the live root index and every chunk served through the WordPress fallback) passes through it just before echo, so a multi-domain plugin can transform the XML per request. The Another Multi-Brand Global Styles subscribes to rewrite canonical-host URLs to the Brand domain being browsed. With no subscribers, chunks keep streaming from disk exactly as before, and a subscriber returning a non-string is ignored rather than corrupting the document.

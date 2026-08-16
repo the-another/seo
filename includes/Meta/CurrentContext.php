@@ -75,6 +75,27 @@ class CurrentContext {
 			return $custom_page;
 		}
 
+		// Before is_singular(), not after: a static front page is a real
+		// WordPress page, so the home request is is_singular() too, and the
+		// singular branch would resolve it as post:page — leaving the
+		// system_page:home templates unreachable on every site with a
+		// static front page.
+		if ( is_front_page() || is_home() ) {
+			$permalink = (string) home_url( '/' );
+
+			// Static-front-page + posts-page setup: is_home() is the blog page
+			// (e.g. /blog/), which must not canonicalize to the site root.
+			if ( is_home() && ! is_front_page() ) {
+				$page_for_posts = (int) get_option( 'page_for_posts' );
+
+				if ( $page_for_posts > 0 ) {
+					$permalink = (string) get_permalink( $page_for_posts );
+				}
+			}
+
+			return $this->build( 'system_page', 'home', 0, $this->site_vars(), $permalink );
+		}
+
 		if ( is_singular() ) {
 			$post = get_queried_object();
 
@@ -104,22 +125,6 @@ class CurrentContext {
 			$link = get_term_link( $term );
 
 			return $this->build( 'term', $term->taxonomy, (int) $term->term_id, $this->term_vars( $term ), is_wp_error( $link ) ? '' : (string) $link );
-		}
-
-		if ( is_front_page() || is_home() ) {
-			$permalink = (string) home_url( '/' );
-
-			// Static-front-page + posts-page setup: is_home() is the blog page
-			// (e.g. /blog/), which must not canonicalize to the site root.
-			if ( is_home() && ! is_front_page() ) {
-				$page_for_posts = (int) get_option( 'page_for_posts' );
-
-				if ( $page_for_posts > 0 ) {
-					$permalink = (string) get_permalink( $page_for_posts );
-				}
-			}
-
-			return $this->build( 'system_page', 'home', 0, $this->site_vars(), $permalink );
 		}
 
 		if ( is_search() ) {
