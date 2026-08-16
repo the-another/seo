@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-08-17
+
+### Fixed
+- A product with no price emitted an Offer stating an empty one. `WC_Product::get_price()` returns `''` for anything with neither a regular nor a sale price — catalogue-only listings, "call for price" items, external and quote-driven products — and the Product node passed that empty string straight through as `offers.price`, beside a real `priceCurrency` and a real `availability`. A blank price is not read as "no price known": Search Console reads it as a malformed price and reports the page. The whole `offers` key is now omitted when there is no price to state, since a currency and a stock status with nothing to buy at are not an offer either. A priced product is unchanged.
+
 ## [1.2.1] - 2026-08-16
 
 ### Fixed
@@ -106,7 +111,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/the-another/seo/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/the-another/seo/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/the-another/seo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/the-another/seo/compare/v1.0.0...v1.1.0

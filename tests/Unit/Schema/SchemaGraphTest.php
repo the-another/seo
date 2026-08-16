@@ -9,6 +9,7 @@ use Brain\Monkey\Functions;
 use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Meta\CurrentContext;
@@ -202,6 +203,17 @@ class SchemaGraphTest extends TestCase {
 		$this->assertSame( $article['@id'], $webpage['mainEntity']['@id'] );
 	}
 
+	/**
+	 * Runs in its own process for the same reason the WooCommerce template
+	 * variable tests do: Functions\when( 'wc_get_product' ) makes Patchwork
+	 * define a real global function that can never be undefined, which
+	 * permanently flips function_exists( 'wc_get_product' ) to true for every
+	 * test afterwards — including TemplateVariablesTest's
+	 * test_products_omit_price_and_sku_without_woocommerce(), which asserts
+	 * the opposite. Declaration order is all that keeps that green today, and
+	 * executionOrder="depends,defects" reorders tests after any local failure.
+	 */
+	#[RunInSeparateProcess]
 	public function test_product_type_adds_product_node_with_offer(): void {
 		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product', Mockery::any() )->andReturn( 'Product' );
 
@@ -229,6 +241,46 @@ class SchemaGraphTest extends TestCase {
 				$this->assertSame( 'USD', $node['offers']['priceCurrency'] );
 				$this->assertSame( 'https://example.com/about/', $node['offers']['url'] );
 				$this->assertSame( 'https://schema.org/InStock', $node['offers']['availability'] );
+				return;
+			}
+		}
+
+		$this->fail( 'No Product node found.' );
+	}
+
+	/**
+	 * get_price() is '' for any product with neither a regular nor a sale
+	 * price — catalogue-only listings, "call for price" items, quote-driven
+	 * products. An Offer stating an empty price is not read as "no price
+	 * known": Search Console reads it as a malformed one, so the Offer is
+	 * worth less than no Offer at all.
+	 *
+	 * Same wc_get_product() hazard as the test above, so same isolation.
+	 */
+	#[RunInSeparateProcess]
+	public function test_a_product_with_no_price_states_no_offer(): void {
+		$this->settings->shouldReceive( 'get_schema_type' )->with( 'product', Mockery::any() )->andReturn( 'Product' );
+
+		$ctx                   = $this->page_context();
+		$ctx['object_subtype'] = 'product';
+		$ctx['post_type']      = 'product';
+		$ctx['object_id']      = 88123;
+		$this->context->shouldReceive( 'resolve' )->andReturn( $ctx );
+
+		$product = Mockery::mock( 'WC_Product' );
+		$product->shouldReceive( 'get_sku' )->andReturn( 'VW-1' );
+		$product->shouldReceive( 'get_price' )->andReturn( '' );
+		$product->shouldReceive( 'is_in_stock' )->andReturn( true );
+
+		Functions\when( 'wc_get_product' )->justReturn( $product );
+		Functions\when( 'get_woocommerce_currency' )->justReturn( 'USD' );
+
+		$graph = $this->graph->build();
+
+		foreach ( $graph as $node ) {
+			if ( 'Product' === $node['@type'] ) {
+				$this->assertArrayNotHasKey( 'offers', $node );
+				$this->assertSame( 'VW-1', $node['sku'] );
 				return;
 			}
 		}

@@ -304,19 +304,32 @@ class SchemaGraph {
 				return null;
 			}
 
-			return array(
-				'@type'  => 'Product',
-				'@id'    => $permalink . '#product',
-				'name'   => (string) ( $ctx['vars']['title'] ?? '' ),
-				'sku'    => (string) $product->get_sku(),
-				'offers' => array(
+			$node = array(
+				'@type' => 'Product',
+				'@id'   => $permalink . '#product',
+				'name'  => (string) ( $ctx['vars']['title'] ?? '' ),
+				'sku'   => (string) $product->get_sku(),
+			);
+
+			$price = trim( (string) $product->get_price() );
+
+			// An Offer is only as good as the price it states. get_price() is
+			// '' for anything with neither a regular nor a sale price, and an
+			// empty price is not read as "no price known" — a search engine
+			// reads it as a malformed one and reports the page. A currency and
+			// a stock status with nothing to buy at are not an offer either,
+			// so the whole key goes rather than the page carrying an error.
+			if ( '' !== $price ) {
+				$node['offers'] = array(
 					'@type'         => 'Offer',
 					'url'           => $permalink,
-					'price'         => (string) $product->get_price(),
+					'price'         => $price,
 					'priceCurrency' => (string) get_woocommerce_currency(),
 					'availability'  => $product->is_in_stock() ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
-				),
-			);
+				);
+			}
+
+			return $node;
 		}
 
 		return null;
