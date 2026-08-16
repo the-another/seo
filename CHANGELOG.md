@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-16
+
 ### Added
 - `taseo_sitemap_xml` filter: every sitemap document served through PHP — the live root index and every chunk served through the WP fallback — passes through it just before echo, so a multi-domain plugin can transform the XML per request (The Another Multi-Brand Global Styles rewrites canonical-host URLs to the Brand host being browsed). The plugin itself still always renders canonical-host URLs; with no subscribers, chunks keep streaming from disk exactly as before. A subscriber returning a non-string is ignored rather than corrupting the document.
 
@@ -99,7 +101,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/the-another/seo/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/the-another/seo/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/the-another/seo/compare/v0.4.0...v1.0.0
 [0.4.0]: https://github.com/the-another/seo/compare/v0.3.0...v0.4.0

@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.0
 Requires PHP: 8.3
-Stable tag: 1.1.0
+Stable tag: 1.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,6 +63,11 @@ Chunked sitemap XML files are written to `wp-content/uploads/taseo-sitemaps/` an
 No. WooCommerce is optional — when present, products get `og:type=product`, price/availability tags, and Product schema.
 
 == Changelog ==
+
+
+= 1.2.0 - 2026-08-16 =
+* Add: `taseo_sitemap_xml` filter — every sitemap document served through PHP (the live root index and every chunk served through the WordPress fallback) passes through it just before echo, so a multi-domain plugin can transform the XML per request. The Another Multi-Brand Global Styles subscribes to rewrite canonical-host URLs to the Brand domain being browsed. With no subscribers, chunks keep streaming from disk exactly as before, and a subscriber returning a non-string is ignored rather than corrupting the document.
+* Fix: Sitemap requests on a non-canonical host could be served the raw chunk file by the Apache static-serve rules, bypassing PHP — and therefore any `taseo_sitemap_xml` subscriber — entirely. The static block now only serves the canonical home host (www and apex forms, any port); every other domain the install answers on falls through to the WordPress fallback where the filter runs. Cross-host URLs in a sitemap violate the sitemaps.org same-host rule and are ignored by crawlers, so a Brand domain's sitemap was previously invisible to search engines.
 
 = 1.1.0 - 2026-08-14 =
 * Add: WP-CLI commands — `wp taseo rescan`, `wp taseo regenerate`, `wp taseo status`, and `wp taseo cleanup`. Rescan and regenerate dispatch the same background jobs the admin buttons do, and take `--wait` to drive the queue and block until it drains.
