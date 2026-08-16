@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- `taseo_sitemap_xml` filter: every sitemap document served through PHP — the live root index and every chunk served through the WP fallback — passes through it just before echo, so a multi-domain plugin can transform the XML per request (The Another Multi-Brand Global Styles rewrites canonical-host URLs to the Brand host being browsed). The plugin itself still always renders canonical-host URLs; with no subscribers, chunks keep streaming from disk exactly as before. A subscriber returning a non-string is ignored rather than corrupting the document.
+
+### Fixed
+- Sitemap requests on a non-canonical host could be served the raw chunk file by the Apache static-serve rules, bypassing PHP — and therefore any `taseo_sitemap_xml` subscriber — entirely. The static block now carries a canonical-host `RewriteCond` (www and apex forms, any port), so only canonical-host requests are served statically; every other host this install answers on (a Brand domain) falls through to the WP fallback where the filter runs. Cross-host URLs in a sitemap violate the sitemaps.org same-host rule and are ignored by crawlers, so a Brand domain's sitemap was previously invisible to search engines.
+
 ## [1.1.0] - 2026-08-14
 
 ### Added
