@@ -398,6 +398,106 @@ class Settings {
 	}
 
 	/**
+	 * Default Cache-Control max-age for sitemap responses, in seconds.
+	 *
+	 * A day. Sitemap chunk files settle under append-only packing — an
+	 * earlier chunk changes only when one of its own URLs does — so the
+	 * interesting case for a crawler is revalidation, not a cold fetch, and
+	 * a long freshness window costs little. The conditional-request path
+	 * (Last-Modified / 304) keeps a shorter window cheap for anyone who
+	 * wants one.
+	 *
+	 * @since 1.3.0
+	 * @var int
+	 */
+	public const SITEMAP_CACHE_TTL_DEFAULT = 86400;
+
+	/**
+	 * Ceiling for any sitemap Cache-Control max-age, in seconds (one year —
+	 * the largest value RFC 9111 suggests anyone means).
+	 *
+	 * @since 1.3.0
+	 * @var int
+	 */
+	public const SITEMAP_CACHE_TTL_MAX = 31536000;
+
+	/**
+	 * Cache-Control max-age for sitemap responses that have no subtype of
+	 * their own — the root index — and the fallback for every subtype
+	 * without an override.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @return int Seconds, clamped to 0–SITEMAP_CACHE_TTL_MAX.
+	 */
+	public function get_sitemap_cache_ttl(): int {
+		return $this->clamp_cache_ttl( $this->get( 'sitemap_cache_ttl', self::SITEMAP_CACHE_TTL_DEFAULT ) );
+	}
+
+	/**
+	 * Per-subtype Cache-Control overrides.
+	 *
+	 * One map covers post types, taxonomies and external URL families alike:
+	 * all three share the subtype namespace (both registries reject keys that
+	 * would collide), and the chunk registry and its files are keyed by
+	 * subtype alone — so a subtype is exactly the granularity at which a
+	 * sitemap file exists, and a second map keyed the same way would only be
+	 * a second place for the same answer to drift.
+	 *
+	 * An absent key means "use the global value", so a newly registered
+	 * subtype needs no migration and no save.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @return array<string, int> Subtype key => seconds, clamped.
+	 */
+	public function get_sitemap_cache_ttl_overrides(): array {
+		$stored = $this->get( 'sitemap_cache_ttl_overrides', array() );
+
+		if ( ! is_array( $stored ) ) {
+			return array();
+		}
+
+		$clean = array();
+
+		foreach ( $stored as $subtype => $ttl ) {
+			if ( ! is_scalar( $ttl ) ) {
+				continue;
+			}
+
+			$clean[ (string) $subtype ] = $this->clamp_cache_ttl( $ttl );
+		}
+
+		return $clean;
+	}
+
+	/**
+	 * Cache-Control max-age for one subtype's chunk files.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @param string $subtype Post type, taxonomy, or family key.
+	 * @return int Seconds.
+	 */
+	public function get_sitemap_cache_ttl_for( string $subtype ): int {
+		$overrides = $this->get_sitemap_cache_ttl_overrides();
+
+		return $overrides[ $subtype ] ?? $this->get_sitemap_cache_ttl();
+	}
+
+	/**
+	 * Reduce a stored value to a usable max-age.
+	 *
+	 * @since 1.3.0
+	 *
+	 * @param mixed $ttl Stored value.
+	 * @return int Seconds, clamped to 0–SITEMAP_CACHE_TTL_MAX.
+	 */
+	private function clamp_cache_ttl( $ttl ): int {
+		return max( 0, min( self::SITEMAP_CACHE_TTL_MAX, (int) $ttl ) );
+	}
+
+	/**
 	 * Family keys excluded from sitemap output.
 	 *
 	 * Stored as a disabled-list so absence means included — a newly

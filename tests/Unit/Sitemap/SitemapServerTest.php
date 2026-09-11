@@ -45,6 +45,9 @@ class SitemapServerTest extends TestCase {
 			static fn( ?array $chunk ): bool => $real_files->is_listable( $chunk )
 		)->byDefault();
 
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl' )->andReturn( 86400 )->byDefault();
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl_for' )->andReturn( 86400 )->byDefault();
+
 		$this->server = new SitemapServer( $this->files, $this->storage, $this->settings );
 	}
 
@@ -266,6 +269,88 @@ class SitemapServerTest extends TestCase {
 		$output = ob_get_clean();
 
 		$this->assertSame( '<urlset>static</urlset>', $output );
+	}
+
+	public function test_chunk_response_takes_its_cache_ttl_from_its_own_subtype(): void {
+		// The header bytes are not observable from a CLI test run, so the
+		// seam asserted here is the one that can actually be wrong: which
+		// Settings value a chunk response consults. A chunk must use its own
+		// subtype's TTL, not the global one — that is the whole point of the
+		// per-type override.
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl_for' )->once()->with( 'product' )->andReturn( 900 );
+		$this->settings->shouldNotReceive( 'get_sitemap_cache_ttl' );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-03 09:00:00' )
+		);
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( true );
+		$this->storage->shouldReceive( 'stream' )->once()->with( $expected_chunk )->andReturn( true );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		ob_get_clean();
+	}
+
+	public function test_a_304_still_consults_the_subtype_cache_ttl(): void {
+		// RFC 9110 asks a 304 to carry the caching headers the 200 would
+		// have; a cache that revalidates and gets no freshness back would
+		// revalidate again on the very next request.
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl_for' )->once()->with( 'product' )->andReturn( 900 );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 304 );
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-03 09:00:00' )
+		);
+
+		$_SERVER['HTTP_IF_MODIFIED_SINCE'] = 'Fri, 03 Jul 2026 09:00:00 GMT';
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		ob_get_clean();
+	}
+
+	public function test_root_index_takes_its_cache_ttl_from_the_global_setting(): void {
+		// The index has no subtype of its own, so it is the one response that
+		// must read the global value.
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl' )->once()->andReturn( 86400 );
+		$this->settings->shouldNotReceive( 'get_sitemap_cache_ttl_for' );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => 'taseo_sitemap' === $var ? 'index' : ''
+		);
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->files->shouldReceive( 'get_all_chunks' )->once()->andReturn( array() );
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		ob_get_clean();
 	}
 
 	public function test_conditional_request_for_an_unchanged_chunk_answers_304_without_touching_storage(): void {

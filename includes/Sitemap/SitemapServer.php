@@ -143,6 +143,9 @@ class SitemapServer {
 		if ( 'index' === $kind ) {
 			status_header( 200 );
 			$this->send_xml_headers();
+			// The index is the one response with no subtype of its own, so
+			// it takes the global value rather than a per-type override.
+			$this->send_cache_control( $this->settings->get_sitemap_cache_ttl() );
 			echo $this->filter_xml( $this->render_root_index() ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped during rendering.
 		} elseif ( 'chunk' === $kind ) {
 			$this->serve_chunk();
@@ -233,6 +236,7 @@ class SitemapServer {
 		// miss path anyway, so the hit path is the only one paying for it.
 		$row          = $this->files->get_by_subtype_and_number( $subtype, $number );
 		$generated_at = $this->files->is_listable( $row ) ? (string) $row['generated_at'] : null;
+		$ttl          = $this->settings->get_sitemap_cache_ttl_for( $subtype );
 
 		if ( null !== $generated_at && $this->is_unmodified_since( $generated_at ) ) {
 			// The crawler already holds exactly this file. Answering from the
@@ -241,6 +245,10 @@ class SitemapServer {
 			// packing, so this is the common case for everything but the tail.
 			status_header( 304 );
 			$this->send_last_modified( $generated_at );
+			// RFC 9110 asks a 304 to carry the headers the 200 would have.
+			// Without the freshness, a cache that revalidated once would
+			// revalidate again on the very next request.
+			$this->send_cache_control( $ttl );
 
 			return;
 		}
@@ -256,6 +264,7 @@ class SitemapServer {
 				status_header( 200 );
 				$this->send_xml_headers();
 				$this->send_last_modified( $generated_at );
+				$this->send_cache_control( $ttl );
 				echo $this->filter_xml( $xml ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped when the file was rendered.
 
 				return;
@@ -264,6 +273,7 @@ class SitemapServer {
 			status_header( 200 );
 			$this->send_xml_headers();
 			$this->send_last_modified( $generated_at );
+			$this->send_cache_control( $ttl );
 			$this->storage->stream( $chunk );
 
 			return;
@@ -307,6 +317,26 @@ class SitemapServer {
 		$generated = strtotime( $generated_at . ' UTC' );
 
 		return false !== $generated && $since >= $generated;
+	}
+
+	/**
+	 * Send the Cache-Control header for a sitemap response.
+	 *
+	 * `public` is stated explicitly: a sitemap is a public document by
+	 * definition, and without it a shared cache in front of WordPress is free
+	 * to treat the response as private and store nothing. That matters most
+	 * where the Apache static-serve block cannot apply — offloaded uploads —
+	 * because there every miss is a WordPress boot plus a bucket round trip.
+	 *
+	 * A TTL of zero renders as `max-age=0`, i.e. revalidate every time, which
+	 * the conditional-request path above answers cheaply.
+	 *
+	 * @since 1.3.0
+	 * @param int $ttl Freshness lifetime in seconds.
+	 * @return void
+	 */
+	private function send_cache_control( int $ttl ): void {
+		header( 'Cache-Control: public, max-age=' . max( 0, $ttl ) );
 	}
 
 	/**
