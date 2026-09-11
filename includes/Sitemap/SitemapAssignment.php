@@ -178,7 +178,10 @@ class SitemapAssignment {
 	}
 
 	/**
-	 * Claim a slot: lowest open chunk first, new chunk as fallback.
+	 * Claim a slot at the tail: the subtype's newest chunk, or a fresh one
+	 * appended after it. Never an earlier chunk, even one with room — see
+	 * SitemapFileRepository::find_open_tail_chunk() for why holes are left
+	 * unfilled.
 	 *
 	 * Both the claim and the create can lose a concurrency race (conditional
 	 * UPDATE affecting zero rows / unique-key violation); either way the
@@ -192,7 +195,7 @@ class SitemapAssignment {
 		$cap = $this->settings->get_sitemap_max_links();
 
 		for ( $attempt = 0; $attempt < self::CLAIM_RETRIES; $attempt++ ) {
-			$chunk = $this->files->find_lowest_open_chunk( $object_subtype, $cap );
+			$chunk = $this->files->find_open_tail_chunk( $object_subtype, $cap );
 
 			if ( null === $chunk ) {
 				$chunk = $this->files->create_chunk( $object_subtype );

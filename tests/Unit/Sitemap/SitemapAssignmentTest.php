@@ -72,7 +72,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )->once()->with( 'product', 1000 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'find_open_tail_chunk' )->once()->with( 'product', 1000 )->andReturn( array( 'id' => '3' ) );
 		$this->files->shouldReceive( 'claim_slot' )->once()->with( 3, 1000 )->andReturn( true );
 		$this->files->shouldNotReceive( 'create_chunk' );
 
@@ -88,7 +88,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )->once()->andReturn( null );
+		$this->files->shouldReceive( 'find_open_tail_chunk' )->once()->andReturn( null );
 		$this->files->shouldReceive( 'create_chunk' )->once()->with( 'product' )->andReturn( array( 'id' => '8' ) );
 
 		$this->wpdb->shouldReceive( 'update' )
@@ -103,7 +103,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )
+		$this->files->shouldReceive( 'find_open_tail_chunk' )
 			->twice()
 			->andReturn( array( 'id' => '3' ), array( 'id' => '4' ) );
 		$this->files->shouldReceive( 'claim_slot' )->once()->with( 3, 1000 )->andReturn( false ); // lost the last slot.
@@ -121,7 +121,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )
+		$this->files->shouldReceive( 'find_open_tail_chunk' )
 			->twice()
 			->andReturn( null, array( 'id' => '5' ) ); // second pass sees the race winner's chunk.
 		$this->files->shouldReceive( 'create_chunk' )->once()->andReturn( null ); // unique-key race lost.
@@ -139,7 +139,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )->times( 5 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'find_open_tail_chunk' )->times( 5 )->andReturn( array( 'id' => '3' ) );
 		$this->files->shouldReceive( 'claim_slot' )->times( 5 )->andReturn( false );
 
 		$this->wpdb->shouldNotReceive( 'update' );
@@ -152,7 +152,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => '7' ) );
 
 		$this->files->shouldReceive( 'mark_dirty' )->once()->with( 7 );
-		$this->files->shouldNotReceive( 'find_lowest_open_chunk' );
+		$this->files->shouldNotReceive( 'find_open_tail_chunk' );
 		$this->files->shouldNotReceive( 'claim_slot' );
 
 		$this->wpdb->shouldNotReceive( 'update' );
@@ -224,7 +224,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( false );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ) );
 
-		$this->files->shouldNotReceive( 'find_lowest_open_chunk' );
+		$this->files->shouldNotReceive( 'find_open_tail_chunk' );
 		$this->wpdb->shouldNotReceive( 'update' );
 
 		$this->assignment->handle_indexable_synced( 'post', 'product', 88123 );
@@ -262,7 +262,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'get_sitemap_max_links' )->andReturn( 1000 );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ), 'custom_page', 'vendor_store', 501 );
 
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )->once()->with( 'vendor_store', 1000 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'find_open_tail_chunk' )->once()->with( 'vendor_store', 1000 )->andReturn( array( 'id' => '3' ) );
 		$this->files->shouldReceive( 'claim_slot' )->once()->with( 3, 1000 )->andReturn( true );
 		$this->wpdb->shouldReceive( 'update' )->once();
 
@@ -274,7 +274,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->settings->shouldReceive( 'is_sitemap_family_enabled' )->with( 'vendor_store' )->andReturn( false );
 		$this->stub_indexable_row( array( 'id' => '9', 'is_indexable' => '1', 'sitemap_file_id' => null ), 'custom_page', 'vendor_store', 501 );
 
-		$this->files->shouldNotReceive( 'find_lowest_open_chunk' );
+		$this->files->shouldNotReceive( 'find_open_tail_chunk' );
 
 		$this->assignment->handle_indexable_synced( 'custom_page', 'vendor_store', 501 );
 	}
@@ -353,7 +353,7 @@ class SitemapAssignmentTest extends TestCase {
 		$this->wpdb->shouldReceive( 'get_results' )->once()->with( 'BATCH_SQL', ARRAY_A )->andReturn( $ids );
 
 		// Every row goes through the claim loop.
-		$this->files->shouldReceive( 'find_lowest_open_chunk' )->times( 200 )->andReturn( array( 'id' => '3' ) );
+		$this->files->shouldReceive( 'find_open_tail_chunk' )->times( 200 )->andReturn( array( 'id' => '3' ) );
 		$this->files->shouldReceive( 'claim_slot' )->times( 200 )->andReturn( true );
 		$this->wpdb->shouldReceive( 'update' )->times( 200 );
 

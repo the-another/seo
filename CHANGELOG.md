@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+- Sitemap chunk packing is now append-only: a URL is assigned to its subtype's newest chunk, or to a fresh chunk appended after it, and never to an earlier chunk that has room. Slots freed further down the range — a listing expired, was unpublished, or was deleted — are deliberately left as holes. Packing previously took the *lowest* chunk with room, which meant every freed slot anywhere in the range was refilled by the next new URL: the oldest files were rewritten whenever anything new arrived, moving their `<lastmod>` and forcing crawlers to re-fetch a file whose other entries had not changed, and no chunk could ever drain. On a catalogue of expiring listings the two policies differ sharply — append-only lets an early chunk shrink monotonically until it is tombstoned and its file removed, so a sub-sitemap retires whole. The cost is the intended trade: partly-filled chunks accumulate below the tail rather than being compacted away. Existing chunk membership is not rewritten; the new policy governs assignments from here on.
+
 ## [1.2.2] - 2026-08-17
 
 ### Fixed

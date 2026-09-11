@@ -65,13 +65,34 @@ class SitemapFileRepository {
 	}
 
 	/**
-	 * Lowest-numbered chunk for a subtype that still has room.
+	 * The subtype's newest chunk, when it still has room.
+	 *
+	 * Packing is append-only: only the last chunk of a subtype ever gains
+	 * members. Slots freed further down the range (a URL expired, was
+	 * unpublished, or was deleted) are deliberately left as holes rather
+	 * than reused, which is what makes a chunk file settle. An earlier
+	 * chunk can then only shrink, and once it reaches zero it is
+	 * tombstoned and its file removed — so a sub-sitemap retires whole
+	 * instead of being permanently recycled.
+	 *
+	 * Refilling holes would mean the opposite on both counts: the oldest
+	 * files would be rewritten every time anything new arrived (moving
+	 * their <lastmod> and forcing crawlers to re-fetch a file whose other
+	 * entries did not change), and no chunk would ever drain.
+	 *
+	 * Hence the deliberately unfiltered query: the cap is applied to the
+	 * tail row in PHP, never as a `link_count < %d` WHERE clause, because
+	 * such a clause would skip past a full tail and hand back an earlier,
+	 * partly drained chunk. A full tail returns null, which is the
+	 * caller's signal to append a new chunk.
 	 *
 	 * @param string $object_subtype Post type or taxonomy slug.
 	 * @param int    $cap            Configured links-per-file cap.
-	 * @return array<string, mixed>|null Row or null when every chunk is full.
+	 * @return array<string, mixed>|null Tail row with room, or null when the
+	 *                                   tail is full or the subtype has no
+	 *                                   chunks yet.
 	 */
-	public function find_lowest_open_chunk( string $object_subtype, int $cap ): ?array {
+	public function find_open_tail_chunk( string $object_subtype, int $cap ): ?array {
 		global $wpdb;
 
 		$table = SitemapFilesTable::get_table_name();
@@ -79,15 +100,18 @@ class SitemapFileRepository {
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 		$row = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT * FROM {$table} WHERE object_subtype = %s AND link_count < %d ORDER BY chunk_number ASC LIMIT 1",
-				$object_subtype,
-				$cap
+				"SELECT * FROM {$table} WHERE object_subtype = %s ORDER BY chunk_number DESC LIMIT 1",
+				$object_subtype
 			),
 			ARRAY_A
 		);
 		// phpcs:enable
 
-		return is_array( $row ) ? $row : null;
+		if ( ! is_array( $row ) || (int) $row['link_count'] >= $cap ) {
+			return null;
+		}
+
+		return $row;
 	}
 
 	/**
