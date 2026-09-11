@@ -135,6 +135,31 @@ class IndexableSyncTest extends TestCase {
 		$this->sync->handle_trash_post( 88123 );
 	}
 
+	public function test_delete_post_removes_the_row_for_a_caller_that_bypassed_wp_delete_post(): void {
+		// The entry point for writers that remove a post with raw SQL to skip
+		// the expensive WordPress/WooCommerce delete hooks: before_delete_post
+		// never fires for them, so the row (and its sitemap slot) would
+		// otherwise survive its post forever.
+		$post = $this->make_post( 88123 );
+
+		Functions\when( 'get_post' )->justReturn( $post );
+
+		$this->repository->shouldReceive( 'delete' )->once()->with( 'post', 'product', 88123 );
+
+		$this->sync->delete_post( 88123 );
+	}
+
+	public function test_delete_post_ignores_a_post_that_is_already_gone(): void {
+		// Called too late — after the post row was deleted — the subtype can
+		// no longer be resolved, so there is no row this could address. A
+		// no-op beats deleting the wrong subtype's row.
+		Functions\when( 'get_post' )->justReturn( null );
+
+		$this->repository->shouldNotReceive( 'delete' );
+
+		$this->sync->delete_post( 88123 );
+	}
+
 	public function test_handle_before_delete_post_deletes_row(): void {
 		$post = $this->make_post( 88123 );
 

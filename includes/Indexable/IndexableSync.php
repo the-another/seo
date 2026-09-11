@@ -144,6 +144,32 @@ class IndexableSync {
 	 * @return void
 	 */
 	public function handle_before_delete_post( int $post_id ): void {
+		$this->delete_post( $post_id );
+	}
+
+	/**
+	 * Remove a post's indexable row, releasing the sitemap slot it holds.
+	 *
+	 * The public entry point for writers that delete a post with raw SQL to
+	 * skip the expensive WordPress/WooCommerce delete hooks — a bulk importer
+	 * retiring expired listings, for instance. `before_delete_post` never
+	 * fires for those, so without this call the row outlives its post: the
+	 * sitemap keeps publishing a URL that now 404s, and the chunk slot is
+	 * never given back, so the chunk can never drain to zero and retire.
+	 *
+	 * Must be called while the post row is still readable. The subtype is
+	 * resolved from the live post, by the same resolution that wrote the row,
+	 * so the two agree on which row to address; after the post is gone there
+	 * is nothing left to resolve and this is a no-op.
+	 *
+	 * Deletes one row and one slot per call. A caller retiring a whole
+	 * catalogue should reach for a bounded job chain rather than a loop.
+	 *
+	 * @since 1.3.0
+	 * @param int $post_id Post ID, still present in wp_posts.
+	 * @return void
+	 */
+	public function delete_post( int $post_id ): void {
 		$post = get_post( $post_id );
 
 		if ( ! $post ) {
