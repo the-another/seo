@@ -112,7 +112,7 @@ class IndexableRepository {
 		}
 
 		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.PreparedSQLPlaceholders.ReplacementsWrongNumber -- Custom table, prepared below; images placeholder is a literal 'NULL' or '%s', so the sniff can't see it as a 7th placeholder, and the spread args count varies with it.
-		$sql = $wpdb->prepare(
+		$sql      = $wpdb->prepare(
 			"INSERT INTO {$table}
 				(object_type, object_subtype, object_id, permalink, is_indexable, last_modified, sitemap_images)
 			VALUES (%s, %s, %d, %s, %d, %s, {$images_placeholder})
@@ -123,8 +123,20 @@ class IndexableRepository {
 				sitemap_images = VALUES(sitemap_images)",
 			...$args
 		);
-		$wpdb->query( $sql );
+		$affected = $wpdb->query( $sql );
 		// phpcs:enable
+
+		// MySQL reports 0 affected rows when the ON DUPLICATE KEY UPDATE
+		// branch finds every column already equal, 1 for an insert and 2 for
+		// a real update — which is exactly "did this write move anything the
+		// sitemap file renders", for free and without a read-back. Every
+		// column in the statement (permalink, is_indexable, last_modified,
+		// sitemap_images) is one a chunk file renders or takes membership
+		// from, so the two questions have the same answer. The updated_at
+		// column cannot muddy it: ON UPDATE CURRENT_TIMESTAMP only fires when
+		// the row actually changes. A false return means the write errored
+		// rather than that nothing moved, so it is reported as a change.
+		$changed = false === $affected || (int) $affected > 0;
 
 		$this->purge_stale_subtypes( $object_type, $object_subtype, $object_id );
 
@@ -140,8 +152,12 @@ class IndexableRepository {
 		 * @param string $object_type    'post', 'term', 'system_page', or 'custom_page'.
 		 * @param string $object_subtype Post type / taxonomy / system page key / custom page key.
 		 * @param int    $object_id      Post or term ID; 0 for system pages and custom pages.
+		 * @param bool   $changed        Whether the write moved any synced column.
+		 *                               False means this was a re-sync that
+		 *                               left the row byte-identical, so
+		 *                               nothing downstream needs re-rendering.
 		 */
-		do_action( 'taseo_indexable_synced', $object_type, $object_subtype, $object_id );
+		do_action( 'taseo_indexable_synced', $object_type, $object_subtype, $object_id, $changed );
 	}
 
 	/**

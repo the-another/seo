@@ -55,6 +55,39 @@ class IndexableRepositoryTest extends TestCase {
 		parent::tearDown();
 	}
 
+	public function test_upsert_reports_no_change_when_the_write_touched_nothing(): void {
+		// MySQL reports 0 affected rows when ON DUPLICATE KEY UPDATE finds
+		// every column already equal — the exact signal for "this re-sync
+		// changed nothing the sitemap file renders".
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 0 );
+
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7, false );
+
+		$this->repository->upsert_synced_fields( 'post', 'product', 7, array( 'permalink' => 'https://example.com/p/7/' ) );
+	}
+
+	public function test_upsert_reports_a_change_when_a_column_actually_moved(): void {
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 2 );
+
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7, true );
+
+		$this->repository->upsert_synced_fields( 'post', 'product', 7, array( 'permalink' => 'https://example.com/p/7/' ) );
+	}
+
+	public function test_upsert_reports_a_change_when_the_write_failed(): void {
+		// A false return says the write errored, not that nothing moved.
+		// Reporting "changed" keeps the conservative behaviour: the chunk is
+		// re-rendered rather than trusted to be current.
+		$this->wpdb->shouldReceive( 'prepare' )->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( false );
+
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7, true );
+
+		$this->repository->upsert_synced_fields( 'post', 'product', 7, array( 'permalink' => 'https://example.com/p/7/' ) );
+	}
+
 	public function test_upsert_synced_fields_issues_insert_on_duplicate_key_update(): void {
 		$this->wpdb->shouldReceive( 'prepare' )
 			->once()
@@ -109,8 +142,8 @@ class IndexableRepositoryTest extends TestCase {
 					return 'SQL';
 				}
 			);
-		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' );
-		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7 );
+		$this->wpdb->shouldReceive( 'query' )->once()->with( 'SQL' )->andReturn( 2 );
+		Monkey\Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 7, true );
 
 		$this->repository->upsert_synced_fields(
 			'post',
@@ -305,9 +338,9 @@ class IndexableRepositoryTest extends TestCase {
 	public function test_upsert_synced_fields_fires_synced_action(): void {
 		// Twice: the upsert itself, then the stale-subtype probe.
 		$this->wpdb->shouldReceive( 'prepare' )->twice()->andReturn( 'SQL' );
-		$this->wpdb->shouldReceive( 'query' )->once();
+		$this->wpdb->shouldReceive( 'query' )->once()->andReturn( 2 );
 
-		Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 88123 );
+		Actions\expectDone( 'taseo_indexable_synced' )->once()->with( 'post', 'product', 88123, true );
 
 		$this->repository->upsert_synced_fields( 'post', 'product', 88123, array() );
 	}

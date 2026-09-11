@@ -85,7 +85,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function init( HookManager $hook_manager ): void {
-		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 3 );
+		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 4 );
 		$hook_manager->register_action( 'taseo_indexable_deleting', array( $this, 'handle_indexable_deleting' ), 10, 3 );
 		$hook_manager->register_action( self::ASSIGN_FAMILY_HOOK, array( $this, 'handle_assign_family_action' ) );
 	}
@@ -96,9 +96,16 @@ class SitemapAssignment {
 	 * @param string $object_type    Object type.
 	 * @param string $object_subtype Object subtype.
 	 * @param int    $object_id      Object ID.
+	 * @param bool   $changed        Whether the write moved a synced column.
+	 *                               Only the mark-dirty branch reads it;
+	 *                               assignment and release describe
+	 *                               membership, which an unchanged row can
+	 *                               still be wrong about. Defaults to true so
+	 *                               a caller that cannot tell gets the
+	 *                               conservative behaviour.
 	 * @return void
 	 */
-	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id ): void {
+	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id, bool $changed = true ): void {
 		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
@@ -133,8 +140,15 @@ class SitemapAssignment {
 		}
 
 		// Already assigned and staying indexable: an edit. Flag the chunk so
-		// the next sweep re-renders it with fresh <loc>/<lastmod> values.
-		$this->files->mark_dirty( $chunk_id );
+		// the next sweep re-renders it with fresh <loc>/<lastmod> values —
+		// but only when the write actually moved one of them. A provider that
+		// re-pushes its catalogue on a schedule otherwise dirties a chunk per
+		// row per pass, and every one of those rebuilds re-renders a file to
+		// the same bytes while moving the <lastmod> the root index publishes,
+		// which is what a crawler uses to decide whether to fetch it again.
+		if ( $changed ) {
+			$this->files->mark_dirty( $chunk_id );
+		}
 	}
 
 	/**
