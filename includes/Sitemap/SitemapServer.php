@@ -197,7 +197,9 @@ class SitemapServer {
 	 * report the file's absence with the status that matches why.
 	 *
 	 * Response matrix (the subtype/number guard aside):
-	 * - Physical file exists: 200, XML headers, streamed body.
+	 * - Live row, and the request's If-Modified-Since covers the time the
+	 *   file was written: 304, no storage touch at all.
+	 * - Physical file exists: 200, XML headers, Last-Modified, streamed body.
 	 * - No file, registry row exists with link_count = 0: 410 — the chunk
 	 *   existed and was emptied (tombstoned).
 	 * - No file, registry row exists with link_count > 0, or no row at all:
@@ -221,6 +223,28 @@ class SitemapServer {
 			'chunk_number'   => $number,
 		);
 
+		// The registry row is read up front, before any storage touch. Where
+		// uploads are offloaded to a stream wrapper (s3://…) every exists(),
+		// read() and stream() call is a network round trip to the bucket,
+		// while this is one indexed lookup on a table that stays in the low
+		// thousands of rows at any catalog size. It answers both of the
+		// questions that do not need the file — "unchanged since the crawler
+		// last saw it" and "gone" — and the row was already being read on the
+		// miss path anyway, so the hit path is the only one paying for it.
+		$row          = $this->files->get_by_subtype_and_number( $subtype, $number );
+		$generated_at = $this->files->is_listable( $row ) ? (string) $row['generated_at'] : null;
+
+		if ( null !== $generated_at && $this->is_unmodified_since( $generated_at ) ) {
+			// The crawler already holds exactly this file. Answering from the
+			// row alone is the whole point: no bucket round trip, and none of
+			// the up-to-a-megabyte body. Chunk files settle under append-only
+			// packing, so this is the common case for everything but the tail.
+			status_header( 304 );
+			$this->send_last_modified( $generated_at );
+
+			return;
+		}
+
 		if ( has_filter( 'taseo_sitemap_xml' ) ) {
 			// A subscriber may need to transform the XML per request (a
 			// multi-domain plugin rewriting hosts), so the file is read into
@@ -231,6 +255,7 @@ class SitemapServer {
 			if ( null !== $xml ) {
 				status_header( 200 );
 				$this->send_xml_headers();
+				$this->send_last_modified( $generated_at );
 				echo $this->filter_xml( $xml ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- XML document; every value escaped when the file was rendered.
 
 				return;
@@ -238,12 +263,11 @@ class SitemapServer {
 		} elseif ( $this->storage->exists( $chunk ) ) {
 			status_header( 200 );
 			$this->send_xml_headers();
+			$this->send_last_modified( $generated_at );
 			$this->storage->stream( $chunk );
 
 			return;
 		}
-
-		$row = $this->files->get_by_subtype_and_number( $subtype, $number );
 
 		if ( null !== $row && 0 === (int) $row['link_count'] ) {
 			// A tombstoned chunk: existed, was emptied, is not a document.
@@ -253,6 +277,61 @@ class SitemapServer {
 		}
 
 		status_header( 404 );
+	}
+
+	/**
+	 * Whether the request already holds the version of a chunk written at
+	 * this timestamp.
+	 *
+	 * Compared against generated_at — when the sweep last wrote the file —
+	 * rather than the chunk's last_modified, which is the newest member's
+	 * modification time and says nothing about when the bytes were produced.
+	 *
+	 * @since 1.3.0
+	 * @param string $generated_at Chunk generated_at, GMT 'Y-m-d H:i:s'.
+	 * @return bool True when a 304 is the correct answer.
+	 */
+	private function is_unmodified_since( string $generated_at ): bool {
+		if ( ! isset( $_SERVER['HTTP_IF_MODIFIED_SINCE'] ) ) {
+			return false;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- a conditional GET of a public document carries no nonce.
+		$header = sanitize_text_field( wp_unslash( $_SERVER['HTTP_IF_MODIFIED_SINCE'] ) );
+		$since  = '' === $header ? false : strtotime( $header );
+
+		if ( false === $since ) {
+			return false;
+		}
+
+		$generated = strtotime( $generated_at . ' UTC' );
+
+		return false !== $generated && $since >= $generated;
+	}
+
+	/**
+	 * Send the Last-Modified header a conditional request can come back with.
+	 *
+	 * Sent on the 304 as well as the 200: RFC 9110 asks a 304 to carry the
+	 * validators the 200 would have.
+	 *
+	 * @since 1.3.0
+	 * @param string|null $generated_at Chunk generated_at, or null when the
+	 *                                  chunk has no written-file timestamp.
+	 * @return void
+	 */
+	private function send_last_modified( ?string $generated_at ): void {
+		if ( null === $generated_at ) {
+			return;
+		}
+
+		$timestamp = strtotime( $generated_at . ' UTC' );
+
+		if ( false === $timestamp ) {
+			return;
+		}
+
+		header( 'Last-Modified: ' . gmdate( 'D, d M Y H:i:s', $timestamp ) . ' GMT' );
 	}
 
 	/**

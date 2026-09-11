@@ -33,6 +33,8 @@ class SitemapServerTest extends TestCase {
 
 		Functions\when( 'home_url' )->alias( fn( string $path = '' ): string => 'https://example.com' . $path );
 		Functions\when( 'esc_url' )->returnArg();
+		Functions\when( 'wp_unslash' )->returnArg();
+		Functions\when( 'sanitize_text_field' )->returnArg();
 
 		// The real predicate. The root index and orphan cleanup must agree on
 		// what "live" means — they used to state it separately and could drift
@@ -47,6 +49,7 @@ class SitemapServerTest extends TestCase {
 	}
 
 	protected function tearDown(): void {
+		unset( $_SERVER['HTTP_IF_MODIFIED_SINCE'] );
 		Monkey\tearDown();
 		parent::tearDown();
 	}
@@ -154,6 +157,12 @@ class SitemapServerTest extends TestCase {
 
 		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
 
+		// The chunk's registry row is now read before any storage touch, so
+		// an unconditional request can still be answered with a validator.
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-03 09:00:00' )
+		);
+
 		$this->storage->shouldReceive( 'read' )
 			->once()
 			->with( $expected_chunk )
@@ -234,6 +243,12 @@ class SitemapServerTest extends TestCase {
 
 		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
 
+		// The chunk's registry row is now read before any storage touch, so
+		// an unconditional request can still be answered with a validator.
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-03 09:00:00' )
+		);
+
 		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( true );
 		$this->storage->shouldReceive( 'stream' )
 			->once()
@@ -251,6 +266,113 @@ class SitemapServerTest extends TestCase {
 		$output = ob_get_clean();
 
 		$this->assertSame( '<urlset>static</urlset>', $output );
+	}
+
+	public function test_conditional_request_for_an_unchanged_chunk_answers_304_without_touching_storage(): void {
+		// The point of the short-circuit: on offloaded uploads every storage
+		// touch is a network round trip to the bucket, so an unchanged chunk
+		// must be answered from the registry row alone.
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 304 );
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-03 09:00:00' )
+		);
+
+		$this->storage->shouldNotReceive( 'exists' );
+		$this->storage->shouldNotReceive( 'stream' );
+		$this->storage->shouldNotReceive( 'read' );
+
+		$_SERVER['HTTP_IF_MODIFIED_SINCE'] = 'Fri, 03 Jul 2026 09:00:00 GMT';
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
+	}
+
+	public function test_conditional_request_for_a_chunk_rebuilt_since_serves_the_file(): void {
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 200 );
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '1000', 'generated_at' => '2026-07-04 09:00:00' )
+		);
+
+		$expected_chunk = array( 'object_subtype' => 'product', 'chunk_number' => 3 );
+
+		$this->storage->shouldReceive( 'exists' )->once()->with( $expected_chunk )->andReturn( true );
+		$this->storage->shouldReceive( 'stream' )
+			->once()
+			->with( $expected_chunk )
+			->andReturnUsing(
+				function () {
+					echo '<urlset>static</urlset>';
+
+					return true;
+				}
+			);
+
+		$_SERVER['HTTP_IF_MODIFIED_SINCE'] = 'Fri, 03 Jul 2026 09:00:00 GMT';
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '<urlset>static</urlset>', $output );
+	}
+
+	public function test_conditional_request_for_a_tombstoned_chunk_is_410_not_304(): void {
+		// A tombstone is not listable, so the short-circuit must not claim it
+		// is unchanged — the URL stopped being a document and has to say so.
+		$this->settings->shouldReceive( 'is_sitemap_enabled' )->andReturn( true );
+
+		Functions\when( 'get_query_var' )->alias(
+			fn( string $var ): string => match ( $var ) {
+				'taseo_sitemap'         => 'chunk',
+				'taseo_sitemap_subtype' => 'product',
+				'taseo_sitemap_chunk'   => '3',
+				default                 => '',
+			}
+		);
+		Functions\when( 'sanitize_key' )->alias( fn( string $v ): string => strtolower( $v ) );
+		Functions\expect( 'status_header' )->once()->with( 410 );
+
+		$this->files->shouldReceive( 'get_by_subtype_and_number' )->once()->with( 'product', 3 )->andReturn(
+			array( 'link_count' => '0', 'generated_at' => null )
+		);
+
+		$this->storage->shouldReceive( 'exists' )->andReturn( false );
+		$this->storage->shouldNotReceive( 'stream' );
+
+		$_SERVER['HTTP_IF_MODIFIED_SINCE'] = 'Fri, 03 Jul 2026 09:00:00 GMT';
+
+		ob_start();
+		$this->server->maybe_serve( false );
+		$output = ob_get_clean();
+
+		$this->assertSame( '', $output );
 	}
 
 	public function test_maybe_serve_404s_when_no_row_exists_for_missing_chunk_file(): void {
