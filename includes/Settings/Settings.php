@@ -626,6 +626,23 @@ class Settings {
 	}
 
 	/**
+	 * Stored tracking ID for one vendor on one domain.
+	 *
+	 * Vendor-agnostic by design: the tag registry declares which settings key
+	 * belongs to which vendor, so a vendor added there needs no getter here.
+	 * Inherits the default domain's value when this domain's own is blank.
+	 *
+	 * @since 1.5.0
+	 *
+	 * @param string $settings_key Settings key, e.g. 'analytics_ga4_id'.
+	 * @param string $host         Normalized host, '' for the default domain.
+	 * @return string ID or ''.
+	 */
+	public function get_tracking_id( string $settings_key, string $host = '' ): string {
+		return $this->get_domain_value( $settings_key, $host, true );
+	}
+
+	/**
 	 * GA4 measurement ID for one domain.
 	 *
 	 * @since 1.0.0 Added the $host parameter.
@@ -634,7 +651,7 @@ class Settings {
 	 * @return string ID or ''.
 	 */
 	public function get_ga4_id( string $host = '' ): string {
-		return $this->get_domain_value( 'analytics_ga4_id', $host, true );
+		return $this->get_tracking_id( 'analytics_ga4_id', $host );
 	}
 
 	/**
@@ -646,7 +663,7 @@ class Settings {
 	 * @return string ID or ''.
 	 */
 	public function get_gtm_id( string $host = '' ): string {
-		return $this->get_domain_value( 'analytics_gtm_id', $host, true );
+		return $this->get_tracking_id( 'analytics_gtm_id', $host );
 	}
 
 	/**
@@ -659,6 +676,6 @@ class Settings {
 	 * @return string ID or ''.
 	 */
 	public function get_meta_pixel_id( string $host = '' ): string {
-		return $this->get_domain_value( 'meta_pixel_id', $host, true );
+		return $this->get_tracking_id( 'meta_pixel_id', $host );
 	}
 }
