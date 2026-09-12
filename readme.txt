@@ -2,7 +2,7 @@
 Contributors: theanother, ziontrooper
 Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.3
 Stable tag: 1.2.2
 License: GPLv2 or later

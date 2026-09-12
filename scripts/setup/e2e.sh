@@ -18,7 +18,7 @@
 set -e
 
 # All e2e version pins live HERE (env-overridable), not in any Dockerfile.
-WP_VERSION="${WP_VERSION:-7.0}"
+WP_VERSION="${WP_VERSION:-7.1}"
 SQLITE_PLUGIN_VERSION="${SQLITE_PLUGIN_VERSION:-2.2.23}"
 # v2.0.15, not the newest tag: same constraint as dist-archive-command in
 # setup/unit.sh — v2.0.16+ declare wp-cli ^2.13, which has not been released.

@@ -311,12 +311,15 @@ test.describe( 'webmaster admin settings', () => {
 		// is actually on the page — a script dependency on wp-components does
 		// not bring the style handle with it. Assert the computed border, not
 		// the class attribute: nothing else on this screen styles a bare div,
-		// so a 1px #949494 border can only have come from that stylesheet.
+		// so a 1px #8d8d8d border can only have come from that stylesheet.
+		// The literal tracks whatever core currently paints that control (it
+		// was #949494 before WordPress 7.1), so it moves with the WP_VERSION
+		// pin in scripts/setup/e2e.sh.
 		await expect( surface ).toHaveClass( /components-text-control__input/ );
 		await expect( surface ).toHaveCSS( 'border-top-width', '1px' );
 		await expect( surface ).toHaveCSS(
 			'border-top-color',
-			'rgb(148, 148, 148)'
+			'rgb(141, 141, 141)'
 		);
 	} );
 
