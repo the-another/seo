@@ -200,21 +200,20 @@ class TagResolver {
 			$gate = $type->consent->gate();
 
 			if ( ! isset( $categories[ $gate ] ) ) {
-				// phpcs:disable Generic.Commenting.DocComment.LongNotCapital -- the long description leads with the documented filter name, not a sentence.
 				/**
 				 * Filters whether one consent category is emitted on this request.
 				 *
-				 * taseo_analytics_should_print covers GA4 and Tag Manager;
-				 * taseo_marketing_should_print covers Meta Pixel, Google Ads and
-				 * Bing UET. Separate so a visitor who accepted analytics but not
-				 * marketing can be honoured without losing both.
+				 * Two categories exist: `taseo_analytics_should_print` covers
+				 * GA4 and Tag Manager, and `taseo_marketing_should_print` covers
+				 * Meta Pixel, Google Ads and Bing UET. Separate so a visitor who
+				 * accepted analytics but not marketing can be honoured without
+				 * losing both.
 				 *
 				 * @since 1.0.0 As taseo_analytics_should_print.
 				 * @since 1.5.0 The marketing category gate.
 				 *
 				 * @param bool $enabled Whether to emit.
 				 */
-				// phpcs:enable Generic.Commenting.DocComment.LongNotCapital
 				$categories[ $gate ] = (bool) apply_filters( $gate, true );
 			}
 
