@@ -64,6 +64,22 @@ class TagResolverTest extends TestCase {
 		$this->assertSame( array( 'ga4' => array( 'G-ABCD1234' ) ), $this->resolver->resolve() );
 	}
 
+	/**
+	 * A stored value goes through the same clean() as a filter-supplied one:
+	 * an invalid value is dropped entirely, and a valid one is normalized.
+	 */
+	public function test_an_invalid_stored_id_is_dropped(): void {
+		$this->store( 'analytics_ga4_id', 'not-an-id' );
+
+		$this->assertSame( array(), $this->resolver->resolve() );
+	}
+
+	public function test_a_stored_id_is_normalized(): void {
+		$this->store( 'analytics_ga4_id', ' g-abcd1234 ' );
+
+		$this->assertSame( array( 'ga4' => array( 'G-ABCD1234' ) ), $this->resolver->resolve() );
+	}
+
 	public function test_an_unconfigured_site_resolves_to_nothing(): void {
 		$this->assertSame( array(), $this->resolver->resolve() );
 	}

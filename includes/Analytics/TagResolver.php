@@ -106,6 +106,7 @@ class TagResolver {
 			 * taseo_tracking_tag_ids below does carry one.
 			 *
 			 * @since 1.0.0
+			 * @since 1.5.0 taseo_google_ads_ids and taseo_bing_uet_ids.
 			 *
 			 * @param array<int, string> $ids Vendor IDs.
 			 */
@@ -209,6 +210,11 @@ class TagResolver {
 				 * accepted analytics but not marketing can be honoured without
 				 * losing both.
 				 *
+				 * Applied only when the category has at least one candidate ID,
+				 * and after the per-vendor ID filters have run — unlike the
+				 * legacy checks this replaces, which ran on every request and
+				 * before those filters.
+				 *
 				 * @since 1.0.0 As taseo_analytics_should_print.
 				 * @since 1.5.0 The marketing category gate.
 				 *
@@ -228,6 +234,10 @@ class TagResolver {
 			 * taseo_meta_pixel_should_print predates the category gates and is
 			 * published API. New vendors get no per-vendor gate: dropping a
 			 * single vendor for a request is what taseo_tracking_tag_ids is for.
+			 *
+			 * Skipped entirely when the marketing category gate has already
+			 * refused: both answers mean "do not emit", so this filter is not
+			 * applied on top of one that already said no.
 			 *
 			 * @since 1.0.0
 			 *
