@@ -85,7 +85,7 @@ class SitemapAssignment {
 	 * @return void
 	 */
 	public function init( HookManager $hook_manager ): void {
-		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 3 );
+		$hook_manager->register_action( 'taseo_indexable_synced', array( $this, 'handle_indexable_synced' ), 10, 4 );
 		$hook_manager->register_action( 'taseo_indexable_deleting', array( $this, 'handle_indexable_deleting' ), 10, 3 );
 		$hook_manager->register_action( self::ASSIGN_FAMILY_HOOK, array( $this, 'handle_assign_family_action' ) );
 	}
@@ -96,9 +96,16 @@ class SitemapAssignment {
 	 * @param string $object_type    Object type.
 	 * @param string $object_subtype Object subtype.
 	 * @param int    $object_id      Object ID.
+	 * @param bool   $changed        Whether the write moved a synced column.
+	 *                               Only the mark-dirty branch reads it;
+	 *                               assignment and release describe
+	 *                               membership, which an unchanged row can
+	 *                               still be wrong about. Defaults to true so
+	 *                               a caller that cannot tell gets the
+	 *                               conservative behaviour.
 	 * @return void
 	 */
-	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id ): void {
+	public function handle_indexable_synced( string $object_type, string $object_subtype, int $object_id, bool $changed = true ): void {
 		if ( ! in_array( $object_type, self::SITEMAP_TYPES, true ) ) {
 			return;
 		}
@@ -133,8 +140,15 @@ class SitemapAssignment {
 		}
 
 		// Already assigned and staying indexable: an edit. Flag the chunk so
-		// the next sweep re-renders it with fresh <loc>/<lastmod> values.
-		$this->files->mark_dirty( $chunk_id );
+		// the next sweep re-renders it with fresh <loc>/<lastmod> values —
+		// but only when the write actually moved one of them. A provider that
+		// re-pushes its catalogue on a schedule otherwise dirties a chunk per
+		// row per pass, and every one of those rebuilds re-renders a file to
+		// the same bytes while moving the <lastmod> the root index publishes,
+		// which is what a crawler uses to decide whether to fetch it again.
+		if ( $changed ) {
+			$this->files->mark_dirty( $chunk_id );
+		}
 	}
 
 	/**
@@ -178,7 +192,10 @@ class SitemapAssignment {
 	}
 
 	/**
-	 * Claim a slot: lowest open chunk first, new chunk as fallback.
+	 * Claim a slot at the tail: the subtype's newest chunk, or a fresh one
+	 * appended after it. Never an earlier chunk, even one with room — see
+	 * SitemapFileRepository::find_open_tail_chunk() for why holes are left
+	 * unfilled.
 	 *
 	 * Both the claim and the create can lose a concurrency race (conditional
 	 * UPDATE affecting zero rows / unique-key violation); either way the
@@ -192,7 +209,7 @@ class SitemapAssignment {
 		$cap = $this->settings->get_sitemap_max_links();
 
 		for ( $attempt = 0; $attempt < self::CLAIM_RETRIES; $attempt++ ) {
-			$chunk = $this->files->find_lowest_open_chunk( $object_subtype, $cap );
+			$chunk = $this->files->find_open_tail_chunk( $object_subtype, $cap );
 
 			if ( null === $chunk ) {
 				$chunk = $this->files->create_chunk( $object_subtype );

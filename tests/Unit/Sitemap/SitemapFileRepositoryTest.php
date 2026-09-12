@@ -49,30 +49,47 @@ class SitemapFileRepositoryTest extends TestCase {
 		$this->assertFalse( $this->files->is_listable( array() ) );
 	}
 
-	public function test_find_lowest_open_chunk_orders_by_chunk_number(): void {
+	public function test_find_open_tail_chunk_reads_the_highest_chunk_whatever_its_link_count(): void {
+		// Append-only packing: the query must not filter on link_count. A
+		// filtered query would return an earlier chunk that lost members to
+		// expiry, and the next new URL would be packed into that hole —
+		// rewriting an otherwise settled file and mixing ages across chunks.
 		$this->wpdb->shouldReceive( 'prepare' )
 			->once()
 			->with(
 				Mockery::on(
 					fn( string $sql ): bool => str_contains( $sql, 'FROM wp_taseo_sitemap_files' )
-						&& str_contains( $sql, 'link_count < %d' )
-						&& str_contains( $sql, 'ORDER BY chunk_number ASC' )
+						&& ! str_contains( $sql, 'link_count <' )
+						&& str_contains( $sql, 'ORDER BY chunk_number DESC' )
 						&& str_contains( $sql, 'LIMIT 1' )
 				),
-				'product',
-				1000
+				'product'
 			)
 			->andReturn( 'SQL' );
-		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'SQL', ARRAY_A )->andReturn( array( 'id' => '3' ) );
+		$this->wpdb->shouldReceive( 'get_row' )->once()->with( 'SQL', ARRAY_A )->andReturn(
+			array( 'id' => '3', 'link_count' => '999' )
+		);
 
-		$this->assertSame( array( 'id' => '3' ), $this->files->find_lowest_open_chunk( 'product', 1000 ) );
+		$this->assertSame(
+			array( 'id' => '3', 'link_count' => '999' ),
+			$this->files->find_open_tail_chunk( 'product', 1000 )
+		);
 	}
 
-	public function test_find_lowest_open_chunk_returns_null_when_all_full(): void {
+	public function test_find_open_tail_chunk_returns_null_when_the_tail_chunk_is_full(): void {
+		// Null is the caller's signal to append a brand new chunk — never to
+		// look further down the range for room.
+		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
+		$this->wpdb->shouldReceive( 'get_row' )->once()->andReturn( array( 'id' => '3', 'link_count' => '1000' ) );
+
+		$this->assertNull( $this->files->find_open_tail_chunk( 'product', 1000 ) );
+	}
+
+	public function test_find_open_tail_chunk_returns_null_for_a_subtype_with_no_chunks_yet(): void {
 		$this->wpdb->shouldReceive( 'prepare' )->once()->andReturn( 'SQL' );
 		$this->wpdb->shouldReceive( 'get_row' )->once()->andReturn( null );
 
-		$this->assertNull( $this->files->find_lowest_open_chunk( 'product', 1000 ) );
+		$this->assertNull( $this->files->find_open_tail_chunk( 'product', 1000 ) );
 	}
 
 	public function test_claim_slot_is_a_single_conditional_update(): void {

@@ -101,6 +101,10 @@ class SettingsPageTest extends TestCase {
 		// handle_save() always reads this before update() regardless of tab;
 		// only the sitemap-toggle tests below care about its value.
 		$this->settings->shouldReceive( 'get_disabled_sitemap_families' )->andReturn( array() )->byDefault();
+		// The sitemap tab now renders a sitewide cache lifetime plus a
+		// per-entry override field; tests asserting on either override these.
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl' )->andReturn( 86400 )->byDefault();
+		$this->settings->shouldReceive( 'get_sitemap_cache_ttl_overrides' )->andReturn( array() )->byDefault();
 
 		// DomainRegistry::default_host() is static and calls these directly.
 		// The sanitizer tests never render, so stub_render_functions()'s copy
@@ -166,6 +170,68 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( array( 'https://x.com/acme', 'https://facebook.com/acme' ), $clean['same_as_urls'] );
 		$this->assertSame( 'Article', $clean['schema_types']['post'] );
 		$this->assertSame( 'WebPage', $clean['schema_types']['page'] ); // invalid value coerced to default.
+	}
+
+	public function test_sanitize_clamps_the_global_sitemap_cache_ttl(): void {
+		$this->assertSame( 31536000, $this->page->sanitize_settings( array( 'sitemap_cache_ttl' => '99999999' ) )['sitemap_cache_ttl'] );
+		$this->assertSame( 0, $this->page->sanitize_settings( array( 'sitemap_cache_ttl' => '-30' ) )['sitemap_cache_ttl'] );
+		$this->assertSame( 3600, $this->page->sanitize_settings( array( 'sitemap_cache_ttl' => '3600' ) )['sitemap_cache_ttl'] );
+	}
+
+	public function test_sanitize_keeps_cache_ttl_overrides_only_for_live_subtypes(): void {
+		// Derived from the live registry the same way the include toggles
+		// are: a stale key from a provider that has gone away is pruned on
+		// every save, and a posted key outside the registry cannot land in
+		// the option.
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn(
+			array( 'vendor_store' => 'Vendor stores', 'vendor_items' => 'Vendor items' )
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'sitemap_enabled'             => '1',
+				'sitemap_cache_ttl_overrides' => array(
+					'vendor_store' => '900',
+					'vendor_items' => '99999999',
+					'ghost_family' => '600',
+				),
+			),
+			'sitemap'
+		);
+
+		$this->assertSame(
+			array( 'vendor_store' => 900, 'vendor_items' => 31536000 ),
+			$clean['sitemap_cache_ttl_overrides']
+		);
+	}
+
+	public function test_sanitize_treats_a_blank_cache_ttl_override_as_inherit(): void {
+		// The field is left empty to mean "use the global value", so a blank
+		// must drop the key rather than store a literal zero — which would
+		// otherwise read as "revalidate every time".
+		$this->sitemap_families->shouldReceive( 'all' )->andReturn(
+			array( 'vendor_store' => 'Vendor stores', 'vendor_items' => 'Vendor items' )
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array(
+				'sitemap_enabled'             => '1',
+				'sitemap_cache_ttl_overrides' => array(
+					'vendor_store' => '',
+					'vendor_items' => '0',
+				),
+			),
+			'sitemap'
+		);
+
+		$this->assertArrayNotHasKey( 'vendor_store', $clean['sitemap_cache_ttl_overrides'] );
+		$this->assertSame( 0, $clean['sitemap_cache_ttl_overrides']['vendor_items'] );
+	}
+
+	public function test_sanitize_other_tabs_do_not_touch_cache_ttl_overrides(): void {
+		$clean = $this->page->sanitize_settings( array( 'separator' => '|' ), 'general' );
+
+		$this->assertArrayNotHasKey( 'sitemap_cache_ttl_overrides', $clean );
 	}
 
 	public function test_sanitize_stores_the_image_url_overrides(): void {

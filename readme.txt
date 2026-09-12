@@ -2,9 +2,9 @@
 Contributors: theanother, ziontrooper
 Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
-Tested up to: 7.0
+Tested up to: 7.1
 Requires PHP: 8.3
-Stable tag: 1.2.2
+Stable tag: 1.3.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -66,6 +66,15 @@ No. WooCommerce is optional — when present, products get `og:type=product`, pr
 
 
 
+
+
+= 1.3.0 - 2026-09-12 =
+* Fix: Sitemap files are now packed append-only, so they settle instead of churning. A URL joins its type's newest sitemap file, or a fresh one after it, and never an earlier file that happens to have room. Previously a slot freed anywhere in the range — a post unpublished, a listing expired, an entry deleted — was reused by the next new URL, which meant the oldest files were rewritten whenever anything new arrived. That moved their `lastmod` in the sitemap index, which is the value a search engine reads to decide whether a file is worth fetching again, so unchanged files were being re-downloaded. It also meant no file could ever empty out: on a site whose content expires, an early file can now shrink to nothing, at which point it is removed and drops out of the index the way it was always meant to. Existing sitemap membership is left as it is; the new behaviour governs URLs indexed from here on.
+* Fix: A re-sync that changes nothing no longer queues its sitemap file for rebuild. Integrations that re-push their content on a schedule were marking a file dirty for every row on every pass, and each of those rebuilds re-rendered a file to exactly the same bytes while advancing the `lastmod` a crawler uses to decide whether to fetch it again. The plugin now takes the answer from the write itself, so only a change a sitemap file actually renders — a permalink, a modification time, an image, or whether the URL belongs in the sitemap at all — causes a rebuild.
+* Add: Sitemap responses send a `Cache-Control` header, defaulting to 24 hours, with a per-type override on the Sitemap settings tab for every post type, taxonomy and registered URL family. Leave a field empty to use the sitewide value, or set `0` to make caches revalidate every time. Without an explicit header a shared cache in front of WordPress is free to treat a sitemap as private and store nothing, which is expensive on installs where the files live in offloaded media storage and every miss costs a full page load.
+* Add: Sitemap files now send `Last-Modified` and answer a conditional request with `304 Not Modified`, decided from the plugin's own records before the file is opened at all. A crawler revalidating a file it already holds costs a single indexed lookup, with no storage read and no response body — which matters most on installs whose uploads are offloaded, where reading a sitemap file is a network round trip. A sitemap file that was emptied still reports `410 Gone` rather than claiming to be unchanged.
+* Add: `taseo_delete_post_indexable()`, for plugins that delete posts with direct database queries to skip WordPress and WooCommerce delete hooks — bulk importers retiring expired content, typically. WordPress's own deletion hook never fires for those, so this plugin could not see the deletion: the sitemap kept publishing a URL that had become a 404, and the file slot was never released. Call it before the delete, alongside the existing `taseo_sync_post()`.
+* Chore: Tested against WordPress 7.1. The functional and Plugin Check suites provision the version this header names, so the two move together.
 
 = 1.2.2 - 2026-08-17 =
 * Fix: A product with no price no longer emits an Offer stating an empty one. WooCommerce reports no price for anything with neither a regular nor a sale price — catalogue-only listings, "call for price" items, external and quote-driven products — and the Product schema passed that empty value straight through as the offer price, beside a real currency and stock status. Search engines read a blank price as malformed rather than absent, and report the page for it, so the offer is now left out entirely: a currency and a stock status with nothing to buy at are not an offer either. Products with a price are unchanged.

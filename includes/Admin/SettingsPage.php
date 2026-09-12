@@ -972,7 +972,17 @@ class SettingsPage {
 			(int) $this->settings->get_sitemap_max_links(),
 			esc_html__( '(1–1000; applies to newly created files)', 'the-another-seo' )
 		);
+		printf(
+			'<tr><th scope="row"><label for="taseo-sitemap-cache-ttl">%s</label></th><td><input type="number" id="taseo-sitemap-cache-ttl" name="taseo_settings[sitemap_cache_ttl]" value="%d" min="0" max="%d" step="60" class="small-text" /> %s</td></tr>',
+			esc_html__( 'Cache lifetime', 'the-another-seo' ),
+			(int) $this->settings->get_sitemap_cache_ttl(),
+			(int) Settings::SITEMAP_CACHE_TTL_MAX,
+			esc_html__( '(seconds sent as Cache-Control max-age; 86400 is a day, 0 makes caches revalidate every time)', 'the-another-seo' )
+		);
 		echo '</table>';
+
+		$ttl_overrides = $this->settings->get_sitemap_cache_ttl_overrides();
+		$global_ttl    = $this->settings->get_sitemap_cache_ttl();
 
 		$groups = array(
 			__( 'Post types', 'the-another-seo' ) => $this->post_subtypes->flatten( $this->settings->get_enabled_post_types() ),
@@ -991,11 +1001,16 @@ class SettingsPage {
 
 			foreach ( $entries as $key => $label ) {
 				printf(
-					'<tr><th scope="row">%1$s<br /><span style="font-weight: normal; color: #646970;">%2$s</span></th><td><label><input type="checkbox" name="taseo_settings[sitemap_families][]" value="%2$s" %3$s /> %4$s</label></td></tr>',
+					'<tr><th scope="row">%1$s<br /><span style="font-weight: normal; color: #646970;">%2$s</span></th><td><label><input type="checkbox" name="taseo_settings[sitemap_families][]" value="%2$s" %3$s /> %4$s</label><br /><label>%5$s <input type="number" name="taseo_settings[sitemap_cache_ttl_overrides][%2$s]" value="%6$s" placeholder="%7$d" min="0" max="%8$d" step="60" class="small-text" /></label> <span style="color: #646970;">%9$s</span></td></tr>',
 					esc_html( (string) $label ),
 					esc_attr( (string) $key ),
 					checked( $this->settings->is_sitemap_family_enabled( (string) $key ), true, false ),
-					esc_html__( 'Include in sitemap', 'the-another-seo' )
+					esc_html__( 'Include in sitemap', 'the-another-seo' ),
+					esc_html__( 'Cache lifetime', 'the-another-seo' ),
+					esc_attr( (string) ( $ttl_overrides[ (string) $key ] ?? '' ) ),
+					(int) $global_ttl,
+					(int) Settings::SITEMAP_CACHE_TTL_MAX,
+					esc_html__( 'seconds — leave empty to use the sitewide value', 'the-another-seo' )
 				);
 			}
 
@@ -1833,6 +1848,10 @@ class SettingsPage {
 			$clean['sitemap_max_links'] = max( 1, min( 1000, absint( $raw['sitemap_max_links'] ) ) );
 		}
 
+		if ( isset( $raw['sitemap_cache_ttl'] ) ) {
+			$clean['sitemap_cache_ttl'] = max( 0, min( Settings::SITEMAP_CACHE_TTL_MAX, (int) $raw['sitemap_cache_ttl'] ) );
+		}
+
 		if ( array_key_exists( 'sitemap_enabled', $raw ) ) {
 			$clean['sitemap_enabled'] = ! empty( $raw['sitemap_enabled'] );
 		}
@@ -1851,6 +1870,27 @@ class SettingsPage {
 			$clean['sitemap_disabled_families'] = array_values(
 				array_diff( array_keys( $this->toggleable_subtypes() ), $checked )
 			);
+
+			// Same registry-derived treatment as the toggles above, for the
+			// same reason. A blank field means "inherit the global value", so
+			// it drops the key rather than storing a zero — which would read
+			// as "revalidate every time" instead.
+			$posted    = isset( $raw['sitemap_cache_ttl_overrides'] ) && is_array( $raw['sitemap_cache_ttl_overrides'] )
+				? $raw['sitemap_cache_ttl_overrides']
+				: array();
+			$overrides = array();
+
+			foreach ( array_keys( $this->toggleable_subtypes() ) as $subtype ) {
+				$value = $posted[ $subtype ] ?? '';
+
+				if ( ! is_scalar( $value ) || '' === trim( (string) $value ) ) {
+					continue;
+				}
+
+				$overrides[ (string) $subtype ] = max( 0, min( Settings::SITEMAP_CACHE_TTL_MAX, (int) $value ) );
+			}
+
+			$clean['sitemap_cache_ttl_overrides'] = $overrides;
 		}
 
 		return $clean;

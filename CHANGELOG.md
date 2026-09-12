@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-12
+
+### Added
+- Sitemap responses now carry `Cache-Control: public, max-age=…`, defaulting to 24 hours, with a per-type override on the Sitemap settings tab. `public` is stated explicitly because a sitemap is a public document by definition and a shared cache is otherwise free to treat the response as private and store nothing — which matters most where the Apache static-serve block cannot apply (offloaded uploads), since every miss there is a WordPress boot plus a bucket round trip. One override map keyed by subtype covers post types, taxonomies and external URL families alike: all three share the subtype namespace, and the chunk registry and its files are keyed by subtype alone, so a subtype is exactly the granularity at which a sitemap file exists. An empty field inherits the sitewide value, `0` makes caches revalidate every time (which the `304` path answers cheaply), and the root index — the one response with no subtype of its own — always uses the sitewide value. The header is sent on `304` responses too, as RFC 9110 asks.
+- `taseo_delete_post_indexable( int $post_id )`, for plugins that delete posts with raw SQL to skip the expensive WordPress/WooCommerce delete hooks — a bulk importer retiring expired listings, for instance. `before_delete_post` does not fire for those, so this plugin never learned the post was gone: the indexable row outlived it, the sitemap kept publishing a URL that now 404s, and the chunk slot was never given back, so the chunk could never drain to zero and retire. Call it while the post row is still readable; afterwards the subtype cannot be resolved and the call is a no-op. It removes one row and one slot, so retiring a whole catalogue belongs in a bounded job chain rather than a loop.
+- Chunk URLs served through PHP now carry a `Last-Modified` header and answer a conditional request with `304 Not Modified` — decided from the chunk's registry row, before any storage call. This matters most where uploads are offloaded to a stream wrapper (`s3://…`): there the plugin's Apache static-serve block is deliberately suppressed, because a rewrite target that cannot exist on local disk is dead configuration, so *every* chunk request reaches PHP and each `exists()`/`stream()` is a round trip to the bucket for a body that can reach a megabyte. A crawler revalidating a settled chunk now costs one indexed lookup on a registry table that stays in the low thousands of rows, and no bucket traffic or body at all. A tombstoned chunk still answers `410` rather than `304`, since it stopped being a document rather than merely not changing.
+
+### Changed
+- Tested against WordPress 7.1. The e2e and Plugin Check suites provision the version pinned in `scripts/setup/e2e.sh`, so the pin and the `Tested up to` header move together — the header is never a claim the suite has not actually run against.
+- A re-sync that changes nothing no longer dirties the chunk it belongs to. `taseo_indexable_synced` now carries a fourth `$changed` argument, taken from the affected-row count of the upsert — MySQL reports zero when `ON DUPLICATE KEY UPDATE` finds every column already equal, and every column in that statement is one a chunk file renders or takes membership from. Assignment and release still run either way, because those describe membership rather than content and an unchanged row can still be wrong about it; only the mark-dirty branch reads the flag. A provider that re-pushes its catalogue on a schedule previously dirtied a chunk per row per pass, and each of those rebuilds re-rendered a file to the same bytes while moving the `<lastmod>` the root index publishes — which is exactly the value a crawler uses to decide whether to fetch that sub-sitemap again. Existing three-argument subscribers are unaffected.
+- Sitemap chunk packing is now append-only: a URL is assigned to its subtype's newest chunk, or to a fresh chunk appended after it, and never to an earlier chunk that has room. Slots freed further down the range — a listing expired, was unpublished, or was deleted — are deliberately left as holes. Packing previously took the *lowest* chunk with room, which meant every freed slot anywhere in the range was refilled by the next new URL: the oldest files were rewritten whenever anything new arrived, moving their `<lastmod>` and forcing crawlers to re-fetch a file whose other entries had not changed, and no chunk could ever drain. On a catalogue of expiring listings the two policies differ sharply — append-only lets an early chunk shrink monotonically until it is tombstoned and its file removed, so a sub-sitemap retires whole. The cost is the intended trade: partly-filled chunks accumulate below the tail rather than being compacted away. Existing chunk membership is not rewritten; the new policy governs assignments from here on.
+
 ## [1.2.2] - 2026-08-17
 
 ### Fixed
@@ -111,7 +123,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/the-another/seo/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/the-another/seo/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/the-another/seo/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/the-another/seo/compare/v1.1.0...v1.2.0

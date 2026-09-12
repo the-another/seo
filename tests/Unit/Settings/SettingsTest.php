@@ -198,6 +198,73 @@ class SettingsTest extends TestCase {
 		$this->assertSame( 500, ( new Settings() )->get_sitemap_max_links() );
 	}
 
+	public function test_sitemap_cache_ttl_defaults_to_24_hours(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 86400, ( new Settings() )->get_sitemap_cache_ttl() );
+	}
+
+	public function test_sitemap_cache_ttl_is_clamped_to_zero_and_a_year(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_cache_ttl' => -1 ) );
+		$this->assertSame( 0, ( new Settings() )->get_sitemap_cache_ttl() );
+
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_cache_ttl' => 99999999 ) );
+		$this->assertSame( 31536000, ( new Settings() )->get_sitemap_cache_ttl() );
+
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_cache_ttl' => 3600 ) );
+		$this->assertSame( 3600, ( new Settings() )->get_sitemap_cache_ttl() );
+	}
+
+	public function test_sitemap_cache_ttl_for_a_subtype_falls_back_to_the_global_value(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_cache_ttl' => 7200 ) );
+
+		$this->assertSame( 7200, ( new Settings() )->get_sitemap_cache_ttl_for( 'product' ) );
+	}
+
+	public function test_sitemap_cache_ttl_for_a_subtype_uses_its_override(): void {
+		// One override map keyed by subtype covers post types, taxonomies and
+		// external families alike: all three share the subtype namespace, and
+		// the chunk registry is keyed by it too.
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'sitemap_cache_ttl'           => 86400,
+				'sitemap_cache_ttl_overrides' => array(
+					'aucteeno_item' => 900,
+					'page'          => 604800,
+				),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 900, $settings->get_sitemap_cache_ttl_for( 'aucteeno_item' ) );
+		$this->assertSame( 604800, $settings->get_sitemap_cache_ttl_for( 'page' ) );
+		$this->assertSame( 86400, $settings->get_sitemap_cache_ttl_for( 'post' ) );
+	}
+
+	public function test_sitemap_cache_ttl_override_is_clamped_like_the_global_one(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'sitemap_cache_ttl_overrides' => array(
+					'page'    => 99999999,
+					'product' => -5,
+				),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 31536000, $settings->get_sitemap_cache_ttl_for( 'page' ) );
+		$this->assertSame( 0, $settings->get_sitemap_cache_ttl_for( 'product' ) );
+	}
+
+	public function test_sitemap_cache_ttl_overrides_ignores_a_malformed_map(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'sitemap_cache_ttl_overrides' => 'nonsense' ) );
+
+		$this->assertSame( array(), ( new Settings() )->get_sitemap_cache_ttl_overrides() );
+		$this->assertSame( 86400, ( new Settings() )->get_sitemap_cache_ttl_for( 'page' ) );
+	}
+
 	public function test_verification_code_returns_stored_value_per_engine(): void {
 		Functions\when( 'get_option' )->justReturn(
 			array(
