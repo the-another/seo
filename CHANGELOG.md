@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-12
+
 ### Added
 - Sitemap responses now carry `Cache-Control: public, max-age=…`, defaulting to 24 hours, with a per-type override on the Sitemap settings tab. `public` is stated explicitly because a sitemap is a public document by definition and a shared cache is otherwise free to treat the response as private and store nothing — which matters most where the Apache static-serve block cannot apply (offloaded uploads), since every miss there is a WordPress boot plus a bucket round trip. One override map keyed by subtype covers post types, taxonomies and external URL families alike: all three share the subtype namespace, and the chunk registry and its files are keyed by subtype alone, so a subtype is exactly the granularity at which a sitemap file exists. An empty field inherits the sitewide value, `0` makes caches revalidate every time (which the `304` path answers cheaply), and the root index — the one response with no subtype of its own — always uses the sitewide value. The header is sent on `304` responses too, as RFC 9110 asks.
 - `taseo_delete_post_indexable( int $post_id )`, for plugins that delete posts with raw SQL to skip the expensive WordPress/WooCommerce delete hooks — a bulk importer retiring expired listings, for instance. `before_delete_post` does not fire for those, so this plugin never learned the post was gone: the indexable row outlived it, the sitemap kept publishing a URL that now 404s, and the chunk slot was never given back, so the chunk could never drain to zero and retire. Call it while the post row is still readable; afterwards the subtype cannot be resolved and the call is a no-op. It removes one row and one slot, so retiring a whole catalogue belongs in a bounded job chain rather than a loop.
@@ -121,7 +123,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/the-another/seo/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/the-another/seo/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/the-another/seo/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/the-another/seo/compare/v1.1.0...v1.2.0
