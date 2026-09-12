@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- `uninstall.php`: deleting the plugin now removes everything it wrote — the `taseo_indexables` and `taseo_sitemap_files` tables, all eight `taseo_` options, and the `uploads/taseo-sitemaps/` directory. Previously every one of them survived deletion; the sitemap chunks in particular stayed fetchable at their own uploads path, so anything holding those direct URLs kept being served stale XML by the webserver with no plugin involved. Teardown lives in `Uninstaller`, the inverse of `Installer::activate()`, with each artifact removed by the class that owns it (`IndexablesTable::drop_table()`, `SitemapFilesTable::drop_table()`, `SitemapStorage::delete_directory()`). Deactivation is unchanged and still keeps all data. Runs per site on multisite. ([#14](https://github.com/the-another/seo/issues/14))
+
 ## [1.3.0] - 2026-09-12
 
 ### Added

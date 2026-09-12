@@ -62,6 +62,14 @@ Chunked sitemap XML files are written to `wp-content/uploads/taseo-sitemaps/` an
 
 No. WooCommerce is optional — when present, products get `og:type=product`, price/availability tags, and Product schema.
 
+= What happens to my data when I delete the plugin? =
+
+All of it is removed. Deleting the plugin drops the `taseo_indexables` and `taseo_sitemap_files` tables, deletes every `taseo_` option including your settings, and removes the `wp-content/uploads/taseo-sitemaps/` directory with all generated sitemap files. Nothing is left behind, and none of it is recoverable afterwards except from a database backup.
+
+Deactivating is the reversible option: it stops the plugin and its scheduled jobs but keeps the tables, settings, and sitemap files exactly as they are, so reactivating costs nothing. On a multisite network the cleanup runs for every site.
+
+Reinstalling after a delete works fine — activation recreates the tables and the index rebuilds in the background, the same as a first install.
+
 == Changelog ==
 
 

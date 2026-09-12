@@ -61,6 +61,21 @@ export default defineConfig( {
 			testMatch: 'specs/**/*.spec.ts',
 			dependencies: [ 'setup' ],
 		},
+		// The uninstall suite actually deletes the plugin from the shared
+		// install, so it must be the last thing that touches it. A project
+		// dependency is what guarantees that: Playwright finishes every test
+		// in 'default' before starting this one. File naming does NOT —
+		// a spec inside specs/ named to sort last still got scheduled ahead
+		// of zz-admin-tour.spec.ts, which then ran against an install with
+		// no plugin in it. Hence its own directory, outside the glob above.
+		// retries:0 because a retry would start from an already-uninstalled
+		// site and turn one honest failure into three confusing ones.
+		{
+			name: 'uninstall',
+			testMatch: 'uninstall/**/*.spec.ts',
+			dependencies: [ 'default' ],
+			retries: 0,
+		},
 	],
 	globalSetup: './setup/global-setup.ts',
 	webServer: {

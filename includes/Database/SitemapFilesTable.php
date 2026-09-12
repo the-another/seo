@@ -95,4 +95,29 @@ class SitemapFilesTable {
 			self::create_table();
 		}
 	}
+
+	/**
+	 * Drop the table and forget the recorded schema version.
+	 *
+	 * The exact inverse of create_table(): both the table and the version
+	 * option are owned here, so uninstall does not have to know the private
+	 * option name to leave nothing behind. Called only from Uninstaller —
+	 * deactivation deliberately keeps the data.
+	 *
+	 * @since 1.4.0
+	 * @return void
+	 */
+	public static function drop_table(): void {
+		global $wpdb;
+
+		$table_name = self::get_table_name();
+
+		// The table name is built from $wpdb->prefix and a literal, never from
+		// input, and DROP TABLE takes no placeholders — prepare() has nothing
+		// to bind here.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.SchemaChange, WordPress.DB.PreparedSQL.InterpolatedNotPrepared -- dropping the plugin's own table on uninstall is the point.
+		$wpdb->query( "DROP TABLE IF EXISTS {$table_name}" );
+
+		delete_option( self::DB_VERSION_OPTION );
+	}
 }
