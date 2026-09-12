@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.3
-Stable tag: 1.3.0
+Stable tag: 1.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -75,6 +75,10 @@ Reinstalling after a delete works fine — activation recreates the tables and t
 
 
 
+
+
+= 1.4.0 - 2026-09-12 =
+* Add: Deleting the plugin now removes everything it created. The plugin had activation and deactivation handling but no uninstall handling, so removing it from the Plugins screen left its two database tables, all of its settings, and every generated sitemap file behind. The sitemap files were the part that mattered: once the plugin is gone the `/sitemap.xml` routes stop resolving, but the XML files themselves stay in `wp-content/uploads/taseo-sitemaps/` and the webserver keeps handing them out at their own addresses, so anything that recorded those URLs carried on being served sitemaps nothing could update or invalidate. Deleting now drops the `taseo_indexables` and `taseo_sitemap_files` tables, removes every `taseo_` option including your settings, and deletes the sitemap directory — on every site of a multisite network. Deactivating is unchanged and still keeps all of it, so deactivating and reactivating remains free, and reinstalling after a delete rebuilds the index in the background exactly like a first install. A new FAQ entry spells out what is removed.
 
 = 1.3.0 - 2026-09-12 =
 * Fix: Sitemap files are now packed append-only, so they settle instead of churning. A URL joins its type's newest sitemap file, or a fresh one after it, and never an earlier file that happens to have room. Previously a slot freed anywhere in the range — a post unpublished, a listing expired, an entry deleted — was reused by the next new URL, which meant the oldest files were rewritten whenever anything new arrived. That moved their `lastmod` in the sitemap index, which is the value a search engine reads to decide whether a file is worth fetching again, so unchanged files were being re-downloaded. It also meant no file could ever empty out: on a site whose content expires, an early file can now shrink to nothing, at which point it is removed and drops out of the index the way it was always meant to. Existing sitemap membership is left as it is; the new behaviour governs URLs indexed from here on.
