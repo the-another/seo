@@ -153,14 +153,45 @@ commit lands in Step 6.
 
 ## Step 4: Validate Lock Files
 
+Both checks are **read-only on purpose**. Step 2 already synced the locks;
+this step only confirms they agree with the manifests.
+
 ```bash
-# Check npm lock file is up to date
-npm install --package-lock-only
+# Check npm lock file agrees with package.json — exactly what CI's `npm ci` does
+npm ci --dry-run
 # Check composer lock file is up to date
 composer validate --no-check-all
 ```
 
-If either fails, fix the issue before proceeding.
+`npm ci --dry-run` is deliberate: it validates that the lock satisfies the
+manifest and is installable as-is, writes nothing, and is the exact operation
+CI performs. `npm install --package-lock-only` would answer the same question
+but rewrite the file to do it, which is the wrong shape for a validation step.
+
+`composer validate` reporting *"valid, but with a few warnings"* and exiting 0
+is a pass. The standing warning is `The version field is present` — deliberate
+here (the family convention ships a version in `composer.json`), not something
+to remove.
+
+### If the npm lock diff is thousands of lines
+
+It means `package.json` and `package-lock.json` have drifted apart on
+indentation. npm writes the lock using the indentation it infers from
+`package.json`; both are tab-indented here, which is what keeps every npm call
+in the Makefile and in `scripts/version-bump.js` a no-op against the lock.
+Let one drift to spaces and the next `npm install` reformats all ~44,000 lines
+of the lock, burying the real change.
+
+This happened on the 1.4.0 release. The fix is to realign the indentation, not
+to hand-patch the lock or avoid npm:
+
+```bash
+head -3 package.json package-lock.json   # both must be tab-indented
+```
+
+`scripts/version-bump.js` writes `package.json` with tabs and says why. If a
+bump ever yields a lock diff bigger than its two root `version` fields, that
+alignment is what broke.
 
 ## Step 5: Re-verify (lint + unit only — deliberately)
 

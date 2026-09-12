@@ -34,9 +34,18 @@ if (versionType && validTypes.includes(versionType)) {
       break;
   }
 
-  // Update package.json with new version
+  // Update package.json with new version.
+  //
+  // Tab-indented, and that is load bearing — do not "tidy" it to spaces.
+  // npm writes package-lock.json using the indentation it infers from
+  // package.json, and the lock is tab-indented. Let the two disagree and
+  // every `npm install` reformats all ~44,000 lines of the lock, burying the
+  // real change in whitespace (it did exactly that on the 1.4.0 release).
+  // Keeping them aligned is what makes every npm command in the Makefile and
+  // in the deploy-plugin skill safe, with no workarounds anywhere. Tabs also
+  // match how composer.json is written below, and the rest of the codebase.
   packageJson.version = newVersion;
-  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, 2) + '\n', 'utf8');
+  fs.writeFileSync(packageJsonPath, JSON.stringify(packageJson, null, '\t') + '\n', 'utf8');
   console.log(`✓ Bumped version to ${newVersion} (${versionType})`);
 } else if (versionType) {
   console.error(`Invalid version type: ${versionType}. Use: patch, minor, or major`);
@@ -135,6 +144,11 @@ const rootDir = path.join(__dirname, '..');
 
 console.log('\nSyncing lock files...');
 
+// Safe to let npm own the lock, because package.json above is written with
+// the same tab indentation the lock uses — see the comment there. If a bump
+// ever produces a lock diff of more than the two root "version" fields,
+// that alignment has been broken; fix the indentation rather than the
+// symptom.
 try {
   execSync('npm install --package-lock-only', { cwd: rootDir, stdio: 'inherit' });
   console.log('✓ Updated package-lock.json');

@@ -262,4 +262,44 @@ class SitemapStorageTest extends TestCase {
 
 		$this->assertSame( array(), ( new SitemapStorage() )->list_files() );
 	}
+
+	public function test_delete_directory_removes_the_whole_tree_through_wp_filesystem(): void {
+		$this->stub_uploads( '/srv/uploads' );
+
+		$filesystem = Mockery::mock( 'WP_Filesystem_Base' );
+		$filesystem->shouldReceive( 'exists' )
+			->once()
+			->with( '/srv/uploads/taseo-sitemaps' )
+			->andReturn( true );
+		$filesystem->shouldReceive( 'rmdir' )
+			->once()
+			->with( '/srv/uploads/taseo-sitemaps', true )
+			->andReturn( true );
+
+		$GLOBALS['wp_filesystem'] = $filesystem;
+		Monkey\Functions\when( 'WP_Filesystem' )->justReturn( true );
+
+		$this->assertTrue( ( new SitemapStorage() )->delete_directory() );
+	}
+
+	public function test_delete_directory_succeeds_when_the_directory_was_never_created(): void {
+		$this->stub_uploads( '/srv/uploads' );
+
+		$filesystem = Mockery::mock( 'WP_Filesystem_Base' );
+		$filesystem->shouldReceive( 'exists' )->once()->andReturn( false );
+		$filesystem->shouldReceive( 'rmdir' )->never();
+
+		$GLOBALS['wp_filesystem'] = $filesystem;
+		Monkey\Functions\when( 'WP_Filesystem' )->justReturn( true );
+
+		$this->assertTrue( ( new SitemapStorage() )->delete_directory() );
+	}
+
+	public function test_delete_directory_fails_when_the_filesystem_is_unavailable(): void {
+		$this->stub_uploads( '/srv/uploads' );
+
+		Monkey\Functions\when( 'WP_Filesystem' )->justReturn( false );
+
+		$this->assertFalse( ( new SitemapStorage() )->delete_directory() );
+	}
 }

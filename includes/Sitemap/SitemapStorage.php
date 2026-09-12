@@ -311,4 +311,40 @@ class SitemapStorage {
 
 		return true;
 	}
+
+	/**
+	 * Remove the sitemap directory and everything in it.
+	 *
+	 * The inverse of write()'s wp_mkdir_p(), and the reason uninstall does not
+	 * reach for rmdir()/unlink() itself: this class stays the single owner of
+	 * every filesystem touch, so a stream-wrapped uploads dir (s3://…) is torn
+	 * down through the same abstraction that built it. Chunk files are the one
+	 * artifact that keeps *serving* after the plugin is deleted — the rewrite
+	 * rule is gone, but the webserver still hands out the physical XML — so
+	 * this runs first during uninstall, before anything that can fail.
+	 *
+	 * @since 1.4.0
+	 * @return bool True when the directory is gone (including when it never
+	 *              existed); false when the filesystem was unavailable or the
+	 *              removal failed.
+	 */
+	public function delete_directory(): bool {
+		global $wp_filesystem;
+
+		if ( ! function_exists( 'WP_Filesystem' ) ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+		}
+
+		if ( ! WP_Filesystem() || ! $wp_filesystem ) {
+			return false;
+		}
+
+		$path = $this->get_directory_path();
+
+		if ( ! $wp_filesystem->exists( $path ) ) {
+			return true;
+		}
+
+		return (bool) $wp_filesystem->rmdir( $path, true );
+	}
 }

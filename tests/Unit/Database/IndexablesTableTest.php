@@ -130,4 +130,24 @@ class IndexablesTableTest extends TestCase {
 	public function test_db_version_is_bumped_for_sitemap_images(): void {
 		$this->assertSame( '1.3.0', IndexablesTable::DB_VERSION );
 	}
+
+	public function test_drop_table_drops_the_table_and_forgets_its_version(): void {
+		global $wpdb;
+		$queried = null;
+
+		$wpdb->shouldReceive( 'query' )
+			->once()
+			->andReturnUsing(
+				function ( string $sql ) use ( &$queried ): int {
+					$queried = $sql;
+					return 0;
+				}
+			);
+
+		Functions\expect( 'delete_option' )->once()->with( 'taseo_db_version' );
+
+		IndexablesTable::drop_table();
+
+		$this->assertSame( 'DROP TABLE IF EXISTS wp_taseo_indexables', $queried );
+	}
 }

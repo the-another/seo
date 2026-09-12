@@ -73,4 +73,24 @@ class SitemapFilesTableTest extends TestCase {
 
 		SitemapFilesTable::maybe_upgrade();
 	}
+
+	public function test_drop_table_drops_the_table_and_forgets_its_version(): void {
+		global $wpdb;
+		$queried = null;
+
+		$wpdb->shouldReceive( 'query' )
+			->once()
+			->andReturnUsing(
+				function ( string $sql ) use ( &$queried ): int {
+					$queried = $sql;
+					return 0;
+				}
+			);
+
+		Functions\expect( 'delete_option' )->once()->with( 'taseo_sitemap_db_version' );
+
+		SitemapFilesTable::drop_table();
+
+		$this->assertSame( 'DROP TABLE IF EXISTS wp_taseo_sitemap_files', $queried );
+	}
 }
