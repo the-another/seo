@@ -11,6 +11,7 @@ namespace TheAnother\Plugin\SEO;
 use TheAnother\Plugin\SEO\Admin\Metabox;
 use TheAnother\Plugin\SEO\Admin\MigrationNotice;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Analytics\ConsentAssets;
 use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\TagOutput;
 use TheAnother\Plugin\SEO\Analytics\TagRegistry;
@@ -283,6 +284,15 @@ class Plugin {
 				$c->get( 'consent_mode' )
 			)
 		);
+		$c->register(
+			'consent_assets',
+			fn( Container $c ) => new ConsentAssets(
+				$c->get( 'consent_mode' ),
+				$c->get( 'settings' ),
+				$c->get( 'domain_registry' ),
+				THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/consent-boot/index.js'
+			)
+		);
 	}
 
 	/**
@@ -307,6 +317,7 @@ class Plugin {
 		$this->container->get( 'verification_output' )->init( $hook_manager );
 		$this->container->get( 'verification_file_server' )->init( $hook_manager );
 		$this->container->get( 'tag_output' )->init( $hook_manager );
+		$this->container->get( 'consent_assets' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );
