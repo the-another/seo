@@ -142,6 +142,15 @@ add_filter(
 );
 PHP
 
+# Turns the consent gate on for a single request, keyed on ?taseo_consent=on,
+# so one seeded install serves both states: consent.spec.ts asserts the gated
+# output and webmaster.spec.ts keeps asserting the live, ungated one. A file
+# rather than a heredoc because the spec quotes its behaviour and the two are
+# read together. The gate is NOT enabled in taseo_settings — default-off is
+# what keeps every other spec unchanged.
+cp "$REPO_ROOT/tests/e2e/functional/environment/taseo-consent-fixture.php" \
+	"$WP_DIR/wp-content/mu-plugins/taseo-consent-fixture.php"
+
 # Pin home/siteurl against wp server's own router.php, which otherwise
 # defeats per-domain host resolution entirely. Root-caused by hand: WP-CLI's
 # server-command bundles a router.php that adds
@@ -245,13 +254,16 @@ wp rewrite flush --path="$WP_DIR" --allow-root
 # deterministic values to assert against. `option patch insert` writes one
 # key inside the serialized taseo_settings array without clobbering the rest.
 #
-# taseo_settings does not exist yet at this point — the plugin only creates
-# it lazily when the settings page is saved (Settings::update()). `wp option
-# patch insert` on a genuinely missing option fetches WordPress's own
-# get_option() default of boolean `false` as the "current value" and fails
+# taseo_settings may not exist yet at this point — outside activation the
+# plugin only creates it when the settings page is saved (Settings::update()).
+# `wp option patch insert` on a genuinely missing option fetches WordPress's
+# own get_option() default of boolean `false` as the "current value" and fails
 # with `Cannot create key "..." on data type boolean` when it tries to patch
 # a key into that. Seed an empty array first so the inserts below have an
-# array to patch into.
+# array to patch into. The `|| true` covers the other case: since 1.6.0
+# Installer::activate() writes the option itself on a fresh install (see the
+# consent_enabled seed below), and `option add` on an existing option is an
+# error.
 wp option add taseo_settings --format=json '{}' --path="$WP_DIR" --allow-root || true
 wp option patch insert taseo_settings verify_google 'e2efile' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings verify_google_method 'file' --path="$WP_DIR" --allow-root
@@ -265,6 +277,24 @@ wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP
 wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings google_ads_id 'AW-123456789' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings bing_uet_id '12345678' --path="$WP_DIR" --allow-root
+
+# The consent gate is OFF in this environment, and that has to be said out
+# loud rather than left to the default. Installer::activate() turns it ON for
+# a fresh install — a new site has no established tracking behaviour to
+# preserve, so it starts gated — and this IS a fresh install, every run. Left
+# alone, every request would be gated and webmaster.spec.ts would be asserting
+# inert type="text/plain" blocks instead of the live tags it exists to pin
+# (confirmed empirically: without this line that spec's GA4 and Meta Pixel
+# tests fail on gated markup, and webmaster-admin.spec.ts's
+# consent-is-off warning disappears from the Webmaster tab).
+#
+# Off here plus taseo-consent-fixture.php's per-request ?taseo_consent=on is
+# what lets ONE install serve both states: the ungated output every other spec
+# asserts, and the gated output consent.spec.ts asserts.
+wp option patch insert taseo_settings consent_enabled --format=json 'false' --path="$WP_DIR" --allow-root
+
+# The privacy-policy link the banner renders.
+wp option patch insert taseo_settings consent_policy_url 'https://example.test/privacy/' --path="$WP_DIR" --allow-root
 
 # The brand domain's own per-domain record (Settings::DOMAINS_KEY), keyed by
 # the normalized host the taseo-domains-fixture.php mu-plugin above pushes
