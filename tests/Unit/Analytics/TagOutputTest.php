@@ -115,6 +115,20 @@ class TagOutputTest extends TestCase {
 		);
 	}
 
+	/**
+	 * init() is called once by Plugin::start(), but HookManager's own
+	 * duplicate guard cannot catch a second call here — it compares
+	 * callbacks for equality, and every callback registered above is a
+	 * freshly created closure, which never equals another one. TagOutput
+	 * has to guard itself, or a second call would double every
+	 * registration and emit every tag twice.
+	 */
+	public function test_calling_init_twice_still_registers_six_callbacks(): void {
+		$this->output->init( $this->hooks );
+
+		$this->assertCount( 6, $this->registrations() );
+	}
+
 	public function test_ga4_and_google_ads_register_a_single_script_queue_callback(): void {
 		$queue = array_filter(
 			$this->registrations(),
@@ -126,7 +140,7 @@ class TagOutputTest extends TestCase {
 
 	/**
 	 * Ordering at wp_body_open is by registration, and today's order comes from
-	 * AnalyticsOutput being initialised before MetaPixelOutput: the container's
+	 * gtm being declared before meta_pixel in TagRegistry: the container's
 	 * iframe prints before the pixel's image.
 	 */
 	public function test_the_body_open_halves_print_gtm_before_meta_pixel(): void {

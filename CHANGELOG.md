@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - Tracking IDs are resolved once per request rather than per output hook. A container loader and its `<noscript>` iframe previously read their filters separately, so a non-deterministic subscriber could make the two disagree about which container to load; one resolution makes that impossible. Emitted output is unchanged for any deterministic subscriber — only the number of filter invocations differs.
 - A consent category's gate is applied only when that category has something to gate, so a site running no marketing tags never calls a marketing consent callback.
+- `taseo_meta_pixel_should_print`, published since 1.0.0, moves onto the same terms as the category gates beside it: it now runs only when the pixel has at least one candidate ID, and is skipped entirely once the marketing category gate has already refused, rather than on every request regardless of either. A subscriber with side effects in its callback will notice it firing less often — never more.
 - `taseo_tracking_should_print` returning `false` now also skips `taseo_tracking_tag_ids`. The global gate means "emit nothing", so nothing may add tags back through it; per-vendor ID filters were already skipped and still are.
 
 ### Removed

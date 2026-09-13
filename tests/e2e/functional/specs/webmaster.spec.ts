@@ -153,7 +153,7 @@ test.describe( 'webmaster verification and tracking', () => {
 		// That is NOT the theme failing to fire wp_body_open — it does fire
 		// (twentytwentyfive is a block theme; core's template-canvas.php
 		// calls wp_body_open() itself, no classic header.php required) and
-		// MetaPixelOutput::print_body() does print. It's a browser parsing
+		// MetaPixelTransport::emit_noscript() does print. It's a browser parsing
 		// rule: per the HTML spec, <noscript> content is parsed as inert raw
 		// text (not child elements) whenever scripting is enabled, which it
 		// is for a normal Playwright page — so the <img> genuinely never

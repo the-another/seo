@@ -28,6 +28,13 @@ use TheAnother\Plugin\SEO\HookManager;
 class TagOutput {
 
 	/**
+	 * Whether init() has already registered this instance's callbacks.
+	 *
+	 * @var bool
+	 */
+	private bool $initialized = false;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param TagRegistry $registry Declared vendors.
@@ -48,6 +55,15 @@ class TagOutput {
 	 * @return void
 	 */
 	public function init( HookManager $hook_manager ): void {
+		// HookManager::register_action() guards against duplicate registration
+		// with has_action(), which compares callbacks by equality. Every
+		// callback here is a freshly created closure, and two closures never
+		// compare equal, so that guard cannot catch a second call here — this
+		// one has to.
+		if ( $this->initialized ) {
+			return;
+		}
+
 		foreach ( $this->groups() as $group ) {
 			$transport = $group['transport'];
 			$keys      = $group['keys'];
@@ -69,6 +85,8 @@ class TagOutput {
 				$group['priority']
 			);
 		}
+
+		$this->initialized = true;
 	}
 
 	/**
@@ -83,7 +101,7 @@ class TagOutput {
 		foreach ( $this->registry->all() as $type ) {
 			$this->group(
 				$primary,
-				$type->transport::class . '|' . $type->placement->hook() . '|' . $type->priority,
+				spl_object_id( $type->transport ) . '|' . $type->placement->hook() . '|' . $type->priority,
 				$type->placement->hook(),
 				$type->priority,
 				$type,
@@ -96,7 +114,7 @@ class TagOutput {
 
 			$this->group(
 				$noscript,
-				$type->transport::class,
+				(string) spl_object_id( $type->transport ),
 				Placement::BodyOpen->hook(),
 				10,
 				$type,
