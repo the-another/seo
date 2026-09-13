@@ -23,7 +23,16 @@ export function clearVendorCookies(
 		domains.push( '.' + parts.slice( -2 ).join( '.' ) );
 	}
 
-	for ( const pair of String( doc.cookie || '' ).split( ';' ) ) {
+	let cookieString;
+
+	try {
+		cookieString = String( doc.cookie || '' );
+	} catch ( e ) {
+		// A blocked or throwing cookie store leaves nothing to clear.
+		return;
+	}
+
+	for ( const pair of cookieString.split( ';' ) ) {
 		const name = pair.split( '=' )[ 0 ].trim();
 
 		if ( ! name || ! VENDOR_COOKIES.test( name ) ) {
@@ -31,10 +40,15 @@ export function clearVendorCookies(
 		}
 
 		for ( const domain of domains ) {
-			doc.cookie =
-				name +
-				'=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/' +
-				( domain ? '; domain=' + domain : '' );
+			try {
+				doc.cookie =
+					name +
+					'=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/' +
+					( domain ? '; domain=' + domain : '' );
+			} catch ( e ) {
+				// One domain candidate refusing the write should not stop
+				// the remaining domain and cookie attempts.
+			}
 		}
 	}
 }
