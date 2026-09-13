@@ -96,29 +96,39 @@ test.describe( 'webmaster verification and tracking', () => {
 		expect( response.status() ).toBe( 404 );
 	} );
 
-	test( 'GA4 and Tag Manager snippets', async ( { page } ) => {
-		await page.goto( '/' );
+	test( 'GA4 and Tag Manager snippets', async ( { request } ) => {
+		// Asserted against the SERVED HTML, not the live DOM. Once a Google Ads
+		// ID is configured alongside GA4, gtag.js injects a second,
+		// product-specific loader request of its own client-side
+		// (gtag/js?id=AW-…&cx=c&gtm=…). That is Google's documented
+		// multi-product behaviour: this plugin emits one loader, built from the
+		// first configured gtag ID, and cannot emit or suppress the second. A
+		// DOM count here would therefore be asserting Google's runtime rather
+		// than this plugin's output — it read as "one loader" only while GA4
+		// was the only gtag vendor. What the plugin owns is the markup it
+		// serves, so that is what this pins.
+		const served = await ( await request.get( '/' ) ).text();
 
-		await expect(
-			page.locator( 'script[src*="googletagmanager.com/gtag/js"]' )
-		).toHaveCount( 1 );
-		await expect(
-			page.locator( 'script[src*="id=G-E2E12345"]' )
-		).toHaveCount( 1 );
+		// Exactly one loader, and it is the GA4 property's — two gtag vendors
+		// are configured and they share one bootstrap rather than loading the
+		// library twice. Stricter than the count it replaces, which would have
+		// passed on any single loader for any ID.
+		expect(
+			served.match( /googletagmanager\.com\/gtag\/js\?id=[^"'&]+/g ) ?? []
+		).toEqual( [ 'googletagmanager.com/gtag/js?id=G-E2E12345' ] );
 
-		const html = await page.content();
-		expect( html ).toContain( "gtag('config', 'G-E2E12345')" );
+		expect( served ).toContain( "gtag('config', 'G-E2E12345')" );
 
 		// A bare 'GTM-E2E1234' substring check would pass even if the
-		// noscript body fallback (print_gtm_body(), on wp_body_open) were
-		// malformed or missing entirely, because the same ID already appears
-		// in the unrelated head bootstrap script (print_gtm_head()). Pin the
-		// literal noscript/iframe fragment instead — same reasoning and same
-		// remedy as the Meta Pixel test below: a DOM locator can't see it
-		// (browsers parse <noscript> content as inert raw text when
-		// scripting is enabled), so this is the only assertion that
-		// actually exercises print_gtm_body()'s output.
-		expect( html ).toContain(
+		// noscript body fallback (GtmTransport::emit_noscript(), on
+		// wp_body_open) were malformed or missing entirely, because the same
+		// ID already appears in the unrelated head bootstrap script
+		// (GtmTransport::emit_primary()). Pin the literal noscript/iframe
+		// fragment instead — same reasoning and same remedy as the Meta Pixel
+		// test below: a DOM locator can't see it (browsers parse <noscript>
+		// content as inert raw text when scripting is enabled), so this is the
+		// only assertion that actually exercises the body half's output.
+		expect( served ).toContain(
 			'<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-E2E1234" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>'
 		);
 	} );
@@ -148,5 +158,55 @@ test.describe( 'webmaster verification and tracking', () => {
 		expect( html ).toContain(
 			'<noscript><img height="1" width="1" style="display:none" alt="" src="https://www.facebook.com/tr?id=123456789012345&#038;ev=PageView&#038;noscript=1" /></noscript>'
 		);
+	} );
+
+	test( 'Google Ads and Bing UET snippets', async ( { page } ) => {
+		await page.goto( '/' );
+
+		const html = await page.content();
+
+		// GA4 and Google Ads are separate registry entries sharing one
+		// transport, so the count-of-1 assertion in the GA4 test above is what
+		// proves the shared bootstrap: two gtag vendors, one gtag.js.
+		expect( html ).toContain( "gtag('config', 'AW-123456789')" );
+		expect( html ).toContain( 'https://bat.bing.com/bat.js' );
+		expect( html ).toContain( 'ti:"12345678"' );
+	} );
+
+	test( 'the override filter replaces the whole tag set', async ( { page } ) => {
+		await page.goto( '/?taseo_tags=replace' );
+
+		const html = await page.content();
+
+		expect( html ).toContain( "gtag('config', 'G-OVERRIDE1')" );
+		expect( html ).not.toContain( 'G-E2E12345' );
+		expect( html ).not.toContain( 'GTM-E2E1234' );
+		expect( html ).not.toContain( 'fbevents.js' );
+		expect( html ).not.toContain( 'bat.bing.com' );
+	} );
+
+	test( 'the override filter can emit nothing at all', async ( { page } ) => {
+		await page.goto( '/?taseo_tags=off' );
+
+		const html = await page.content();
+
+		await expect( page.locator( 'script[src*="gtag/js"]' ) ).toHaveCount( 0 );
+		expect( html ).not.toContain( 'googletagmanager.com' );
+		expect( html ).not.toContain( 'fbevents.js' );
+		expect( html ).not.toContain( 'bat.bing.com' );
+
+		// Nothing means nothing: no empty wrapper left behind either.
+		expect( html ).not.toContain( '<noscript><iframe' );
+		expect( html ).not.toContain( '<noscript><img height="1"' );
+	} );
+
+	test( 'markup supplied through the override filter never reaches the page', async ( { page } ) => {
+		await page.goto( '/?taseo_tags=markup' );
+
+		const html = await page.content();
+
+		expect( html ).not.toContain( 'taseoBreakout' );
+		expect( await page.evaluate( () => 'taseoBreakout' in window ) ).toBe( false );
+		await expect( page.locator( 'script[src*="gtag/js"]' ) ).toHaveCount( 0 );
 	} );
 } );
