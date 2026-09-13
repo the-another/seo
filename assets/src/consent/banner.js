@@ -25,7 +25,7 @@ const STYLE = `
 	color: var( --taseo-consent-text, #1a1a1a );
 	background: var( --taseo-consent-surface, #fff );
 	border-top: 1px solid var( --taseo-consent-border, rgba( 0, 0, 0, .15 ) );
-	box-shadow: 0 -2px 16px rgba( 0, 0, 0, .08 );
+	box-shadow: 0 -2px 16px var( --taseo-consent-shadow, rgba( 0, 0, 0, .08 ) );
 }
 .text { flex: 1 1 20rem; }
 .title { margin: 0 0 .25rem; font-size: 15px; font-weight: 600; }
