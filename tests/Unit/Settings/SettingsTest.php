@@ -374,6 +374,50 @@ class SettingsTest extends TestCase {
 		$this->assertSame( '0987654321098', ( new Settings() )->get_meta_pixel_id() );
 	}
 
+	public function test_get_tracking_id_reads_any_vendors_stored_value(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'analytics_ga4_id' => 'G-ABCD1234',
+				'google_ads_id'    => 'AW-123456789',
+				'bing_uet_id'      => '12345678',
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( 'G-ABCD1234', $settings->get_tracking_id( 'analytics_ga4_id' ) );
+		$this->assertSame( 'AW-123456789', $settings->get_tracking_id( 'google_ads_id' ) );
+		$this->assertSame( '12345678', $settings->get_tracking_id( 'bing_uet_id' ) );
+	}
+
+	public function test_get_tracking_id_defaults_to_empty_string(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( '', ( new Settings() )->get_tracking_id( 'google_ads_id' ) );
+	}
+
+	/**
+	 * Tracking IDs inherit because brands commonly share one property, and
+	 * re-typing it per domain is how they drift apart. A vendor added after the
+	 * registry landed must inherit the same way the original three do.
+	 */
+	public function test_get_tracking_id_inherits_the_default_when_blank(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'google_ads_id'        => 'AW-111111111',
+				'bing_uet_id'          => '11111111',
+				'verification_domains' => array(
+					'brandtwo.com' => array( 'bing_uet_id' => '22222222' ),
+				),
+			)
+		);
+
+		$settings = new Settings();
+
+		$this->assertSame( '22222222', $settings->get_tracking_id( 'bing_uet_id', 'brandtwo.com' ) );
+		$this->assertSame( 'AW-111111111', $settings->get_tracking_id( 'google_ads_id', 'brandtwo.com' ) );
+	}
+
 	public function test_image_url_overrides_default_to_empty_string(): void {
 		Functions\when( 'get_option' )->justReturn( array() );
 

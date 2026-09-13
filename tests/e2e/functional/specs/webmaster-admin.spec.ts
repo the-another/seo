@@ -156,6 +156,12 @@ test.describe( 'webmaster admin settings', () => {
 		await expect(
 			page.locator( 'input[name="taseo_settings[meta_pixel_id]"]' )
 		).toHaveValue( '123456789012345' );
+		await expect(
+			page.locator( 'input[name="taseo_settings[google_ads_id]"]' )
+		).toHaveValue( 'AW-123456789' );
+		await expect(
+			page.locator( 'input[name="taseo_settings[bing_uet_id]"]' )
+		).toHaveValue( '12345678' );
 
 		// Both a GA4 ID and a GTM ID are seeded, so the double-count warning
 		// must be showing. Scoped to the settings form: WordPress core's own

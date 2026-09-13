@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.3
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,9 +34,9 @@ The initial index backfill runs in background batches via Action Scheduler, so a
 
 This plugin can load third-party scripts, but only when you configure them. With no IDs entered, the plugin contacts no external service.
 
-**Google Analytics (GA4) and Google Tag Manager**
+**Google Analytics (GA4), Google Tag Manager and Google Ads**
 
-Loaded only when you enter a GA4 Measurement ID or a Tag Manager Container ID on the Webmaster Tools settings tab. These scripts are served from `googletagmanager.com` (`/gtag/js`, `/gtm.js`, `/ns.html`) and send your visitors' IP address, user agent, and the URL being viewed to Google, which uses them for analytics measurement.
+Loaded only when you enter a GA4 Measurement ID, a Tag Manager Container ID, or a Google Ads Conversion ID on the Webmaster Tools settings tab. These scripts are served from `googletagmanager.com` (`/gtag/js`, `/gtm.js`, `/ns.html`) and send your visitors' IP address, user agent, and the URL being viewed to Google. GA4 and Tag Manager use this for analytics measurement; Google Ads uses it for conversion measurement and remarketing — a different purpose, which is why the plugin treats a Google Ads ID as a marketing tag rather than an analytics one when honouring your visitors' consent choices.
 
 Terms of service: https://policies.google.com/terms — Privacy policy: https://policies.google.com/privacy
 
@@ -45,6 +45,12 @@ Terms of service: https://policies.google.com/terms — Privacy policy: https://
 Loaded only when you enter a Meta Pixel ID on the Webmaster Tools settings tab. The script is served from `connect.facebook.net` and sends your visitors' IP address, user agent, the URL being viewed, and any Meta cookies already present in the browser to Meta, which uses them for advertising measurement and ad targeting. A tracking image is also requested from `facebook.com/tr`.
 
 Terms of service: https://www.facebook.com/legal/terms/businesstools — Privacy policy: https://www.facebook.com/privacy/policy/
+
+**Bing UET (Microsoft Advertising)**
+
+Loaded only when you enter a Bing UET Tag ID on the Webmaster Tools settings tab. The script is served from `bat.bing.com` (`/bat.js`) and sends your visitors' IP address, user agent, and the URL being viewed to Microsoft, which uses them for conversion tracking and remarketing.
+
+Terms of service: https://about.ads.microsoft.com/en-us/resources/policies/microsoft-advertising-agreement — Privacy policy: https://privacy.microsoft.com/en-us/privacystatement
 
 Site verification meta tags and verification files contact no external service; a search engine fetches them from your site.
 
@@ -73,9 +79,11 @@ Reinstalling after a delete works fine — activation recreates the tables and t
 == Changelog ==
 
 
-
-
-
+= 1.5.0 - 2026-09-13 =
+* Add: Google Ads and Bing UET tracking. Both have their own field on the Webmaster tab, they work per brand domain like the existing tracking IDs, and a blank field inherits the default domain's value. Google Ads shares the same Google tag the GA4 field uses, so if you also use GA4, switching it on adds a line to that same script rather than loading a second copy of it.
+* Add: Other plugins and themes can now change the whole set of tracking tags for a single page view — swap in a different set of IDs, add one, or turn tracking off entirely for that request. This is what a site needs when one page belongs to a single partner, or spans several and should report to none of them. Only IDs can be supplied this way, never snippets or markup, and a visitor's consent choice still has the last word.
+* Fix: The tracking ID fields and the tracking output now validate against exactly the same rules. They were separate copies of the same patterns before, so it was possible for a field to accept an ID the front end then refused to use, with nothing to tell you.
+* Refactor: All five tracking tags are now emitted by one shared mechanism instead of two separate ones. Nothing changes on your site: the Google Analytics, Tag Manager and Meta Pixel snippets are byte-for-byte what they were, on the same page positions.
 
 = 1.4.0 - 2026-09-12 =
 * Add: Deleting the plugin now removes everything it created. The plugin had activation and deactivation handling but no uninstall handling, so removing it from the Plugins screen left its two database tables, all of its settings, and every generated sitemap file behind. The sitemap files were the part that mattered: once the plugin is gone the `/sitemap.xml` routes stop resolving, but the XML files themselves stay in `wp-content/uploads/taseo-sitemaps/` and the webserver keeps handing them out at their own addresses, so anything that recorded those URLs carried on being served sitemaps nothing could update or invalidate. Deleting now drops the `taseo_indexables` and `taseo_sitemap_files` tables, removes every `taseo_` option including your settings, and deletes the sitemap directory — on every site of a multisite network. Deactivating is unchanged and still keeps all of it, so deactivating and reactivating remains free, and reinstalling after a delete rebuilds the index in the background exactly like a first install. A new FAQ entry spells out what is removed.

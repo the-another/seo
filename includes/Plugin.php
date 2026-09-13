@@ -11,8 +11,9 @@ namespace TheAnother\Plugin\SEO;
 use TheAnother\Plugin\SEO\Admin\Metabox;
 use TheAnother\Plugin\SEO\Admin\MigrationNotice;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
-use TheAnother\Plugin\SEO\Analytics\AnalyticsOutput;
-use TheAnother\Plugin\SEO\Analytics\MetaPixelOutput;
+use TheAnother\Plugin\SEO\Analytics\TagOutput;
+use TheAnother\Plugin\SEO\Analytics\TagRegistry;
+use TheAnother\Plugin\SEO\Analytics\TagResolver;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbRenderer;
 use TheAnother\Plugin\SEO\Breadcrumbs\BreadcrumbTrail;
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
@@ -190,7 +191,8 @@ class Plugin {
 				$c->get( 'sitemap_families' ),
 				$c->get( 'sitemap_assignment' ),
 				$c->get( 'post_subtypes' ),
-				$c->get( 'domain_registry' )
+				$c->get( 'domain_registry' ),
+				$c->get( 'tag_registry' )
 			)
 		);
 		$c->register( 'migration_notice', fn() => new MigrationNotice() );
@@ -255,13 +257,18 @@ class Plugin {
 			'verification_file_server',
 			fn( Container $c ) => new VerificationFileServer( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
 		);
+		$c->register( 'tag_registry', fn() => new TagRegistry() );
 		$c->register(
-			'analytics_output',
-			fn( Container $c ) => new AnalyticsOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
+			'tag_resolver',
+			fn( Container $c ) => new TagResolver(
+				$c->get( 'tag_registry' ),
+				$c->get( 'settings' ),
+				$c->get( 'domain_registry' )
+			)
 		);
 		$c->register(
-			'meta_pixel_output',
-			fn( Container $c ) => new MetaPixelOutput( $c->get( 'settings' ), $c->get( 'domain_registry' ) )
+			'tag_output',
+			fn( Container $c ) => new TagOutput( $c->get( 'tag_registry' ), $c->get( 'tag_resolver' ) )
 		);
 	}
 
@@ -286,8 +293,7 @@ class Plugin {
 		$this->container->get( 'sitemap_server' )->init( $hook_manager );
 		$this->container->get( 'verification_output' )->init( $hook_manager );
 		$this->container->get( 'verification_file_server' )->init( $hook_manager );
-		$this->container->get( 'analytics_output' )->init( $hook_manager );
-		$this->container->get( 'meta_pixel_output' )->init( $hook_manager );
+		$this->container->get( 'tag_output' )->init( $hook_manager );
 
 		if ( is_admin() ) {
 			$this->container->get( 'metabox' )->init( $hook_manager );

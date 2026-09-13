@@ -107,6 +107,41 @@ add_filter(
 );
 PHP
 
+# Exercises taseo_tracking_tag_ids from outside the plugin, the way a host site
+# would. Keyed on a query var so one seeded install can assert the untouched,
+# replaced, emptied and hostile collections in four different requests — the
+# filter is per-request, so nothing here leaks between specs.
+cat > "$WP_DIR/wp-content/mu-plugins/taseo-tracking-override-fixture.php" <<'PHP'
+<?php
+/**
+ * Plugin Name: TASEO e2e tracking override fixture
+ *
+ * Drives the per-request tag override filter from a query var.
+ */
+
+add_filter(
+	'taseo_tracking_tag_ids',
+	static function ( $tags ) {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only test switch in a fixture.
+		$mode = isset( $_GET['taseo_tags'] ) ? sanitize_key( wp_unslash( $_GET['taseo_tags'] ) ) : '';
+
+		if ( 'off' === $mode ) {
+			return array();
+		}
+
+		if ( 'replace' === $mode ) {
+			return array( 'ga4' => array( 'G-OVERRIDE1' ) );
+		}
+
+		if ( 'markup' === $mode ) {
+			return array( 'ga4' => array( '"><script>window.taseoBreakout=1;</script>' ) );
+		}
+
+		return $tags;
+	}
+);
+PHP
+
 # Pin home/siteurl against wp server's own router.php, which otherwise
 # defeats per-domain host resolution entirely. Root-caused by hand: WP-CLI's
 # server-command bundles a router.php that adds
@@ -228,6 +263,8 @@ wp option patch insert taseo_settings verify_facebook 'metae2etoken' --path="$WP
 wp option patch insert taseo_settings analytics_ga4_id 'G-E2E12345' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings analytics_gtm_id 'GTM-E2E1234' --path="$WP_DIR" --allow-root
 wp option patch insert taseo_settings meta_pixel_id '123456789012345' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings google_ads_id 'AW-123456789' --path="$WP_DIR" --allow-root
+wp option patch insert taseo_settings bing_uet_id '12345678' --path="$WP_DIR" --allow-root
 
 # The brand domain's own per-domain record (Settings::DOMAINS_KEY), keyed by
 # the normalized host the taseo-domains-fixture.php mu-plugin above pushes
