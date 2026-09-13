@@ -29,5 +29,11 @@ export function isRealUser(
 		return false;
 	}
 
-	return ! new RegExp( pattern ).test( ua );
+	// An empty pattern means "use the built-in one" — that is what the PHP
+	// config's 'crawlers' key documents and what it defaults to, and a default
+	// parameter cannot catch it because '' is a value, not a missing argument.
+	// Handing '' to RegExp would build //, which matches every string, so
+	// every visitor would be classified as a crawler and nobody would ever be
+	// asked for consent.
+	return ! new RegExp( pattern || DEFAULT_CRAWLERS ).test( ua );
 }
