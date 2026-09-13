@@ -21,4 +21,9 @@ class ConsentTest extends TestCase {
 	public function test_marketing_gates_on_the_category_not_a_vendor(): void {
 		$this->assertSame( 'taseo_marketing_should_print', Consent::Marketing->gate() );
 	}
+
+	public function test_each_category_has_a_stable_slug(): void {
+		$this->assertSame( 'analytics', Consent::Analytics->slug() );
+		$this->assertSame( 'marketing', Consent::Marketing->slug() );
+	}
 }
