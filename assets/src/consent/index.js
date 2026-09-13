@@ -16,6 +16,7 @@ function render( options = {} ) {
 
 	host = createBanner( window.taseoConsentConfig || {}, window.taseoConsent, options );
 	document.body.appendChild( host );
+	host.taseoSyncAccent();
 	host.taseoFocus();
 }
 

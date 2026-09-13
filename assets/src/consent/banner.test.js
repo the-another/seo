@@ -1,4 +1,4 @@
-import { createBanner } from './banner.js';
+import { createBanner, accentTextFor } from './banner.js';
 
 const config = {
 	categories: [ 'analytics', 'marketing' ],
@@ -119,5 +119,45 @@ describe( 'the consent banner', () => {
 		shadow.querySelector( '[data-action="reject-all"]' ).click();
 
 		expect( host.isConnected ).toBe( false );
+	} );
+} );
+
+describe( 'brand accent contrast', () => {
+	// The two brands this plugin actually serves. Neither a fixed white nor a
+	// fixed near-black passes WCAG AA on both: white on the teal is 3.8:1, and
+	// near-black on the rust is 2.3:1. The text colour has to be chosen from the
+	// accent that is actually resolved, which is why this exists at all.
+	it( 'uses dark text on a light brand accent', () => {
+		expect( accentTextFor( 'rgb(11, 146, 143)' ) ).toBe( '#111111' );
+	} );
+
+	it( 'uses light text on a dark brand accent', () => {
+		expect( accentTextFor( 'rgb(145, 44, 31)' ) ).toBe( '#ffffff' );
+	} );
+
+	it( 'keeps light text on the unbranded default', () => {
+		expect( accentTextFor( 'rgb(26, 26, 26)' ) ).toBe( '#ffffff' );
+	} );
+
+	it( 'declines to choose when the colour cannot be parsed', () => {
+		expect( accentTextFor( 'oklch(0.7 0.1 200)' ) ).toBeNull();
+	} );
+
+	it( 'sets the text colour on the host from the resolved accent', () => {
+		const original = window.getComputedStyle;
+		window.getComputedStyle = ( el ) =>
+			el.classList && el.classList.contains( 'action' )
+				? { backgroundColor: 'rgb(11, 146, 143)' }
+				: original( el );
+
+		try {
+			const host = createBanner( config, { set: jest.fn() } );
+			document.body.appendChild( host );
+			host.taseoSyncAccent();
+
+			expect( host.style.getPropertyValue( '--taseo-consent-accent-text' ) ).toBe( '#111111' );
+		} finally {
+			window.getComputedStyle = original;
+		}
 	} );
 } );

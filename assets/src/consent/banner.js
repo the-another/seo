@@ -36,11 +36,11 @@ const STYLE = `
 	padding: .55em 1.1em;
 	border-radius: var( --taseo-consent-radius, 6px );
 	border: 1px solid var( --taseo-consent-border, rgba( 0, 0, 0, .25 ) );
-	background: var( --taseo-consent-accent, #1a1a1a );
+	background: var( --taseo-consent-accent, var( --wp--preset--color--accent-1, var( --wp--preset--color--primary, #1a1a1a ) ) );
 	color: var( --taseo-consent-accent-text, #fff );
 	cursor: pointer;
 }
-.action:focus-visible { outline: 2px solid var( --taseo-consent-accent, #1a1a1a ); outline-offset: 2px; }
+.action:focus-visible { outline: 2px solid var( --taseo-consent-accent, var( --wp--preset--color--accent-1, var( --wp--preset--color--primary, #1a1a1a ) ) ); outline-offset: 2px; }
 a { color: inherit; }
 .panel { flex: 1 1 100%; padding-top: .75rem; border-top: 1px solid var( --taseo-consent-border, rgba( 0, 0, 0, .15 ) ); }
 .panel[hidden] { display: none; }
@@ -89,6 +89,47 @@ function button( label, action ) {
 	element.textContent = label || '';
 
 	return element;
+}
+
+/**
+ * Text colour that reads on a given background.
+ *
+ * The banner adopts the brand's own accent, and the brands differ enough that no
+ * fixed text colour works on all of them: white on a mid teal is 3.8:1 and near
+ * black on a dark rust is 2.3:1, both short of WCAG AA. So the colour is chosen
+ * from the accent that actually resolved, by comparing the contrast each
+ * candidate achieves against it.
+ *
+ * @param {string} color Resolved CSS colour, as getComputedStyle returns it.
+ * @return {string|null} '#ffffff', '#111111', or null when the colour is not one
+ *                       this can parse — in which case the stylesheet default stands.
+ */
+export function accentTextFor( color ) {
+	const channels = String( color ).match( /rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i );
+
+	if ( ! channels ) {
+		return null;
+	}
+
+	const srgb = ( value ) => {
+		const c = Number( value ) / 255;
+
+		return c <= 0.03928 ? c / 12.92 : Math.pow( ( c + 0.055 ) / 1.055, 2.4 );
+	};
+
+	const luminance =
+		0.2126 * srgb( channels[ 1 ] ) +
+		0.7152 * srgb( channels[ 2 ] ) +
+		0.0722 * srgb( channels[ 3 ] );
+
+	const contrast = ( against ) => {
+		const [ hi, lo ] = luminance > against ? [ luminance, against ] : [ against, luminance ];
+
+		return ( hi + 0.05 ) / ( lo + 0.05 );
+	};
+
+	// 1 is white's relative luminance; 0.0056 is #111111's.
+	return contrast( 1 ) >= contrast( 0.0056 ) ? '#ffffff' : '#111111';
 }
 
 /**
@@ -229,6 +270,22 @@ export function createBanner( config, api, options = {} ) {
 	};
 
 	host.taseoFocus = () => bar.focus();
+
+	// Runs after the host is in the document: a custom property chain only
+	// resolves once the element is connected, so this cannot happen at build time.
+	host.taseoSyncAccent = () => {
+		const probe = shadow.querySelector( '.action' );
+
+		if ( ! probe ) {
+			return;
+		}
+
+		const text = accentTextFor( window.getComputedStyle( probe ).backgroundColor );
+
+		if ( null !== text ) {
+			host.style.setProperty( '--taseo-consent-accent-text', text );
+		}
+	};
 
 	if ( options.open ) {
 		host.taseoOpenPreferences();
