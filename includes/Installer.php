@@ -10,6 +10,7 @@ namespace TheAnother\Plugin\SEO;
 
 use TheAnother\Plugin\SEO\Database\IndexablesTable;
 use TheAnother\Plugin\SEO\Database\SitemapFilesTable;
+use TheAnother\Plugin\SEO\Settings\Settings;
 
 /**
  * Class Installer
@@ -47,5 +48,13 @@ class Installer {
 
 		update_option( self::NEEDS_BACKFILL_OPTION, '1' );
 		update_option( self::FLUSH_REWRITE_OPTION, '1' );
+
+		// A fresh install has no established tracking behaviour to preserve,
+		// so it starts gated. An existing site keeps the stored option and
+		// therefore the false default, and an administrator turns consent on
+		// deliberately from the Consent tab.
+		if ( false === get_option( Settings::OPTION_NAME, false ) ) {
+			update_option( Settings::OPTION_NAME, array( 'consent_enabled' => true ) );
+		}
 	}
 }

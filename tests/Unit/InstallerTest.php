@@ -33,6 +33,9 @@ class InstallerTest extends TestCase {
 	public function test_activate_creates_both_tables_and_sets_flags(): void {
 		$updated = array();
 
+		// Not false: a site with an existing options row, so the consent
+		// backfill below has nothing to do and stays out of this test's count.
+		Functions\when( 'get_option' )->justReturn( array() );
 		Functions\expect( 'dbDelta' )->twice();
 		Functions\expect( 'update_option' )
 			->times( 4 )
@@ -49,5 +52,37 @@ class InstallerTest extends TestCase {
 		$this->assertContains( 'taseo_sitemap_db_version', $updated );
 		$this->assertContains( 'taseo_needs_backfill', $updated );
 		$this->assertContains( 'taseo_needs_rewrite_flush', $updated );
+	}
+
+	public function test_activation_turns_consent_on_for_a_fresh_install(): void {
+		$written = array();
+
+		Functions\when( 'get_option' )->justReturn( false );
+		Functions\when( 'dbDelta' )->justReturn( array() );
+		Functions\when( 'update_option' )->alias(
+			function ( string $key, $value ) use ( &$written ): void {
+				$written[ $key ] = $value;
+			}
+		);
+
+		Installer::activate();
+
+		$this->assertSame( array( 'consent_enabled' => true ), $written['taseo_settings'] );
+	}
+
+	public function test_activation_leaves_an_existing_option_alone(): void {
+		$written = array();
+
+		Functions\when( 'get_option' )->justReturn( array( 'separator' => '-' ) );
+		Functions\when( 'dbDelta' )->justReturn( array() );
+		Functions\when( 'update_option' )->alias(
+			function ( string $key, $value ) use ( &$written ): void {
+				$written[ $key ] = $value;
+			}
+		);
+
+		Installer::activate();
+
+		$this->assertArrayNotHasKey( 'taseo_settings', $written );
 	}
 }

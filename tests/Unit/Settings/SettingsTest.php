@@ -527,6 +527,60 @@ class SettingsTest extends TestCase {
 		$this->assertSame( '111111111111111', $settings->get_meta_pixel_id( 'brandtwo.com' ) );
 	}
 
+	public function test_consent_is_disabled_when_the_option_says_nothing(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertFalse( ( new Settings() )->is_consent_enabled() );
+	}
+
+	public function test_consent_lifetime_defaults_to_180_days(): void {
+		Functions\when( 'get_option' )->justReturn( array() );
+
+		$this->assertSame( 180, ( new Settings() )->get_consent_lifetime_days() );
+	}
+
+	public function test_consent_lifetime_is_clamped_up_from_zero(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'consent_lifetime_days' => 0 ) );
+
+		$this->assertSame( 1, ( new Settings() )->get_consent_lifetime_days() );
+	}
+
+	public function test_consent_lifetime_is_clamped_down_from_a_decade(): void {
+		Functions\when( 'get_option' )->justReturn( array( 'consent_lifetime_days' => 5000 ) );
+
+		$this->assertSame( 730, ( new Settings() )->get_consent_lifetime_days() );
+	}
+
+	public function test_consent_policy_url_inherits_the_default_domain(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'consent_policy_url'   => 'https://example.test/privacy',
+				'verification_domains' => array( 'brandtwo.test' => array() ),
+			)
+		);
+
+		$this->assertSame(
+			'https://example.test/privacy',
+			( new Settings() )->get_consent_policy_url( 'brandtwo.test' )
+		);
+	}
+
+	public function test_consent_policy_url_prefers_the_domain_record(): void {
+		Functions\when( 'get_option' )->justReturn(
+			array(
+				'consent_policy_url'   => 'https://example.test/privacy',
+				'verification_domains' => array(
+					'brandtwo.test' => array( 'consent_policy_url' => 'https://brandtwo.test/privacy' ),
+				),
+			)
+		);
+
+		$this->assertSame(
+			'https://brandtwo.test/privacy',
+			( new Settings() )->get_consent_policy_url( 'brandtwo.test' )
+		);
+	}
+
 	public function test_get_domain_record_returns_an_empty_array_for_an_unknown_host(): void {
 		Functions\when( 'get_option' )->justReturn( array( 'verification_domains' => 'corrupt' ) );
 
