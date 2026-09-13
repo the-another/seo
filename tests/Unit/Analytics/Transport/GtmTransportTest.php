@@ -5,11 +5,9 @@ namespace TheAnother\Plugin\SEO\Tests\Analytics\Transport;
 
 use Brain\Monkey;
 use Brain\Monkey\Functions;
-use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Analytics\TagSlice;
 use TheAnother\Plugin\SEO\Analytics\Transport\GtmTransport;
@@ -17,6 +15,7 @@ use TheAnother\Plugin\SEO\Analytics\Transport\GtmTransport;
 #[CoversClass( GtmTransport::class )]
 class GtmTransportTest extends TestCase {
 	use MockeryPHPUnitIntegration;
+	use RendersScriptTags;
 
 	private GtmTransport $transport;
 
@@ -30,24 +29,12 @@ class GtmTransportTest extends TestCase {
 		$this->registry  = new TagRegistry();
 
 		Functions\when( 'esc_url' )->returnArg();
-		Functions\when( 'wp_print_inline_script_tag' )->alias(
-			static function ( string $js ): void {
-				echo '<script>' . $js . '</script>';
-			}
-		);
+		$this->stub_script_tags();
 	}
 
 	protected function tearDown(): void {
 		Monkey\tearDown();
 		parent::tearDown();
-	}
-
-	private function inactive_consent(): ConsentMode {
-		$consent = Mockery::mock( ConsentMode::class );
-		$consent->shouldReceive( 'is_active' )->andReturn( false );
-		$consent->shouldReceive( 'attributes' )->andReturn( array() );
-
-		return $consent;
 	}
 
 	/**
@@ -107,5 +94,28 @@ class GtmTransportTest extends TestCase {
 		$this->assertStringContainsString( 'GTM-FIRST11', $head );
 		$this->assertStringContainsString( 'GTM-SECOND2', $head );
 		$this->assertSame( 2, substr_count( $body, '<noscript>' ) );
+	}
+
+	public function test_the_loader_is_inert_while_consent_mode_is_active(): void {
+		$slices = array( new TagSlice( $this->registry->get( 'gtm' ), array( 'GTM-XYZ789' ) ) );
+
+		ob_start();
+		$this->transport->emit_primary( $slices, $this->active_consent() );
+		$head = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'type="text/plain"', $head );
+		$this->assertStringContainsString( 'data-taseo-consent="analytics"', $head );
+		$this->assertStringContainsString( 'GTM-XYZ789', $head, 'The snippet bytes are unchanged; only the wrapper blocks them.' );
+	}
+
+	public function test_the_loader_is_live_while_consent_mode_is_inactive(): void {
+		$slices = array( new TagSlice( $this->registry->get( 'gtm' ), array( 'GTM-XYZ789' ) ) );
+
+		ob_start();
+		$this->transport->emit_primary( $slices, $this->inactive_consent() );
+		$head = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( 'text/plain', $head );
+		$this->assertStringNotContainsString( 'data-taseo-consent', $head );
 	}
 }

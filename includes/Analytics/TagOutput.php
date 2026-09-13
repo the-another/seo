@@ -53,6 +53,7 @@ class TagOutput {
 	 *
 	 * @since 1.5.0
 	 * @since 1.6.0 Threads consent mode through to each transport call.
+	 * @since 1.6.0 Suppresses the <noscript> half while consent mode is active.
 	 *
 	 * @param HookManager $hook_manager Hook manager.
 	 * @return void
@@ -75,6 +76,14 @@ class TagOutput {
 			$hook_manager->register_action(
 				$group['hook'],
 				function () use ( $transport, $keys, $noscript ): void {
+					// A <noscript> half cannot be gated: a visitor with
+					// JavaScript disabled has no way to have answered, and no
+					// way to be asked. Emitting one under consent mode would be
+					// the one ungated tag on the page.
+					if ( $noscript && $this->consent->is_active() ) {
+						return;
+					}
+
 					$slices = $this->slices_for( $keys );
 
 					if ( $noscript ) {

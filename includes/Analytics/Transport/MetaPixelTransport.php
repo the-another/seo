@@ -32,6 +32,8 @@ class MetaPixelTransport implements TagTransport {
 	 * @since 1.5.0
 	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
 	 *              key => IDs map.
+	 * @since 1.6.0 Emits inert, with the consent attributes, while consent mode
+	 *              is active.
 	 *
 	 * @param array<int, TagSlice> $slices Slices, in registry order.
 	 * @param ConsentMode          $consent Consent mode for this request.
@@ -61,7 +63,7 @@ class MetaPixelTransport implements TagTransport {
 		// documented multi-pixel pattern.
 		$js .= "fbq('track', 'PageView');\n";
 
-		wp_print_inline_script_tag( $js );
+		wp_print_inline_script_tag( $js, $consent->attributes( $this->categories( $slices ) ) );
 	}
 
 	/**

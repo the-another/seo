@@ -40,25 +40,33 @@ class BingUetTransport implements TagTransport {
 	 * @since 1.5.0
 	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
 	 *              key => IDs map.
+	 * @since 1.6.0 Emits inert, with the consent attributes, while consent mode
+	 *              is active.
 	 *
 	 * @param array<int, TagSlice> $slices Slices, in registry order.
 	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
 	public function emit_primary( array $slices, ConsentMode $consent ): void {
-		foreach ( $this->ids( $slices ) as $index => $id ) {
-			$queue = 0 === $index ? 'uetq' : 'uetq_' . $id;
+		$index = 0;
 
-			wp_print_inline_script_tag(
-				'(function(w,d,t,r,u){var f,n,i;w[u]=w[u]||[],f=function(){'
-				. 'var o={ti:"' . $id . '"};o.q=w[u],w[u]=new UET(o),w[u].push("pageLoad")},'
-				. 'n=d.createElement(t),n.src=r,n.async=1,'
-				. 'n.onload=n.onreadystatechange=function(){var s=this.readyState;'
-				. 's&&s!=="loaded"&&s!=="complete"||(f(),n.onload=n.onreadystatechange=null,'
-				. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i))},'
-				. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i)})'
-				. '(window,document,"script","https://bat.bing.com/bat.js","' . $queue . '");'
-			);
+		foreach ( $slices as $slice ) {
+			foreach ( $slice->ids as $id ) {
+				$queue = 0 === $index ? 'uetq' : 'uetq_' . $id;
+				++$index;
+
+				wp_print_inline_script_tag(
+					'(function(w,d,t,r,u){var f,n,i;w[u]=w[u]||[],f=function(){'
+					. 'var o={ti:"' . $id . '"};o.q=w[u],w[u]=new UET(o),w[u].push("pageLoad")},'
+					. 'n=d.createElement(t),n.src=r,n.async=1,'
+					. 'n.onload=n.onreadystatechange=function(){var s=this.readyState;'
+					. 's&&s!=="loaded"&&s!=="complete"||(f(),n.onload=n.onreadystatechange=null,'
+					. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i))},'
+					. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i)})'
+					. '(window,document,"script","https://bat.bing.com/bat.js","' . $queue . '");',
+					$consent->attributes( array( $slice->type->consent ) )
+				);
+			}
 		}
 	}
 

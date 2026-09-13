@@ -204,4 +204,28 @@ class TagOutputTest extends TestCase {
 			$this->enqueued['taseo-gtag']
 		);
 	}
+
+	public function test_the_noscript_half_is_not_emitted_while_consent_mode_is_active(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array( 'gtm' => array( 'GTM-XYZ789' ) ) );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( true );
+
+		$this->assertSame(
+			'',
+			$this->fire( 'wp_body_open', 10 ),
+			'A visitor with JavaScript disabled cannot have answered, so the no-JS half must not fire.'
+		);
+	}
+
+	public function test_the_noscript_half_is_still_emitted_while_consent_mode_is_inactive(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array( 'gtm' => array( 'GTM-XYZ789' ) ) );
+
+		$this->assertStringContainsString( 'ns.html?id=GTM-XYZ789', $this->fire( 'wp_body_open', 10 ) );
+	}
+
+	public function test_the_global_gate_leaves_nothing_to_block(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array() );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( true );
+
+		$this->assertSame( '', $this->fire( 'wp_head', 1 ), 'Issue scenario 11: refused by site policy means not emitted at all, not emitted inert.' );
+	}
 }

@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Analytics\Transport;
 
+use TheAnother\Plugin\SEO\Analytics\Consent;
 use TheAnother\Plugin\SEO\Analytics\TagSlice;
 
 /**
@@ -40,5 +41,29 @@ trait FlattensTags {
 		}
 
 		return $ids;
+	}
+
+	/**
+	 * Every distinct consent category across the slices, in order.
+	 *
+	 * For a block that belongs to no single vendor — the gtag bootstrap, which
+	 * every ID needs before its config line runs — and therefore activates when
+	 * any of them is accepted.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @param array<int, TagSlice> $slices Slices.
+	 * @return array<int, Consent> Categories.
+	 */
+	private function categories( array $slices ): array {
+		$categories = array();
+
+		foreach ( $slices as $slice ) {
+			if ( ! in_array( $slice->type->consent, $categories, true ) ) {
+				$categories[] = $slice->type->consent;
+			}
+		}
+
+		return $categories;
 	}
 }

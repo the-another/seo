@@ -30,20 +30,25 @@ class GtmTransport implements TagTransport {
 	 * @since 1.5.0
 	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
 	 *              key => IDs map.
+	 * @since 1.6.0 Emits inert, with the consent attributes, while consent mode
+	 *              is active.
 	 *
 	 * @param array<int, TagSlice> $slices Slices, in registry order.
 	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
 	public function emit_primary( array $slices, ConsentMode $consent ): void {
-		foreach ( $this->ids( $slices ) as $id ) {
-			wp_print_inline_script_tag(
-				"(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':\n"
-				. "new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],\n"
-				. "j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=\n"
-				. "'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);\n"
-				. "})(window,document,'script','dataLayer','" . $id . "');"
-			);
+		foreach ( $slices as $slice ) {
+			foreach ( $slice->ids as $id ) {
+				wp_print_inline_script_tag(
+					"(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':\n"
+					. "new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],\n"
+					. "j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=\n"
+					. "'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);\n"
+					. "})(window,document,'script','dataLayer','" . $id . "');",
+					$consent->attributes( array( $slice->type->consent ) )
+				);
+			}
 		}
 	}
 
