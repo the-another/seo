@@ -8,6 +8,7 @@
 
 namespace TheAnother\Plugin\SEO\Admin;
 
+use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\HookManager;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
@@ -83,17 +84,6 @@ class SettingsPage {
 	);
 
 	/**
-	 * Tracking ID settings keys => validation pattern.
-	 *
-	 * @var array<string, string>
-	 */
-	private const TRACKING_ID_PATTERNS = array(
-		'analytics_ga4_id' => '/^G-[A-Z0-9]{4,}$/',
-		'analytics_gtm_id' => '/^GTM-[A-Z0-9]{4,}$/',
-		'meta_pixel_id'    => '/^[0-9]{10,20}$/',
-	);
-
-	/**
 	 * Tab slugs => labels (labels translated at render time).
 	 *
 	 * @var array<string, string>
@@ -165,6 +155,7 @@ class SettingsPage {
 	 * @param SitemapAssignment     $sitemap_assignment Sitemap chunk assignment (family toggle transitions).
 	 * @param PostSubtypes          $post_subtypes      Post subtype registry (per-subtype rows).
 	 * @param DomainRegistry        $domains            Verification domain registry.
+	 * @param TagRegistry           $tags               Tracking tag registry.
 	 */
 	public function __construct(
 		private readonly Settings $settings,
@@ -177,7 +168,8 @@ class SettingsPage {
 		private readonly SitemapFamilies $sitemap_families,
 		private readonly SitemapAssignment $sitemap_assignment,
 		private readonly PostSubtypes $post_subtypes,
-		private readonly DomainRegistry $domains
+		private readonly DomainRegistry $domains,
+		private readonly TagRegistry $tags
 	) {
 	}
 
@@ -1130,17 +1122,33 @@ class SettingsPage {
 		// a copy that then drifts.
 		$record = '' === $lookup ? array() : $this->settings->get_domain_record( $active );
 
-		$tracking = array(
-			'analytics_ga4_id' => array( __( 'GA4 Measurement ID', 'the-another-seo' ), $this->settings->get_ga4_id(), 'G-XXXXXXXXXX' ),
-			'analytics_gtm_id' => array( __( 'Tag Manager Container ID', 'the-another-seo' ), $this->settings->get_gtm_id(), 'GTM-XXXXXXX' ),
-			'meta_pixel_id'    => array( __( 'Meta Pixel ID', 'the-another-seo' ), $this->settings->get_meta_pixel_id(), '123456789012345' ),
+		// Labels and placeholders stay in the admin layer: a translated string
+		// belongs where the screen is built, not in the registry's data. The
+		// field LIST comes from the registry, so a declared vendor that has no
+		// label row here renders no field at all —
+		// SettingsPageTest::test_every_declared_vendor_gets_a_tracking_field()
+		// is what turns that silence into a failing test.
+		$labels = array(
+			'analytics_ga4_id' => array( __( 'GA4 Measurement ID', 'the-another-seo' ), 'G-XXXXXXXXXX' ),
+			'analytics_gtm_id' => array( __( 'Tag Manager Container ID', 'the-another-seo' ), 'GTM-XXXXXXX' ),
+			'meta_pixel_id'    => array( __( 'Meta Pixel ID', 'the-another-seo' ), '123456789012345' ),
+			'google_ads_id'    => array( __( 'Google Ads Conversion ID', 'the-another-seo' ), 'AW-123456789' ),
+			'bing_uet_id'      => array( __( 'Bing UET Tag ID', 'the-another-seo' ), '12345678' ),
 		);
 
 		echo '<h2>' . esc_html__( 'Tracking', 'the-another-seo' ) . '</h2>';
 		echo '<table class="form-table">';
 
-		foreach ( $tracking as $key => $field ) {
-			list( $label, $default_value, $hint ) = $field;
+		foreach ( $this->tags->all() as $type ) {
+			$key = $type->settings_key;
+
+			if ( ! isset( $labels[ $key ] ) ) {
+				continue;
+			}
+
+			list( $label, $hint ) = $labels[ $key ];
+
+			$default_value = $this->settings->get_tracking_id( $key );
 
 			printf(
 				'<tr><th scope="row">%1$s</th><td><input type="text" name="taseo_settings[%2$s]" value="%3$s" placeholder="%4$s" /></td></tr>',
@@ -1799,15 +1807,17 @@ class SettingsPage {
 			}
 		}
 
-		foreach ( self::TRACKING_ID_PATTERNS as $id_key => $pattern ) {
+		foreach ( $this->tags->all() as $type ) {
+			$id_key = $type->settings_key;
+
 			if ( ! isset( $raw[ $id_key ] ) ) {
 				continue;
 			}
 
 			$value = trim( (string) $raw[ $id_key ] );
-			$value = 'meta_pixel_id' === $id_key ? $value : strtoupper( $value );
+			$value = $type->uppercase ? strtoupper( $value ) : $value;
 
-			$webmaster[ $id_key ] = 1 === preg_match( $pattern, $value ) ? $value : '';
+			$webmaster[ $id_key ] = 1 === preg_match( $type->pattern, $value ) ? $value : '';
 		}
 
 		// A null target means the submission named a domain that is not

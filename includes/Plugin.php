@@ -191,7 +191,8 @@ class Plugin {
 				$c->get( 'sitemap_families' ),
 				$c->get( 'sitemap_assignment' ),
 				$c->get( 'post_subtypes' ),
-				$c->get( 'domain_registry' )
+				$c->get( 'domain_registry' ),
+				$c->get( 'tag_registry' )
 			)
 		);
 		$c->register( 'migration_notice', fn() => new MigrationNotice() );

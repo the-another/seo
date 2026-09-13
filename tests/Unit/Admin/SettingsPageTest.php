@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Indexable\PostSubtypes;
 use TheAnother\Plugin\SEO\Admin\SettingsPage;
+use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Domains\DomainRegistry;
 use TheAnother\Plugin\SEO\Indexable\IndexableBackfill;
 use TheAnother\Plugin\SEO\Meta\CustomPages;
@@ -136,7 +137,8 @@ class SettingsPageTest extends TestCase {
 			$this->sitemap_families,
 			$this->sitemap_assignment,
 			new PostSubtypes(),
-			$this->domains
+			$this->domains,
+			new TagRegistry()
 		);
 	}
 
@@ -703,6 +705,67 @@ class SettingsPageTest extends TestCase {
 		$this->assertSame( '', $clean['meta_pixel_id'] );
 	}
 
+	public function test_normalizes_and_validates_the_new_tracking_ids(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'google_ads_id' => ' aw-123456789 ',
+				'bing_uet_id'   => ' 12345678 ',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( 'AW-123456789', $clean['google_ads_id'] );
+		$this->assertSame( '12345678', $clean['bing_uet_id'] );
+	}
+
+	public function test_rejects_malformed_new_tracking_ids(): void {
+		$clean = $this->page->sanitize_settings(
+			array(
+				'google_ads_id' => 'AW-ABCDEFGHI',
+				'bing_uet_id'   => 'UET-12345678',
+			),
+			'webmaster'
+		);
+
+		$this->assertSame( '', $clean['google_ads_id'] );
+		$this->assertSame( '', $clean['bing_uet_id'] );
+	}
+
+	/**
+	 * The field list is generated from the registry, but the labels are not —
+	 * a translated string belongs in the admin layer. This is what stops the
+	 * two drifting: declare a vendor without a label row and its field silently
+	 * never renders, so assert one input per declared vendor.
+	 */
+	public function test_every_declared_vendor_gets_a_tracking_field(): void {
+		$this->stub_webmaster_settings();
+
+		$html = $this->render_webmaster_html();
+
+		foreach ( ( new TagRegistry() )->all() as $type ) {
+			$this->assertStringContainsString(
+				'name="taseo_settings[' . $type->settings_key . ']"',
+				$html,
+				'No tracking field rendered for ' . $type->key
+			);
+		}
+	}
+
+	public function test_a_new_vendors_id_saves_into_the_domain_record(): void {
+		$this->settings->shouldReceive( 'get' )->with( Settings::DOMAINS_KEY, array() )->andReturn( array() );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'google_ads_id' => 'AW-123456789' ),
+			'webmaster',
+			'brandtwo.com'
+		);
+
+		$this->assertSame(
+			'AW-123456789',
+			$clean['verification_domains']['brandtwo.com']['google_ads_id']
+		);
+	}
+
 	public function test_clearing_a_verification_field_clears_the_stored_key(): void {
 		$clean = $this->page->sanitize_settings( array( 'verify_google' => '' ), 'webmaster' );
 
@@ -1012,6 +1075,8 @@ class SettingsPageTest extends TestCase {
 	 *                                      default domain's values, which is
 	 *                                      what inheritance really returns; pass
 	 *                                      them to make the two forms differ.
+	 * @param string                $ads   Google Ads conversion ID.
+	 * @param string                $uet   Bing UET tag ID.
 	 * @return void
 	 */
 	private function stub_webmaster_settings(
@@ -1021,7 +1086,9 @@ class SettingsPageTest extends TestCase {
 		string $gtm = '',
 		string $pixel = '',
 		string $host = '',
-		array $active = array()
+		array $active = array(),
+		string $ads = '',
+		string $uet = ''
 	): void {
 		$codes = array_merge(
 			array(
@@ -1053,15 +1120,18 @@ class SettingsPageTest extends TestCase {
 				->andReturn( $method );
 		}
 
-		// The renderer deliberately calls BOTH getter forms in one render and
-		// they mean different things: the argument-less form supplies the
-		// default domain's value for the inherit placeholder, while the $lookup
-		// form drives the double-tracking warning. Bound separately so the two
-		// call sites are distinguishable — a bare stub matches either, which
-		// would let the renderer swap them without failing a single test.
-		$this->settings->shouldReceive( 'get_ga4_id' )->withNoArgs()->andReturn( $ga4 );
-		$this->settings->shouldReceive( 'get_gtm_id' )->withNoArgs()->andReturn( $gtm );
-		$this->settings->shouldReceive( 'get_meta_pixel_id' )->withNoArgs()->andReturn( $pixel );
+		// The renderer calls two different lookups in one render and they mean
+		// different things: get_tracking_id( $key ) with no host supplies the
+		// DEFAULT domain's value for the inherit placeholder, while the
+		// $lookup-taking getters drive the double-tracking warning for the
+		// ACTIVE domain. Bound separately so the two call sites stay
+		// distinguishable — a bare stub matches either, which would let the
+		// renderer swap them without failing a single test.
+		$this->settings->shouldReceive( 'get_tracking_id' )->with( 'analytics_ga4_id' )->andReturn( $ga4 );
+		$this->settings->shouldReceive( 'get_tracking_id' )->with( 'analytics_gtm_id' )->andReturn( $gtm );
+		$this->settings->shouldReceive( 'get_tracking_id' )->with( 'meta_pixel_id' )->andReturn( $pixel );
+		$this->settings->shouldReceive( 'get_tracking_id' )->with( 'google_ads_id' )->andReturn( $ads );
+		$this->settings->shouldReceive( 'get_tracking_id' )->with( 'bing_uet_id' )->andReturn( $uet );
 
 		$this->settings->shouldReceive( 'get_ga4_id' )->with( $host )->andReturn( $active['ga4'] ?? $ga4 );
 		$this->settings->shouldReceive( 'get_gtm_id' )->with( $host )->andReturn( $active['gtm'] ?? $gtm );
