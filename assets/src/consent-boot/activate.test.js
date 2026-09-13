@@ -71,6 +71,27 @@ describe( 'activation', () => {
 		);
 	} );
 
+	it( 'carries a CSP nonce across replacement', () => {
+		blocked(
+			'<script type="text/plain" data-taseo-consent="analytics" nonce="">0;</script>'
+		);
+
+		// What a browser does to an element already in a document: the nonce
+		// content attribute reads empty and the real value lives in an
+		// internal slot, so copying attributes alone hands the live element
+		// nonce="" and a nonce-based CSP refuses to run it.
+		const block = document.head.querySelector( 'script' );
+		Object.defineProperty( block, 'nonce', {
+			configurable: true,
+			get: () => 'n0nce',
+		} );
+
+		expect( activate( [ 'analytics' ] ) ).toBe( 1 );
+		expect( document.head.querySelector( 'script' ).nonce ).toBe(
+			'n0nce'
+		);
+	} );
+
 	it( 'is idempotent', () => {
 		blocked(
 			'<script type="text/plain" data-taseo-consent="analytics">0;</script>'

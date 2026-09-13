@@ -76,6 +76,13 @@ function replace( block ) {
 		live.setAttribute( attribute.name, attribute.value );
 	}
 
+	// Not covered by the attribute loop: once an element is in a document,
+	// browsers empty its nonce content attribute and keep the value in an
+	// internal slot, so the copy above reads ''. Without this line every
+	// activated block is refused by a nonce-based CSP and tracking dies
+	// silently for the visitors who consented to it.
+	live.nonce = block.nonce;
+
 	if ( ! block.hasAttribute( 'src' ) ) {
 		live.text = block.text;
 	}
