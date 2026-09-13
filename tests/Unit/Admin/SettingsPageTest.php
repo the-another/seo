@@ -1652,6 +1652,36 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( '<input type="hidden" name="domain" value="example.com" />', $html );
 	}
 
+	/**
+	 * Regression pin: render_domain_nav() used to hardcode tab=webmaster into
+	 * every link it built, so switching domains from the Consent tab silently
+	 * navigated the operator back to Webmaster Tools — the only place the
+	 * per-domain policy URL can be set, made unreachable via the built-in nav.
+	 */
+	public function test_the_domain_nav_keeps_each_tab_on_itself(): void {
+		$this->stub_webmaster_settings();
+
+		$webmaster_html = $this->render_webmaster_html();
+
+		// The top nav's own tab switcher always links to every registered
+		// tab, Consent included, regardless of which one is active — that
+		// link never carries a domain= param. The domain SWITCHER's links do
+		// pair tab= with domain=, which is what render_domain_nav() used to
+		// hardcode to webmaster; that pairing is what actually pins the fix.
+		$this->assertStringContainsString( 'tab=webmaster&domain=example.com', $webmaster_html );
+		$this->assertStringNotContainsString( 'tab=consent&domain=', $webmaster_html );
+
+		Functions\when( 'checked' )->justReturn( '' );
+		$this->settings->shouldReceive( 'get_consent_lifetime_days' )->andReturn( 180 );
+		$this->settings->shouldReceive( 'get_consent_policy_url' )->andReturn( '' );
+
+		$_GET['tab'] = 'consent';
+		$consent_html = $this->render_page();
+
+		$this->assertStringContainsString( 'tab=consent&domain=example.com', $consent_html );
+		$this->assertStringNotContainsString( 'tab=webmaster&domain=', $consent_html );
+	}
+
 	public function test_webmaster_tab_reads_the_active_domains_record(): void {
 		$this->stub_webmaster_settings(
 			array( 'google' => 'brandtwocode' ),

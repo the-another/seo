@@ -1064,7 +1064,7 @@ class SettingsPage {
 		$lookup = $active === $default ? '' : $active;
 
 		$this->render_consent_notice();
-		$this->render_domain_nav( $hosts, $active, $default );
+		$this->render_domain_nav( $hosts, $active, $default, 'webmaster' );
 
 		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
 
@@ -1191,7 +1191,7 @@ class SettingsPage {
 		$lookup     = $active === $default ? '' : $active;
 
 		$this->render_consent_notice();
-		$this->render_domain_nav( $hosts, $active, $default );
+		$this->render_domain_nav( $hosts, $active, $default, 'consent' );
 
 		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
 
@@ -1386,7 +1386,7 @@ class SettingsPage {
 	}
 
 	/**
-	 * The domain switcher for the Webmaster Tools tab.
+	 * The domain switcher, shared by every tab that carries per-domain values.
 	 *
 	 * Core's own secondary-navigation pattern (`.subsubsub`, styled in
 	 * wp-admin/css/common.css), the same one the Titles & Templates tab uses.
@@ -1396,13 +1396,17 @@ class SettingsPage {
 	 * without it the first `<h2>` wraps alongside the nav.
 	 *
 	 * @since 1.0.0
+	 * @since 1.6.0 Added $tab. Every generated link used to hardcode
+	 *              tab=webmaster, so switching domains from the Consent tab
+	 *              silently navigated the operator back to Webmaster Tools.
 	 *
 	 * @param array<int, string> $hosts        Registered hosts, default first.
 	 * @param string             $active       Host being edited.
 	 * @param string             $default_host Default host.
+	 * @param string             $tab          Tab slug the links should stay on.
 	 * @return void
 	 */
-	private function render_domain_nav( array $hosts, string $active, string $default_host ): void {
+	private function render_domain_nav( array $hosts, string $active, string $default_host, string $tab ): void {
 		echo '<ul class="subsubsub">';
 
 		$last = array_key_last( $hosts );
@@ -1411,7 +1415,7 @@ class SettingsPage {
 			$url = add_query_arg(
 				array(
 					'page'   => 'taseo',
-					'tab'    => 'webmaster',
+					'tab'    => $tab,
 					'domain' => $host,
 				),
 				admin_url( 'options-general.php' )
