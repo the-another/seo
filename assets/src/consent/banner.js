@@ -50,6 +50,33 @@ a { color: inherit; }
 `;
 
 /**
+ * A policy URL that is safe to put in an href.
+ *
+ * esc_url_raw() guards the value saved in settings, but taseo_consent_config
+ * can replace it and never passes through that path, so the scheme is checked
+ * here too: only http and https link, everything else (javascript:, data:) is
+ * dropped along with the link.
+ *
+ * @param {*} value Candidate URL.
+ * @return {string} The URL to link, or '' when there is none to trust.
+ */
+function safeUrl( value ) {
+	if ( typeof value !== 'string' || ! value ) {
+		return '';
+	}
+
+	try {
+		const url = new URL( value, window.location.href );
+
+		return url.protocol === 'http:' || url.protocol === 'https:'
+			? url.href
+			: '';
+	} catch ( e ) {
+		return '';
+	}
+}
+
+/**
  * @param {string} label  Button text.
  * @param {string} action data-action value.
  * @return {HTMLButtonElement} Button.
@@ -100,9 +127,11 @@ export function createBanner( config, api, options = {} ) {
 	body.className = 'body';
 	body.textContent = copy.body || '';
 
-	if ( config.policyUrl ) {
+	const policyUrl = safeUrl( config.policyUrl );
+
+	if ( policyUrl ) {
 		const link = document.createElement( 'a' );
-		link.href = config.policyUrl;
+		link.href = policyUrl;
 		link.rel = 'noreferrer';
 		link.textContent = copy.policy || '';
 		body.append( ' ', link );

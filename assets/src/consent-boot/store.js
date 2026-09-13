@@ -100,6 +100,13 @@ export function writeRecord(
  * re-asks every visitor when a site adds a tracking vendor in a new category —
  * no stored version to remember to bump.
  *
+ * A lifetime that is not a positive number makes every record unusable rather
+ * than immortal. PHP normalizes the config before it gets here, but this half
+ * must not depend on the other half behaving: `x > NaN` is false, so trusting
+ * an undefined lifetime would mean no stored decision ever expires and no
+ * visitor is ever re-asked — the one place in this feature that would fail
+ * open, and exactly what the lifetime setting exists to prevent.
+ *
  * @param {Object|null} record       The record.
  * @param {string[]}    categories   Category slugs offered now.
  * @param {number}      lifetimeDays How long a decision lasts.
@@ -111,7 +118,13 @@ export function isUsable( record, categories, lifetimeDays, now = Date.now() ) {
 		return false;
 	}
 
-	if ( now - record.t * 1000 > lifetimeDays * DAY_MS ) {
+	const days = Number( lifetimeDays );
+
+	if ( ! Number.isFinite( days ) || days <= 0 ) {
+		return false;
+	}
+
+	if ( now - record.t * 1000 > days * DAY_MS ) {
 		return false;
 	}
 

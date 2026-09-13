@@ -71,6 +71,26 @@ describe( 'the consent record', () => {
 		);
 	} );
 
+	it( 'treats a lifetime that is not a positive number as unusable', () => {
+		const record = {
+			v: 1,
+			cats: { analytics: true },
+			t: Math.floor( Date.now() / 1000 ),
+		};
+
+		// A filtered config that omits lifetimeDays used to reach here as
+		// undefined and be compared against NaN, which is false for every
+		// operand: the record never expired and the visitor was never asked
+		// again. Fail closed instead — the only alternative is a decision
+		// that outlives the setting meant to end it.
+		expect( isUsable( record, [ 'analytics' ], undefined ) ).toBe( false );
+		expect( isUsable( record, [ 'analytics' ], NaN ) ).toBe( false );
+		expect( isUsable( record, [ 'analytics' ], 0 ) ).toBe( false );
+		expect( isUsable( record, [ 'analytics' ], -1 ) ).toBe( false );
+		expect( isUsable( record, [ 'analytics' ], 'later' ) ).toBe( false );
+		expect( isUsable( record, [ 'analytics' ], Infinity ) ).toBe( false );
+	} );
+
 	it( 'treats a decision that never mentioned a category as unusable', () => {
 		const record = {
 			v: 1,

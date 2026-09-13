@@ -86,6 +86,34 @@ describe( 'the consent banner', () => {
 		expect( shadow.querySelector( 'a[href="https://example.test/privacy"]' ) ).not.toBeNull();
 	} );
 
+	it( 'refuses to link a policy URL that is not http or https', () => {
+		// esc_url_raw() guards the settings path, but taseo_consent_config can
+		// replace this value and never passes through it.
+		const host = createBanner(
+			// eslint-disable-next-line no-script-url
+			{ ...config, policyUrl: 'javascript:alert(1)' },
+			{ set: jest.fn() }
+		);
+		document.body.appendChild( host );
+
+		expect( host.shadowRoot.querySelector( 'a' ) ).toBeNull();
+	} );
+
+	it( 'links a site-relative policy URL', () => {
+		const host = createBanner(
+			{ ...config, policyUrl: '/privacy' },
+			{ set: jest.fn() }
+		);
+		document.body.appendChild( host );
+
+		const link = host.shadowRoot.querySelector( 'a' );
+
+		expect( link ).not.toBeNull();
+		expect( link.getAttribute( 'href' ) ).toBe(
+			new URL( '/privacy', window.location.href ).href
+		);
+	} );
+
 	it( 'removes itself once a choice is made', () => {
 		const { host, shadow } = mount();
 		shadow.querySelector( '[data-action="reject-all"]' ).click();

@@ -39,6 +39,14 @@ class ConsentAssets {
 	private ?string $source = null;
 
 	/**
+	 * Memoized version of the built consent UI bundle for this request. Null
+	 * until read, '' when the build's asset file cannot be read.
+	 *
+	 * @var string|null
+	 */
+	private ?string $ui_version = null;
+
+	/**
 	 * Constructor.
 	 *
 	 * @param ConsentMode    $consent   Consent mode for this request.
@@ -76,9 +84,18 @@ class ConsentAssets {
 	 * built bundle exists.
 	 *
 	 * A site with nothing to consent to, or with the gate off, gets nothing:
-	 * no boot script, no banner. A missing bundle — a build that never ran,
-	 * or ran into a directory this install does not have — is the same as
-	 * consent mode being off, never a fatal error on a public page.
+	 * no boot script, no banner.
+	 *
+	 * A missing bundle — a build that never ran, or ran into a directory this
+	 * install does not have — is NOT the same as the gate being off. By the
+	 * time this runs every transport has already emitted its snippet inert, so
+	 * returning early leaves a page of text/plain blocks that nothing will ever
+	 * activate: the site loses all tracking, silently, for every visitor. That
+	 * is deliberately the failure taken. The alternative — printing nothing and
+	 * hoping, or fataling on a public page — would either leak tracking past a
+	 * gate the page claims to have or take the front end down with it, and no
+	 * visitor is tracked without consent while this state lasts. It is a broken
+	 * deploy to fix, not a state to render around.
 	 *
 	 * @since 1.6.0
 	 *
@@ -96,7 +113,13 @@ class ConsentAssets {
 		}
 
 		wp_print_inline_script_tag(
-			'window.taseoConsentConfig=' . wp_json_encode( $this->config() ) . ';' . $source,
+			// The flags are belt and braces on top of wp_json_encode()'s default
+			// escaping of '/', which already stops a '</script>' inside a
+			// filtered string or a translation closing this tag. They also
+			// neutralize '<!--<script>', which does not close anything but does
+			// move the HTML tokenizer into its double-escaped state and change
+			// where the parser thinks this script ends.
+			'window.taseoConsentConfig=' . wp_json_encode( $this->config(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT ) . ';' . $source,
 			array( 'id' => 'taseo-consent-boot' )
 		);
 	}
@@ -139,7 +162,7 @@ class ConsentAssets {
 			'categories'   => $this->consent->categories(),
 			'lifetimeDays' => $this->settings->get_consent_lifetime_days(),
 			'policyUrl'    => $this->settings->get_consent_policy_url( $host ),
-			'uiUrl'        => THE_ANOTHER_SEO_PLUGIN_URL . 'dist/consent/index.js',
+			'uiUrl'        => $this->ui_url(),
 			'crawlers'     => '',
 			'copy'         => array(
 				'title'       => __( 'Before we load tracking', 'the-another-seo' ),
@@ -174,13 +197,82 @@ class ConsentAssets {
 		 *
 		 * An empty 'crawlers' means the boot script's own pattern is used.
 		 *
+		 * The answer replaces the array wholesale, but the four keys the boot
+		 * script cannot run without — 'categories', 'lifetimeDays', 'uiUrl' and
+		 * 'crawlers' — are restored from the values above when it omits them.
+		 * Anything else it omits is simply absent.
+		 *
 		 * @since 1.6.0
 		 *
 		 * @param array<string, mixed> $config Configuration.
 		 * @param string               $host   Normalized host the request arrived on.
 		 */
 		$config = apply_filters( 'taseo_consent_config', $config, $host );
+		$config = is_array( $config ) ? $config : array();
 
-		return is_array( $config ) ? $config : array();
+		// The filter replaces the array wholesale, so a site answering it with
+		// only the keys it cares about — the natural way to write one — hands
+		// the boot script a config missing everything else. Normalising here,
+		// rather than trusting the answer, is what keeps the browser's failure
+		// modes closed: an absent lifetime would otherwise be compared against
+		// NaN in store.js and make every stored decision immortal, an absent
+		// uiUrl would become a script src of "undefined", and an absent
+		// crawlers key is what already shipped as a defect once.
+		$config['categories']   = isset( $config['categories'] ) && is_array( $config['categories'] ) ? array_values( $config['categories'] ) : array();
+		$config['lifetimeDays'] = max( 1, (int) ( is_numeric( $config['lifetimeDays'] ?? null ) ? $config['lifetimeDays'] : $this->settings->get_consent_lifetime_days() ) );
+		$config['uiUrl']        = isset( $config['uiUrl'] ) && is_string( $config['uiUrl'] ) && '' !== $config['uiUrl'] ? $config['uiUrl'] : $this->ui_url();
+		$config['crawlers']     = isset( $config['crawlers'] ) && is_string( $config['crawlers'] ) ? $config['crawlers'] : '';
+
+		return $config;
+	}
+
+	/**
+	 * URL of the built consent UI bundle, carrying the build's version.
+	 *
+	 * The boot script loads this with a bare script.src, so nothing about
+	 * wp_enqueue_script()'s cache busting applies to it: a browser or a CDN
+	 * holding this path keeps serving the previous build's banner after an
+	 * update, and the stale thing here is the copy a visitor is shown before
+	 * agreeing to tracking. The version comes from the same
+	 * dist/<name>/index.asset.php the admin bundles read.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return string URL.
+	 */
+	private function ui_url(): string {
+		$url     = THE_ANOTHER_SEO_PLUGIN_URL . 'dist/consent/index.js';
+		$version = $this->ui_version();
+
+		return '' === $version ? $url : $url . '?ver=' . rawurlencode( $version );
+	}
+
+	/**
+	 * Read the built UI bundle's version, once per request.
+	 *
+	 * An unreadable asset file degrades to '' — an unversioned URL that still
+	 * loads — rather than a query string naming nothing.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return string Version, or '' when unknown.
+	 */
+	private function ui_version(): string {
+		if ( null !== $this->ui_version ) {
+			return $this->ui_version;
+		}
+
+		$this->ui_version = '';
+		$asset_file       = THE_ANOTHER_SEO_PLUGIN_DIR . 'dist/consent/index.asset.php';
+
+		if ( file_exists( $asset_file ) ) {
+			$asset = require $asset_file;
+
+			if ( is_array( $asset ) && isset( $asset['version'] ) && is_string( $asset['version'] ) ) {
+				$this->ui_version = $asset['version'];
+			}
+		}
+
+		return $this->ui_version;
 	}
 }
