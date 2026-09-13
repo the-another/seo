@@ -8,6 +8,9 @@
 
 namespace TheAnother\Plugin\SEO\Analytics\Transport;
 
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
+
 /**
  * Class GtagTransport
  *
@@ -31,12 +34,15 @@ class GtagTransport implements TagTransport {
 	 * Enqueue gtag.js and its configuration.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_primary( array $tags ): void {
-		$ids = $this->ids( $tags );
+	public function emit_primary( array $slices, ConsentMode $consent ): void {
+		$ids = $this->ids( $slices );
 
 		if ( array() === $ids ) {
 			return;
@@ -89,10 +95,13 @@ class GtagTransport implements TagTransport {
 	 * No no-JS half: gtag.js has none to emit.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_noscript( array $tags ): void {
+	public function emit_noscript( array $slices, ConsentMode $consent ): void {
 	}
 }

@@ -39,10 +39,12 @@ class TagOutput {
 	 *
 	 * @param TagRegistry $registry Declared vendors.
 	 * @param TagResolver $resolver Per-request resolution.
+	 * @param ConsentMode $consent  Consent mode for this request.
 	 */
 	public function __construct(
 		private readonly TagRegistry $registry,
-		private readonly TagResolver $resolver
+		private readonly TagResolver $resolver,
+		private readonly ConsentMode $consent
 	) {
 	}
 
@@ -72,15 +74,15 @@ class TagOutput {
 			$hook_manager->register_action(
 				$group['hook'],
 				function () use ( $transport, $keys, $noscript ): void {
-					$tags = $this->tags_for( $keys );
+					$slices = $this->slices_for( $keys );
 
 					if ( $noscript ) {
-						$transport->emit_noscript( $tags );
+						$transport->emit_noscript( $slices, $this->consent );
 
 						return;
 					}
 
-					$transport->emit_primary( $tags );
+					$transport->emit_primary( $slices, $this->consent );
 				},
 				$group['priority']
 			);
@@ -151,21 +153,25 @@ class TagOutput {
 	}
 
 	/**
-	 * The resolved IDs for one group's vendors.
+	 * The resolved slices for one group's vendors.
 	 *
 	 * @param array<int, string> $keys Vendor keys.
-	 * @return array<string, array<int, string>> Vendor key => IDs, in registry order.
+	 * @return array<int, TagSlice> Slices, in registry order.
 	 */
-	private function tags_for( array $keys ): array {
+	private function slices_for( array $keys ): array {
 		$resolved = $this->resolver->resolve();
-		$tags     = array();
+		$slices   = array();
 
 		foreach ( $keys as $key ) {
-			if ( isset( $resolved[ $key ] ) ) {
-				$tags[ $key ] = $resolved[ $key ];
+			$type = $this->registry->get( $key );
+
+			if ( null === $type || ! isset( $resolved[ $key ] ) ) {
+				continue;
 			}
+
+			$slices[] = new TagSlice( $type, $resolved[ $key ] );
 		}
 
-		return $tags;
+		return $slices;
 	}
 }

@@ -8,6 +8,9 @@
 
 namespace TheAnother\Plugin\SEO\Analytics\Transport;
 
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
+
 /**
  * Class BingUetTransport
  *
@@ -35,12 +38,15 @@ class BingUetTransport implements TagTransport {
 	 * Print one UET tag per ID.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_primary( array $tags ): void {
-		foreach ( $this->ids( $tags ) as $index => $id ) {
+	public function emit_primary( array $slices, ConsentMode $consent ): void {
+		foreach ( $this->ids( $slices ) as $index => $id ) {
 			$queue = 0 === $index ? 'uetq' : 'uetq_' . $id;
 
 			wp_print_inline_script_tag(
@@ -60,10 +66,13 @@ class BingUetTransport implements TagTransport {
 	 * No no-JS half: Microsoft publishes none.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_noscript( array $tags ): void {
+	public function emit_noscript( array $slices, ConsentMode $consent ): void {
 	}
 }

@@ -8,6 +8,9 @@
 
 namespace TheAnother\Plugin\SEO\Analytics\Transport;
 
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
+
 /**
  * Class GtmTransport
  *
@@ -25,12 +28,15 @@ class GtmTransport implements TagTransport {
 	 * Print the container loader.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_primary( array $tags ): void {
-		foreach ( $this->ids( $tags ) as $id ) {
+	public function emit_primary( array $slices, ConsentMode $consent ): void {
+		foreach ( $this->ids( $slices ) as $id ) {
 			wp_print_inline_script_tag(
 				"(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':\n"
 				. "new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],\n"
@@ -45,12 +51,15 @@ class GtmTransport implements TagTransport {
 	 * Print the no-JS fallback iframe.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_noscript( array $tags ): void {
-		foreach ( $this->ids( $tags ) as $id ) {
+	public function emit_noscript( array $slices, ConsentMode $consent ): void {
+		foreach ( $this->ids( $slices ) as $id ) {
 			printf(
 				'<noscript><iframe src="%s" height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>' . "\n",
 				esc_url( 'https://www.googletagmanager.com/ns.html?id=' . rawurlencode( $id ) )

@@ -9,6 +9,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\TagOutput;
 use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Analytics\TagResolver;
@@ -19,6 +20,7 @@ class TagOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $resolver;
+	private $consent;
 	private TagOutput $output;
 	private HookManager $hooks;
 
@@ -38,7 +40,11 @@ class TagOutputTest extends TestCase {
 		$this->resolver = Mockery::mock( TagResolver::class );
 		$this->resolver->shouldReceive( 'resolve' )->andReturn( array() )->byDefault();
 
-		$this->output = new TagOutput( new TagRegistry(), $this->resolver );
+		$this->consent = Mockery::mock( ConsentMode::class );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( false )->byDefault();
+		$this->consent->shouldReceive( 'attributes' )->andReturn( array() )->byDefault();
+
+		$this->output = new TagOutput( new TagRegistry(), $this->resolver, $this->consent );
 		$this->hooks  = new HookManager();
 
 		Functions\when( 'has_action' )->justReturn( false );

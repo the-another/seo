@@ -5,20 +5,29 @@ namespace TheAnother\Plugin\SEO\Tests\Analytics\Transport;
 
 use Brain\Monkey;
 use Brain\Monkey\Functions;
+use Mockery;
+use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
+use TheAnother\Plugin\SEO\Analytics\TagRegistry;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
 use TheAnother\Plugin\SEO\Analytics\Transport\MetaPixelTransport;
 
 #[CoversClass( MetaPixelTransport::class )]
 class MetaPixelTransportTest extends TestCase {
+	use MockeryPHPUnitIntegration;
 
 	private MetaPixelTransport $transport;
+
+	private TagRegistry $registry;
 
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
 
 		$this->transport = new MetaPixelTransport();
+		$this->registry  = new TagRegistry();
 
 		Functions\when( 'esc_url' )->returnArg();
 		Functions\when( 'wp_print_inline_script_tag' )->alias(
@@ -33,16 +42,30 @@ class MetaPixelTransportTest extends TestCase {
 		parent::tearDown();
 	}
 
+	private function inactive_consent(): ConsentMode {
+		$consent = Mockery::mock( ConsentMode::class );
+		$consent->shouldReceive( 'is_active' )->andReturn( false );
+		$consent->shouldReceive( 'attributes' )->andReturn( array() );
+
+		return $consent;
+	}
+
 	/**
 	 * Capture one emit call.
 	 *
 	 * @param string                            $method emit_primary|emit_noscript.
-	 * @param array<string, array<int, string>> $tags   Tags.
+	 * @param array<string, array<int, string>> $tags   Vendor key => IDs.
 	 * @return string Output.
 	 */
 	private function emit( string $method, array $tags ): string {
+		$slices = array();
+
+		foreach ( $tags as $key => $ids ) {
+			$slices[] = new TagSlice( $this->registry->get( $key ), $ids );
+		}
+
 		ob_start();
-		$this->transport->$method( $tags );
+		$this->transport->$method( $slices, $this->inactive_consent() );
 
 		return (string) ob_get_clean();
 	}
