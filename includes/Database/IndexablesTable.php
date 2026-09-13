@@ -26,9 +26,13 @@ class IndexablesTable {
 	/**
 	 * Version option name.
 	 *
+	 * Public because it is also the plugin's "has this site ever been
+	 * installed?" signal: Installer::activate() reads it before create_table()
+	 * writes it, rather than hardcoding the option name of another class.
+	 *
 	 * @var string
 	 */
-	private const DB_VERSION_OPTION = 'taseo_db_version';
+	public const DB_VERSION_OPTION = 'taseo_db_version';
 
 	/**
 	 * Get the fully prefixed table name.
