@@ -113,6 +113,12 @@ test.describe( 'webmaster verification and tracking', () => {
 		// are configured and they share one bootstrap rather than loading the
 		// library twice. Stricter than the count it replaces, which would have
 		// passed on any single loader for any ID.
+		//
+		// This matches raw served text rather than parsed <script src>
+		// elements, so a textual occurrence of the loader URL outside an
+		// actual script tag would also count. Accepted: the served response
+		// is what the plugin controls, and a stray textual occurrence of this
+		// URL is not a failure mode this plugin has.
 		expect(
 			served.match( /googletagmanager\.com\/gtag\/js\?id=[^"'&]+/g ) ?? []
 		).toEqual( [ 'googletagmanager.com/gtag/js?id=G-E2E12345' ] );
@@ -186,9 +192,17 @@ test.describe( 'webmaster verification and tracking', () => {
 	} );
 
 	test( 'the override filter can emit nothing at all', async ( { page } ) => {
-		await page.goto( '/?taseo_tags=off' );
+		const response = await page.goto( '/?taseo_tags=off' );
+
+		// Everything below this point asserts ABSENCE — no gtag, no fbevents,
+		// no bat.bing.com, no noscript wrappers. Absence alone is satisfied
+		// just as well by a page that never rendered (a 500, a fatal, a blank
+		// response), so pin that the page actually loaded before asserting
+		// what it does not contain.
+		expect( response!.status() ).toBe( 200 );
 
 		const html = await page.content();
+		expect( html ).toContain( '</html>' );
 
 		await expect( page.locator( 'script[src*="gtag/js"]' ) ).toHaveCount( 0 );
 		expect( html ).not.toContain( 'googletagmanager.com' );
@@ -201,9 +215,14 @@ test.describe( 'webmaster verification and tracking', () => {
 	} );
 
 	test( 'markup supplied through the override filter never reaches the page', async ( { page } ) => {
-		await page.goto( '/?taseo_tags=markup' );
+		const response = await page.goto( '/?taseo_tags=markup' );
+
+		// As above: every assertion below is absence, so confirm the page
+		// actually rendered first.
+		expect( response!.status() ).toBe( 200 );
 
 		const html = await page.content();
+		expect( html ).toContain( '</html>' );
 
 		expect( html ).not.toContain( 'taseoBreakout' );
 		expect( await page.evaluate( () => 'taseoBreakout' in window ) ).toBe( false );
