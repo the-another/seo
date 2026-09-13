@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-09-13
+
 ### Added
 
 - A typed registry of supported tracking vendors, replacing the two bespoke output classes. Each vendor is one entry declaring a stable key, the pattern its ID must match, a consent category, a placement and hook priority, and the transport that emits it — GA4, Tag Manager and Meta Pixel declare exactly what they already did, and **Google Ads** (`AW-…`) and **Bing UET** (numeric tag ID) join them with fields on the Webmaster tab, per-domain and inheriting like the rest. Google Ads needed no rendering code at all: it is gtag.js, so it shares GA4's transport instance and a site running both loads one `gtag.js` and gets a `config` line per ID rather than two copies of the same library. The two stay separate entries so their consent categories can differ — a marketing refusal drops the `AW-` IDs and leaves the `G-` IDs rendering in the same block. The settings screen's own copy of the ID patterns is gone with the duplication it invited: a field that saved what the output layer then rejected had nothing to catch it. ([#17](https://github.com/the-another/seo/issues/17))
@@ -147,7 +149,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Breadcrumbs block.
 - Chunked static XML sitemaps.
 
-[Unreleased]: https://github.com/the-another/seo/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/the-another/seo/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/the-another/seo/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/the-another/seo/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/the-another/seo/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/the-another/seo/compare/v1.2.1...v1.2.2

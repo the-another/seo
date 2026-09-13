@@ -4,7 +4,7 @@ Tags: seo, open graph, schema, sitemap, breadcrumbs
 Requires at least: 6.9
 Tested up to: 7.1
 Requires PHP: 8.3
-Stable tag: 1.4.0
+Stable tag: 1.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -78,10 +78,12 @@ Reinstalling after a delete works fine — activation recreates the tables and t
 
 == Changelog ==
 
-= Unreleased =
+
+= 1.5.0 - 2026-09-13 =
 * Add: Google Ads and Bing UET tracking. Both have their own field on the Webmaster tab, they work per brand domain like the existing tracking IDs, and a blank field inherits the default domain's value. Google Ads shares the same Google tag the GA4 field uses, so if you also use GA4, switching it on adds a line to that same script rather than loading a second copy of it.
 * Add: Other plugins and themes can now change the whole set of tracking tags for a single page view — swap in a different set of IDs, add one, or turn tracking off entirely for that request. This is what a site needs when one page belongs to a single partner, or spans several and should report to none of them. Only IDs can be supplied this way, never snippets or markup, and a visitor's consent choice still has the last word.
 * Fix: The tracking ID fields and the tracking output now validate against exactly the same rules. They were separate copies of the same patterns before, so it was possible for a field to accept an ID the front end then refused to use, with nothing to tell you.
+* Refactor: All five tracking tags are now emitted by one shared mechanism instead of two separate ones. Nothing changes on your site: the Google Analytics, Tag Manager and Meta Pixel snippets are byte-for-byte what they were, on the same page positions.
 
 = 1.4.0 - 2026-09-12 =
 * Add: Deleting the plugin now removes everything it created. The plugin had activation and deactivation handling but no uninstall handling, so removing it from the Plugins screen left its two database tables, all of its settings, and every generated sitemap file behind. The sitemap files were the part that mattered: once the plugin is gone the `/sitemap.xml` routes stop resolving, but the XML files themselves stay in `wp-content/uploads/taseo-sitemaps/` and the webserver keeps handing them out at their own addresses, so anything that recorded those URLs carried on being served sitemaps nothing could update or invalidate. Deleting now drops the `taseo_indexables` and `taseo_sitemap_files` tables, removes every `taseo_` option including your settings, and deletes the sitemap directory — on every site of a multisite network. Deactivating is unchanged and still keeps all of it, so deactivating and reactivating remains free, and reinstalling after a delete rebuilds the index in the background exactly like a first install. A new FAQ entry spells out what is removed.
