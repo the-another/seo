@@ -29,9 +29,9 @@ use TheAnother\Plugin\SEO\Verification\VerificationOutput;
  * Class SettingsPage
  *
  * Tabbed options screen. Tabs: General, Post Types & Taxonomies, Titles &
- * Templates, Social Networks, Schema & Breadcrumbs, Sitemap, Webmaster Tools.
- * General carries the backfill progress indicator and the Rescan everything
- * action.
+ * Templates, Social Networks, Schema & Breadcrumbs, Sitemap, Webmaster Tools,
+ * Consent. General carries the backfill progress indicator and the Rescan
+ * everything action.
  */
 class SettingsPage {
 
@@ -96,6 +96,7 @@ class SettingsPage {
 		'schema'    => 'Schema & Breadcrumbs',
 		'sitemap'   => 'Sitemap',
 		'webmaster' => 'Webmaster Tools',
+		'consent'   => 'Consent',
 	);
 
 	/**
@@ -330,6 +331,7 @@ class SettingsPage {
 			'schema'    => $this->render_schema_tab(),
 			'sitemap'   => $this->render_sitemap_tab(),
 			'webmaster' => $this->render_webmaster_tab(),
+			'consent'   => $this->render_consent_tab(),
 			default     => $this->render_general_tab(),
 		};
 
@@ -1061,6 +1063,7 @@ class SettingsPage {
 		// the default domain keeps using them.
 		$lookup = $active === $default ? '' : $active;
 
+		$this->render_consent_notice();
 		$this->render_domain_nav( $hosts, $active, $default );
 
 		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
@@ -1167,6 +1170,97 @@ class SettingsPage {
 				esc_html__( 'Both a GA4 Measurement ID and a Tag Manager Container ID are set. If your Tag Manager container already fires a GA4 tag, pageviews will be counted twice.', 'the-another-seo' )
 			);
 		}
+	}
+
+	/**
+	 * Consent tab: whether visitors are asked, how long their answer lasts, and
+	 * the policy they are being asked to agree to.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return void
+	 */
+	private function render_consent_tab(): void {
+		$hosts = $this->domains->get_hosts();
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- read-only domain switch.
+		$raw_domain = isset( $_GET['domain'] ) ? sanitize_text_field( wp_unslash( $_GET['domain'] ) ) : '';
+		$requested  = DomainRegistry::normalize_host( $raw_domain );
+		$active     = in_array( $requested, $hosts, true ) ? $requested : (string) ( $hosts[0] ?? '' );
+		$default    = DomainRegistry::default_host();
+		$lookup     = $active === $default ? '' : $active;
+
+		$this->render_consent_notice();
+		$this->render_domain_nav( $hosts, $active, $default );
+
+		printf( '<input type="hidden" name="domain" value="%s" />', esc_attr( $active ) );
+
+		echo '<table class="form-table">';
+		printf(
+			'<tr><th scope="row">%s</th><td><label><input type="checkbox" name="taseo_settings[consent_enabled]" value="1" %s /> %s</label><p class="description">%s</p></td></tr>',
+			esc_html__( 'Ask before tracking', 'the-another-seo' ),
+			checked( $this->settings->is_consent_enabled(), true, false ),
+			esc_html__( 'Load tracking tags only for visitors who have accepted them', 'the-another-seo' ),
+			esc_html__( 'Tags are still written into the page, inert, and start only once a visitor accepts the category they belong to. A site with no tracking IDs configured asks nothing.', 'the-another-seo' )
+		);
+		printf(
+			'<tr><th scope="row"><label for="taseo-consent-lifetime">%s</label></th><td><input type="number" id="taseo-consent-lifetime" name="taseo_settings[consent_lifetime_days]" value="%d" min="1" max="%d" class="small-text" /> %s</td></tr>',
+			esc_html__( 'Decision lasts', 'the-another-seo' ),
+			(int) $this->settings->get_consent_lifetime_days(),
+			(int) Settings::CONSENT_LIFETIME_MAX,
+			esc_html__( 'days, after which the visitor is asked again', 'the-another-seo' )
+		);
+		printf(
+			'<tr><th scope="row"><label for="taseo-consent-policy">%s</label></th><td><input type="url" id="taseo-consent-policy" name="taseo_settings[consent_policy_url]" value="%s" class="regular-text" placeholder="https://example.com/privacy/" /><p class="description">%s</p></td></tr>',
+			esc_html__( 'Privacy policy', 'the-another-seo' ),
+			esc_attr( $this->settings->get_consent_policy_url( $lookup ) ),
+			esc_html__( 'Linked from the banner. A blank field on a brand domain inherits the default domain’s policy.', 'the-another-seo' )
+		);
+		echo '</table>';
+
+		echo '<h2>' . esc_html__( 'What the two answers cover', 'the-another-seo' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Analytics covers Google Analytics 4 and Tag Manager. Marketing covers Meta Pixel, Google Ads and Bing UET. A visitor can accept one and refuse the other, and refusing is offered as plainly as accepting.', 'the-another-seo' ) . '</p>';
+		echo '<p>' . esc_html__( 'A Tag Manager container counts as analytics, but it can load marketing tags of its own that this plugin cannot see. If yours does, gate those inside the container.', 'the-another-seo' ) . '</p>';
+	}
+
+	/**
+	 * Say so when tracking is configured and running ungated.
+	 *
+	 * Rendered on this tab and on Webmaster Tools, where the IDs are entered:
+	 * a site that has typed in a measurement ID and left the gate off is
+	 * tracking everyone who has never been asked, and that should be visible
+	 * where the decision was made rather than discovered elsewhere.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return void
+	 */
+	private function render_consent_notice(): void {
+		if ( $this->settings->is_consent_enabled() || ! $this->tracking_is_configured() ) {
+			return;
+		}
+
+		printf(
+			'<div class="notice notice-warning inline"><p>%s</p></div>',
+			esc_html__( 'Tracking tags are configured and load for every visitor, including those who have never been asked. Turn on “Ask before tracking” below to gate them.', 'the-another-seo' )
+		);
+	}
+
+	/**
+	 * Whether any vendor has a stored ID on the default domain.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return bool Configured.
+	 */
+	private function tracking_is_configured(): bool {
+		foreach ( $this->tags->all() as $type ) {
+			if ( '' !== $this->settings->get_tracking_id( $type->settings_key ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -1583,31 +1677,34 @@ class SettingsPage {
 	}
 
 	/**
-	 * Which domain a webmaster submission writes to.
+	 * Which domain a per-domain submission writes to.
 	 *
 	 * Three outcomes, and telling the last two apart is the whole point:
 	 *
 	 * - `''` — the default domain, i.e. the flat keys. This is what an absent
-	 *   `domain` field means, which covers every non-webmaster tab and any
-	 *   form rendered before the domain switcher existed.
+	 *   `domain` field means, which covers every tab with no domain switcher
+	 *   and any form rendered before the domain switcher existed.
 	 * - a host — that domain's record under Settings::DOMAINS_KEY.
 	 * - `null` — write nothing. The field carried a host that is not
 	 *   registered, and there is no safe place to put the values. Treating it
 	 *   as the default is the one genuinely destructive option: get_hosts() is
 	 *   dynamic (a Brand's URL rule edited in another tab changes it
-	 *   mid-session), so an operator can return to a stale Webmaster Tools
-	 *   screen and press Save with no attacker involved — and the posted
-	 *   codes would overwrite the site's own. Seeding a record on an
+	 *   mid-session), so an operator can return to a stale Webmaster Tools or
+	 *   Consent screen and press Save with no attacker involved — and the
+	 *   posted values would overwrite the site's own. Seeding a record on an
 	 *   unregistered host is rejected too, since a record key decides which
 	 *   body a public request is answered with. Discarding the edit loses
 	 *   nothing that still exists.
 	 *
 	 * @since 1.0.0
+	 * @since 1.6.0 Renamed from webmaster_target(): the Consent tab's policy
+	 *              URL now resolves through the same lookup as the
+	 *              verification codes and tracking IDs.
 	 *
 	 * @param string $domain Posted domain field, '' when none was posted.
 	 * @return string|null Lookup key, or null to write nothing.
 	 */
-	private function webmaster_target( string $domain ): ?string {
+	private function domain_target( string $domain ): ?string {
 		if ( '' === trim( $domain ) ) {
 			return '';
 		}
@@ -1754,9 +1851,16 @@ class SettingsPage {
 			}
 		}
 
-		$target = $this->webmaster_target( $domain );
+		$target = $this->domain_target( $domain );
 
-		$webmaster = array();
+		$per_domain = array();
+
+		// Added to $per_domain before the merge block below runs, so it
+		// travels through the same default-domain / brand-domain write as
+		// the verification codes and tracking IDs just below it.
+		if ( isset( $raw['consent_policy_url'] ) ) {
+			$per_domain['consent_policy_url'] = esc_url_raw( trim( (string) $raw['consent_policy_url'] ) );
+		}
 
 		foreach ( array( 'google', 'bing', 'yandex', 'yahoo', 'facebook' ) as $engine ) {
 			$code_key   = 'verify_' . $engine;
@@ -1770,7 +1874,7 @@ class SettingsPage {
 			}
 
 			if ( $has_method && isset( $raw[ $method_key ] ) ) {
-				$webmaster[ $method_key ] = $method;
+				$per_domain[ $method_key ] = $method;
 			}
 
 			if ( ! isset( $raw[ $code_key ] ) ) {
@@ -1784,7 +1888,7 @@ class SettingsPage {
 			// therefore not reachable from this screen.
 			$posted = (string) $raw[ $code_key ];
 
-			$webmaster[ $code_key ] = Settings::METHOD_FILE === $method
+			$per_domain[ $code_key ] = Settings::METHOD_FILE === $method
 				? self::sanitize_token( $engine, $posted )
 				: VerificationOutput::sanitize_code( $posted );
 
@@ -1793,7 +1897,7 @@ class SettingsPage {
 			// switching one and pressing Save clears the stored code — behind
 			// a "Settings saved" notice and an empty field, unless this says
 			// otherwise.
-			if ( '' === $webmaster[ $code_key ] && '' !== trim( $posted ) ) {
+			if ( '' === $per_domain[ $code_key ] && '' !== trim( $posted ) ) {
 				add_settings_error(
 					'taseo_messages',
 					self::INVALID_VERIFICATION_CODE . $code_key,
@@ -1817,14 +1921,14 @@ class SettingsPage {
 			$value = trim( (string) $raw[ $id_key ] );
 			$value = $type->uppercase ? strtoupper( $value ) : $value;
 
-			$webmaster[ $id_key ] = 1 === preg_match( $type->pattern, $value ) ? $value : '';
+			$per_domain[ $id_key ] = 1 === preg_match( $type->pattern, $value ) ? $value : '';
 		}
 
 		// A null target means the submission named a domain that is not
 		// registered: nothing is written, so the values are simply discarded.
-		if ( array() !== $webmaster && null !== $target ) {
+		if ( array() !== $per_domain && null !== $target ) {
 			if ( '' === $target ) {
-				$clean = array_merge( $clean, $webmaster );
+				$clean = array_merge( $clean, $per_domain );
 			} else {
 				// Start from what is stored: this key holds every domain's
 				// record, so replacing it wholesale would discard the sibling
@@ -1833,7 +1937,7 @@ class SettingsPage {
 				$rows   = is_array( $stored ) ? $stored : array();
 				$row    = isset( $rows[ $target ] ) && is_array( $rows[ $target ] ) ? $rows[ $target ] : array();
 
-				$rows[ $target ] = array_merge( $row, $webmaster );
+				$rows[ $target ] = array_merge( $row, $per_domain );
 
 				$clean[ Settings::DOMAINS_KEY ] = $rows;
 			}
@@ -1852,6 +1956,20 @@ class SettingsPage {
 		if ( 'types' === $tab ) {
 			$clean['enabled_post_types'] = $clean['enabled_post_types'] ?? array();
 			$clean['enabled_taxonomies'] = $clean['enabled_taxonomies'] ?? array();
+		}
+
+		// Force-set from the submitted tab, like every other checkbox above:
+		// an unchecked box posts nothing, and that must still save false
+		// rather than leave the previously stored value in place.
+		if ( 'consent' === $tab ) {
+			$clean['consent_enabled'] = ! empty( $raw['consent_enabled'] );
+		}
+
+		if ( isset( $raw['consent_lifetime_days'] ) ) {
+			$clean['consent_lifetime_days'] = max(
+				1,
+				min( Settings::CONSENT_LIFETIME_MAX, absint( $raw['consent_lifetime_days'] ) )
+			);
 		}
 
 		if ( isset( $raw['sitemap_max_links'] ) ) {

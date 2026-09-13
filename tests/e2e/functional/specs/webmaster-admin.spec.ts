@@ -166,10 +166,28 @@ test.describe( 'webmaster admin settings', () => {
 		// Both a GA4 ID and a GTM ID are seeded, so the double-count warning
 		// must be showing. Scoped to the settings form: WordPress core's own
 		// "a new WordPress version is available" admin notice also carries
-		// notice-warning + inline classes and would otherwise collide.
+		// notice-warning + inline classes and would otherwise collide. Also
+		// filtered by text: tracking IDs are seeded and consent is off
+		// (serve-wp.sh does not enable it), so the Consent tab's
+		// ungated-tracking notice renders on this same form with the same
+		// classes, and an unfiltered locator would resolve to both and fail
+		// Playwright's strict mode.
 		await expect(
-			page.locator( 'form .notice-warning.inline' )
-		).toContainText( 'counted twice' );
+			page
+				.locator( 'form .notice-warning.inline' )
+				.filter( { hasText: 'counted twice' } )
+		).toBeVisible();
+
+		// The ungated-tracking notice itself, named by its own text — not
+		// merely tolerated by loosening the assertion above.
+		await expect(
+			page
+				.locator( 'form .notice-warning.inline' )
+				.filter( {
+					hasText:
+						'load for every visitor, including those who have never been asked',
+				} )
+		).toBeVisible();
 	} );
 
 	test( 'saving a new value redirects back to the webmaster tab and persists across reload', async ( {
