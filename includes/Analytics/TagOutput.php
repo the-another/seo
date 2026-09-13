@@ -52,6 +52,7 @@ class TagOutput {
 	 * Register hooks.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Threads consent mode through to each transport call.
 	 *
 	 * @param HookManager $hook_manager Hook manager.
 	 * @return void
