@@ -17,9 +17,25 @@ const categories = Array.isArray( config.categories ) ? config.categories : [];
 const listeners = [];
 
 let record = readRecord();
-let refusedByBrowser =
-	window.navigator && window.navigator.globalPrivacyControl === true;
 let uiRequested = false;
+
+/**
+ * @return {boolean} Whether the stored record still answers for every category
+ *                   the site offers now.
+ */
+function hasDecision() {
+	return isUsable( record, categories, config.lifetimeDays, Date.now() );
+}
+
+// Global Privacy Control is a browser-wide default, and an explicit stored
+// decision is more specific than a default: a visitor who opened the
+// preferences and accepted said something about this site, and honouring that
+// for one pageview and then silently discarding it on the next is the worst of
+// both. So GPC refuses only while there is nothing stored for it to override.
+let refusedByBrowser =
+	! hasDecision() &&
+	window.navigator &&
+	window.navigator.globalPrivacyControl === true;
 
 function accepted() {
 	return refusedByBrowser ? [] : acceptedFrom( record, categories );
@@ -28,10 +44,18 @@ function accepted() {
 activate( accepted() );
 
 function loadUi( open ) {
+	// A config without a uiUrl would make this a <script src="undefined">: a
+	// 404 against the site itself on every first visit, and still no banner.
+	if ( ! config.uiUrl ) {
+		return;
+	}
+
 	window.taseoConsentUiRequest = { open };
 
 	if ( uiRequested ) {
-		if ( window.taseoConsentUi ) {
+		// Not a truthiness check on window.taseoConsentUi: any element with
+		// id="taseoConsentUi" is exposed under that name and would pass one.
+		if ( typeof window.taseoConsentUi?.render === 'function' ) {
 			window.taseoConsentUi.render( { open } );
 		}
 
@@ -104,7 +128,7 @@ document.addEventListener( 'DOMContentLoaded', () => {
 		return;
 	}
 
-	if ( ! isUsable( record, categories, config.lifetimeDays, Date.now() ) ) {
+	if ( ! hasDecision() ) {
 		if ( isRealUser( window.navigator, config.crawlers ) ) {
 			loadUi( false );
 		}
