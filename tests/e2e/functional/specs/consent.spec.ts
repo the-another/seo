@@ -12,7 +12,7 @@
  */
 
 import { test, expect } from '@wordpress/e2e-test-utils-playwright';
-import type { Page } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 
 const GATED = '/?taseo_consent=on';
 
@@ -105,9 +105,43 @@ async function seedDecision(
 }
 
 /**
- * The raw bytes the server sent for the document, before any script ran.
+ * The same decision, in the one place this design promises never to put it.
+ *
+ * The stored record lives in localStorage, which is never transmitted — so two
+ * contexts holding different decisions send byte-identical requests and the
+ * server could not vary on them even if it tried. That makes an assertion that
+ * their responses match true by construction, and a test that cannot fail
+ * proves nothing. A cookie is what a regression to a server-side read would
+ * have to look at, under the name it would look for, so seeding a different one
+ * per context is what gives the byte-identity assertion something to catch.
  */
-async function documentBody( page: Page ): Promise< string > {
+async function seedCookie(
+	context: BrowserContext,
+	cats: Record< string, boolean >
+): Promise< void > {
+	await context.addCookies( [
+		{
+			name: 'taseo_consent',
+			value: encodeURIComponent(
+				JSON.stringify( {
+					v: 1,
+					cats,
+					t: Math.floor( Date.now() / 1000 ),
+				} )
+			),
+			domain: 'localhost',
+			path: '/',
+		},
+	] );
+}
+
+/**
+ * The raw bytes the server sent for the document, before any script ran, and
+ * the cookies the request carried to get them.
+ */
+async function documentResponse(
+	page: Page
+): Promise< { body: string; cookies: string } > {
 	const [ response ] = await Promise.all( [
 		page.waitForResponse(
 			( r ) =>
@@ -117,7 +151,9 @@ async function documentBody( page: Page ): Promise< string > {
 		page.goto( GATED ),
 	] );
 
-	return response.text();
+	const headers = await response.request().allHeaders();
+
+	return { body: await response.text(), cookies: headers.cookie ?? '' };
 }
 
 test.describe( 'tracking consent', () => {
@@ -177,6 +213,12 @@ test.describe( 'tracking consent', () => {
 		expect( loaders ).toHaveLength( 1 );
 		expect( loaders[ 0 ] ).toContain( 'AW-123456789' );
 		expect( loaders[ 0 ] ).not.toContain( 'G-E2E12345' );
+		// Broader than the loader: gtag.js names the property it measures to
+		// on /g/collect as well, so the promise is that no request of any kind
+		// carries the GA4 property for a visitor who refused analytics.
+		expect(
+			requests.some( ( url ) => url.includes( 'G-E2E12345' ) )
+		).toBe( false );
 		expect(
 			requests.some( ( url ) => url.includes( 'connect.facebook.net' ) )
 		).toBe( true );
@@ -252,20 +294,26 @@ test.describe( 'tracking consent', () => {
 
 		await seedDecision( acceptedPage, { analytics: true, marketing: true } );
 		await seedDecision( refusedPage, { analytics: false, marketing: false } );
+		await seedCookie( accepted, { analytics: true, marketing: true } );
+		await seedCookie( refused, { analytics: false, marketing: false } );
 
 		const acceptedRequests = trackRequests( acceptedPage );
 		const refusedRequests = trackRequests( refusedPage );
 
-		const acceptedBody = await documentBody( acceptedPage );
-		const refusedBody = await documentBody( refusedPage );
+		const acceptedResponse = await documentResponse( acceptedPage );
+		const refusedResponse = await documentResponse( refusedPage );
 
 		await acceptedPage.waitForLoadState( 'networkidle' );
 		await refusedPage.waitForLoadState( 'networkidle' );
 
-		// The bytes the server sent are identical, so there is no variant for a
-		// full-page cache to store, mix up, or hand to the wrong visitor. What
-		// differs is only what each browser then chose to do with them.
-		expect( acceptedBody ).toBe( refusedBody );
+		// The two requests differ in the only channel a server could read a
+		// decision from, and they still came back byte-identical: there is no
+		// variant for a full-page cache to store, mix up, or hand to the wrong
+		// visitor, and nothing on the server is looking. What differs is only
+		// what each browser then chose to do with the same bytes.
+		expect( acceptedResponse.cookies ).toContain( 'taseo_consent' );
+		expect( acceptedResponse.cookies ).not.toBe( refusedResponse.cookies );
+		expect( acceptedResponse.body ).toBe( refusedResponse.body );
 		expect( acceptedRequests.length ).toBeGreaterThan( 0 );
 		expect( refusedRequests ).toEqual( [] );
 
