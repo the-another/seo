@@ -347,6 +347,60 @@ test.describe( 'tracking consent', () => {
 	} );
 } );
 
+test.describe( 'a category registered by other code', () => {
+	// The blocking contract is deliberately general: anything can mark its own
+	// script inert with data-taseo-consent and have the activator run it. Nothing
+	// in this plugin emits a functional tag, so without this fixture the path has
+	// no coverage at all — and it is exactly the kind of contract that keeps
+	// working by accident until a refactor quietly breaks it.
+	const REGISTERED = '/?taseo_consent=on&taseo_functional=on';
+
+	// Same as the block above: the gate refuses a browser that looks automated,
+	// so a test that forgets this asserts the crawler path and reports it as a
+	// missing banner.
+	test.use( { userAgent: VISITOR_UA } );
+
+	test.beforeEach( async ( { page } ) => {
+		await asVisitor( page );
+	} );
+
+	test( 'is offered beside the built-in ones and gates its own script', async ( {
+		page,
+	} ) => {
+		await page.goto( REGISTERED );
+
+		await page
+			.getByRole( 'button', { name: 'Preferences' } )
+			.click();
+
+		await expect(
+			page.locator( 'input[data-category="functional"]' )
+		).toBeVisible();
+
+		// Nothing has been accepted yet, so the third party's script must be inert.
+		expect( await page.evaluate( () => window.__taseoFunctionalRan ) ).toBeUndefined();
+
+		await page.evaluate( () =>
+			window.taseoConsent.set( { analytics: false, marketing: false, functional: true } )
+		);
+
+		expect( await page.evaluate( () => window.__taseoFunctionalRan ) ).toBe( true );
+	} );
+
+	test( 'strictly necessary is disclosed without a checkbox', async ( { page } ) => {
+		await page.goto( REGISTERED );
+
+		await page
+			.getByRole( 'button', { name: 'Preferences' } )
+			.click();
+
+		const necessary = page.locator( '[data-category="necessary"]' );
+
+		await expect( necessary ).toBeVisible();
+		await expect( necessary.locator( 'input' ) ).toHaveCount( 0 );
+	} );
+} );
+
 test.describe( 'tracking consent without JavaScript', () => {
 	test.use( { javaScriptEnabled: false } );
 
