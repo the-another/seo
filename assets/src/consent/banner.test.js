@@ -161,3 +161,58 @@ describe( 'brand accent contrast', () => {
 		}
 	} );
 } );
+
+describe( 'the standard consent groups', () => {
+	function mountWith( extra ) {
+		const api = { set: jest.fn() };
+		const host = createBanner( { ...config, ...extra }, api );
+		document.body.appendChild( host );
+		host.shadowRoot.querySelector( '[data-action="preferences"]' ).click();
+
+		return { host, api, shadow: host.shadowRoot };
+	}
+
+	it( 'discloses strictly necessary as always active, with no checkbox', () => {
+		const { shadow } = mountWith( {
+			copy: {
+				...config.copy,
+				necessary: { label: 'Strictly necessary', body: 'Needed for the site to work.' },
+			},
+		} );
+		const row = shadow.querySelector( '[data-category="necessary"]' );
+
+		expect( row ).not.toBeNull();
+		expect( row.querySelector( 'input' ) ).toBeNull();
+		expect( row.textContent ).toContain( 'Strictly necessary' );
+	} );
+
+	it( 'never puts strictly necessary into the decision', () => {
+		const { shadow, api } = mountWith( {
+			copy: {
+				...config.copy,
+				necessary: { label: 'Strictly necessary', body: 'Needed for the site to work.' },
+			},
+		} );
+		shadow.querySelector( '[data-action="accept-all"]' ).click();
+
+		expect( api.set ).toHaveBeenCalledWith( { analytics: true, marketing: true } );
+	} );
+
+	it( 'offers a registered third-party category alongside the built-in ones', () => {
+		const { shadow } = mountWith( { categories: [ 'analytics', 'functional' ] } );
+
+		expect(
+			[ ...shadow.querySelectorAll( 'input[data-category]' ) ].map( ( i ) =>
+				i.getAttribute( 'data-category' )
+			)
+		).toEqual( [ 'analytics', 'functional' ] );
+	} );
+
+	it( 'humanises a registered category that arrived without copy', () => {
+		const { shadow } = mountWith( { categories: [ 'analytics', 'social_media' ] } );
+		const row = shadow.querySelector( '[data-category="social_media"]' ).closest( '.category' );
+
+		expect( row.textContent ).toContain( 'Social media' );
+		expect( row.textContent ).not.toContain( 'social_media' );
+	} );
+} );

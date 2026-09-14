@@ -47,6 +47,8 @@ a { color: inherit; }
 .category { display: block; margin: 0 0 .75rem; }
 .category span { font-weight: 600; }
 .category p { margin: .15rem 0 0 1.6rem; }
+.category[data-category] > p { margin-left: 0; }
+.always { font-style: normal; font-weight: 400; opacity: .7; }
 `;
 
 /**
@@ -74,6 +76,18 @@ function safeUrl( value ) {
 	} catch ( e ) {
 		return '';
 	}
+}
+
+/**
+ * A readable label for a category whose registrant supplied no copy.
+ *
+ * @param {string} slug Category slug.
+ * @return {string} Label.
+ */
+function humanise( slug ) {
+	const text = String( slug ).replace( /[-_]+/g, ' ' ).trim();
+
+	return text.charAt( 0 ).toUpperCase() + text.slice( 1 );
 }
 
 /**
@@ -195,6 +209,25 @@ export function createBanner( config, api, options = {} ) {
 
 	const inputs = {};
 
+	if ( copy.necessary ) {
+		const row = document.createElement( 'div' );
+		row.className = 'category';
+		row.setAttribute( 'data-category', 'necessary' );
+
+		const necessaryName = document.createElement( 'span' );
+		necessaryName.textContent = copy.necessary.label || '';
+
+		const state = document.createElement( 'em' );
+		state.className = 'always';
+		state.textContent = copy.necessary.state || '';
+
+		const necessaryNote = document.createElement( 'p' );
+		necessaryNote.textContent = copy.necessary.body || '';
+
+		row.append( necessaryName, ' ', state, necessaryNote );
+		panel.appendChild( row );
+	}
+
 	categories.forEach( ( slug ) => {
 		const meta = ( copy.categories || {} )[ slug ] || {};
 		const label = document.createElement( 'label' );
@@ -207,7 +240,7 @@ export function createBanner( config, api, options = {} ) {
 		input.setAttribute( 'data-category', slug );
 
 		const name = document.createElement( 'span' );
-		name.textContent = ' ' + ( meta.label || slug );
+		name.textContent = ' ' + ( meta.label || humanise( slug ) );
 
 		const note = document.createElement( 'p' );
 		note.textContent = meta.body || '';

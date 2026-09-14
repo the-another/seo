@@ -254,4 +254,28 @@ class ConsentAssetsTest extends TestCase {
 
 		$this->assertSame( '', (string) ob_get_clean() );
 	}
+	public function test_the_config_discloses_the_strictly_necessary_group(): void {
+		$assets = $this->assets( true );
+
+		ob_start();
+		$assets->print_boot();
+		$copy = $this->printed_config( (string) ob_get_clean() )['copy'];
+
+		$this->assertArrayHasKey( 'necessary', $copy );
+		$this->assertNotSame( '', $copy['necessary']['label'] );
+		$this->assertNotSame( '', $copy['necessary']['state'] );
+		$this->assertNotSame( '', $copy['necessary']['body'] );
+	}
+
+	public function test_the_config_predefines_copy_for_the_functional_group(): void {
+		$assets = $this->assets( true );
+
+		ob_start();
+		$assets->print_boot();
+		$copy = $this->printed_config( (string) ob_get_clean() )['copy'];
+
+		$this->assertArrayHasKey( 'functional', $copy['categories'] );
+		$this->assertNotSame( '', $copy['categories']['functional']['label'] );
+	}
+
 }

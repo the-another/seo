@@ -173,12 +173,21 @@ class ConsentAssets {
 				'save'        => __( 'Save choices', 'the-another-seo' ),
 				'manage'      => __( 'Cookie settings', 'the-another-seo' ),
 				'policy'      => __( 'Privacy policy', 'the-another-seo' ),
+				'necessary'   => array(
+					'label' => __( 'Strictly necessary', 'the-another-seo' ),
+					'state' => __( 'Always active', 'the-another-seo' ),
+					'body'  => __( 'Needed for the site to work at all — signing in, security, and remembering what is in a basket. These are never used for tracking and cannot be switched off.', 'the-another-seo' ),
+				),
 				'categories'  => array(
-					'analytics' => array(
+					'analytics'  => array(
 						'label' => __( 'Analytics', 'the-another-seo' ),
 						'body'  => __( 'Measuring how the site is used, so it can be improved.', 'the-another-seo' ),
 					),
-					'marketing' => array(
+					'functional' => array(
+						'label' => __( 'Functional', 'the-another-seo' ),
+						'body'  => __( 'Remembering choices you make, such as language or region, so the site behaves the way you left it.', 'the-another-seo' ),
+					),
+					'marketing'  => array(
 						'label' => __( 'Marketing', 'the-another-seo' ),
 						'body'  => __( 'Advertising and remarketing, including measuring whether an advert worked.', 'the-another-seo' ),
 					),

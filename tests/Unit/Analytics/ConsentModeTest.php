@@ -105,4 +105,42 @@ class ConsentModeTest extends TestCase {
 
 		$this->assertSame( array( 'analytics', 'marketing' ), $mode->categories() );
 	}
+	public function test_a_filter_can_register_an_extra_category(): void {
+		Filters\expectApplied( 'taseo_consent_categories' )
+			->once()
+			->andReturn( array( 'analytics', 'functional' ) );
+
+		$this->assertSame(
+			array( 'analytics', 'functional' ),
+			$this->mode( true, array( 'ga4' => array( 'G-ABCD1234' ) ) )->categories()
+		);
+	}
+
+	/**
+	 * Strictly necessary is disclosed, never offered: it is not a choice, so a
+	 * toggle for it would ask a question with only one honest answer — and it
+	 * would land in every stored decision, re-asking everyone for nothing.
+	 */
+	public function test_the_necessary_slug_cannot_be_registered_as_a_choice(): void {
+		Filters\expectApplied( 'taseo_consent_categories' )
+			->once()
+			->andReturn( array( 'analytics', 'necessary' ) );
+
+		$this->assertSame(
+			array( 'analytics' ),
+			$this->mode( true, array( 'ga4' => array( 'G-ABCD1234' ) ) )->categories()
+		);
+	}
+
+	public function test_registered_categories_are_cleaned(): void {
+		Filters\expectApplied( 'taseo_consent_categories' )
+			->once()
+			->andReturn( array( 'analytics', 'analytics', '', 42, ' functional ', 'two words' ) );
+
+		$this->assertSame(
+			array( 'analytics', 'functional' ),
+			$this->mode( true, array( 'ga4' => array( 'G-ABCD1234' ) ) )->categories()
+		);
+	}
+
 }
