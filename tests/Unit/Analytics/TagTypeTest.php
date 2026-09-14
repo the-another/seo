@@ -6,6 +6,7 @@ namespace TheAnother\Plugin\SEO\Tests\Analytics;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use TheAnother\Plugin\SEO\Analytics\Consent;
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\Placement;
 use TheAnother\Plugin\SEO\Analytics\TagType;
 use TheAnother\Plugin\SEO\Analytics\Transport\TagTransport;
@@ -22,10 +23,10 @@ class TagTypeTest extends TestCase {
 	 */
 	private function type( bool $uppercase = true, string $pattern = '/^G-[A-Z0-9]{4,}$/' ): TagType {
 		$transport = new class() implements TagTransport {
-			public function emit_primary( array $tags ): void {
+			public function emit_primary( array $slices, ConsentMode $consent ): void {
 			}
 
-			public function emit_noscript( array $tags ): void {
+			public function emit_noscript( array $slices, ConsentMode $consent ): void {
 			}
 		};
 

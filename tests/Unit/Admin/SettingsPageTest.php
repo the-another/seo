@@ -106,6 +106,12 @@ class SettingsPageTest extends TestCase {
 		// per-entry override field; tests asserting on either override these.
 		$this->settings->shouldReceive( 'get_sitemap_cache_ttl' )->andReturn( 86400 )->byDefault();
 		$this->settings->shouldReceive( 'get_sitemap_cache_ttl_overrides' )->andReturn( array() )->byDefault();
+		// render_consent_notice() now runs at the top of both the Webmaster
+		// Tools and Consent tabs; false matches Settings::is_consent_enabled()'s
+		// own default, so a webmaster-tab render test that doesn't care about
+		// consent keeps behaving as before. Tests asserting on the notice
+		// override this.
+		$this->settings->shouldReceive( 'is_consent_enabled' )->andReturn( false )->byDefault();
 
 		// DomainRegistry::default_host() is static and calls these directly.
 		// The sanitizer tests never render, so stub_render_functions()'s copy
@@ -886,6 +892,55 @@ class SettingsPageTest extends TestCase {
 		$this->assertArrayNotHasKey( 'verification_domains', $clean );
 	}
 
+	public function test_the_consent_toggle_saves_both_ways(): void {
+		$clean = $this->page->sanitize_settings( array( 'consent_enabled' => '1' ), 'consent' );
+		$this->assertTrue( $clean['consent_enabled'] );
+
+		$clean = $this->page->sanitize_settings( array(), 'consent' );
+		$this->assertFalse( $clean['consent_enabled'], 'An unchecked box posts nothing and must still save false.' );
+	}
+
+	public function test_the_consent_lifetime_is_clamped(): void {
+		$this->assertSame( 730, $this->page->sanitize_settings( array( 'consent_lifetime_days' => '9999' ), 'consent' )['consent_lifetime_days'] );
+		$this->assertSame( 1, $this->page->sanitize_settings( array( 'consent_lifetime_days' => '0' ), 'consent' )['consent_lifetime_days'] );
+	}
+
+	public function test_the_policy_url_is_sanitized_as_a_url(): void {
+		// A faithful stub for this test only: setUp()'s blanket
+		// esc_url_raw()->returnArg() would let a javascript: URL straight
+		// through, which would make this test meaningless.
+		Functions\when( 'esc_url_raw' )->alias(
+			static fn( string $url ): string => 1 === preg_match( '#^https?://#i', $url ) ? $url : ''
+		);
+
+		$clean = $this->page->sanitize_settings(
+			array( 'consent_policy_url' => 'javascript:alert(1)' ),
+			'consent'
+		);
+
+		$this->assertSame( '', $clean['consent_policy_url'] );
+	}
+
+	public function test_the_policy_url_is_written_to_the_named_domain(): void {
+		// brandtwo.test is not one of the hosts setUp() registers by default;
+		// domain_target() writes nothing for a host get_hosts() doesn't list,
+		// which would silently discard the posted value and fail this test for
+		// a reason that looks unrelated to what it names.
+		$this->domains->shouldReceive( 'get_hosts' )
+			->andReturn( array( 'example.com', 'brandtwo.com', 'brandthree.co', 'brandtwo.test' ) );
+
+		$clean = $this->page->sanitize_settings(
+			array( 'consent_policy_url' => 'https://brandtwo.test/privacy' ),
+			'consent',
+			'brandtwo.test'
+		);
+
+		$this->assertSame(
+			'https://brandtwo.test/privacy',
+			$clean[ Settings::DOMAINS_KEY ]['brandtwo.test']['consent_policy_url']
+		);
+	}
+
 	public function test_save_redirect_preserves_the_active_tab(): void {
 		$_POST['taseo_settings_nonce'] = 'nonce';
 		$_POST['tab']                  = 'webmaster';
@@ -1595,6 +1650,36 @@ class SettingsPageTest extends TestCase {
 		$this->assertStringContainsString( 'example.com (default)', $html );
 		$this->assertStringContainsString( 'brandtwo.com', $html );
 		$this->assertStringContainsString( '<input type="hidden" name="domain" value="example.com" />', $html );
+	}
+
+	/**
+	 * Regression pin: render_domain_nav() used to hardcode tab=webmaster into
+	 * every link it built, so switching domains from the Consent tab silently
+	 * navigated the operator back to Webmaster Tools — the only place the
+	 * per-domain policy URL can be set, made unreachable via the built-in nav.
+	 */
+	public function test_the_domain_nav_keeps_each_tab_on_itself(): void {
+		$this->stub_webmaster_settings();
+
+		$webmaster_html = $this->render_webmaster_html();
+
+		// The top nav's own tab switcher always links to every registered
+		// tab, Consent included, regardless of which one is active — that
+		// link never carries a domain= param. The domain SWITCHER's links do
+		// pair tab= with domain=, which is what render_domain_nav() used to
+		// hardcode to webmaster; that pairing is what actually pins the fix.
+		$this->assertStringContainsString( 'tab=webmaster&domain=example.com', $webmaster_html );
+		$this->assertStringNotContainsString( 'tab=consent&domain=', $webmaster_html );
+
+		Functions\when( 'checked' )->justReturn( '' );
+		$this->settings->shouldReceive( 'get_consent_lifetime_days' )->andReturn( 180 );
+		$this->settings->shouldReceive( 'get_consent_policy_url' )->andReturn( '' );
+
+		$_GET['tab'] = 'consent';
+		$consent_html = $this->render_page();
+
+		$this->assertStringContainsString( 'tab=consent&domain=example.com', $consent_html );
+		$this->assertStringNotContainsString( 'tab=webmaster&domain=', $consent_html );
 	}
 
 	public function test_webmaster_tab_reads_the_active_domains_record(): void {

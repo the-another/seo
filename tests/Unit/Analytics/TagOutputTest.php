@@ -9,6 +9,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\TagOutput;
 use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Analytics\TagResolver;
@@ -19,6 +20,7 @@ class TagOutputTest extends TestCase {
 	use MockeryPHPUnitIntegration;
 
 	private $resolver;
+	private $consent;
 	private TagOutput $output;
 	private HookManager $hooks;
 
@@ -38,7 +40,11 @@ class TagOutputTest extends TestCase {
 		$this->resolver = Mockery::mock( TagResolver::class );
 		$this->resolver->shouldReceive( 'resolve' )->andReturn( array() )->byDefault();
 
-		$this->output = new TagOutput( new TagRegistry(), $this->resolver );
+		$this->consent = Mockery::mock( ConsentMode::class );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( false )->byDefault();
+		$this->consent->shouldReceive( 'attributes' )->andReturn( array() )->byDefault();
+
+		$this->output = new TagOutput( new TagRegistry(), $this->resolver, $this->consent );
 		$this->hooks  = new HookManager();
 
 		Functions\when( 'has_action' )->justReturn( false );
@@ -197,5 +203,29 @@ class TagOutputTest extends TestCase {
 			'https://www.googletagmanager.com/gtag/js?id=G-ABCD1234',
 			$this->enqueued['taseo-gtag']
 		);
+	}
+
+	public function test_the_noscript_half_is_not_emitted_while_consent_mode_is_active(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array( 'gtm' => array( 'GTM-XYZ789' ) ) );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( true );
+
+		$this->assertSame(
+			'',
+			$this->fire( 'wp_body_open', 10 ),
+			'A visitor with JavaScript disabled cannot have answered, so the no-JS half must not fire.'
+		);
+	}
+
+	public function test_the_noscript_half_is_still_emitted_while_consent_mode_is_inactive(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array( 'gtm' => array( 'GTM-XYZ789' ) ) );
+
+		$this->assertStringContainsString( 'ns.html?id=GTM-XYZ789', $this->fire( 'wp_body_open', 10 ) );
+	}
+
+	public function test_the_global_gate_leaves_nothing_to_block(): void {
+		$this->resolver->shouldReceive( 'resolve' )->andReturn( array() );
+		$this->consent->shouldReceive( 'is_active' )->andReturn( true );
+
+		$this->assertSame( '', $this->fire( 'wp_head', 1 ), 'Issue scenario 11: refused by site policy means not emitted at all, not emitted inert.' );
 	}
 }

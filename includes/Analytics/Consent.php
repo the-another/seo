@@ -43,4 +43,22 @@ enum Consent {
 			self::Marketing => 'taseo_marketing_should_print',
 		};
 	}
+
+	/**
+	 * The slug this category is named by in markup and in storage.
+	 *
+	 * Stable API: it is the value of the data-taseo-consent attribute and the
+	 * key inside the visitor's stored record, so renaming one renames both and
+	 * invalidates every decision already given.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return string Slug.
+	 */
+	public function slug(): string {
+		return match ( $this ) {
+			self::Analytics => 'analytics',
+			self::Marketing => 'marketing',
+		};
+	}
 }

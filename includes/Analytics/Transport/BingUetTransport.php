@@ -8,6 +8,9 @@
 
 namespace TheAnother\Plugin\SEO\Analytics\Transport;
 
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
+
 /**
  * Class BingUetTransport
  *
@@ -35,24 +38,35 @@ class BingUetTransport implements TagTransport {
 	 * Print one UET tag per ID.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
+	 * @since 1.6.0 Emits inert, with the consent attributes, while consent mode
+	 *              is active.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_primary( array $tags ): void {
-		foreach ( $this->ids( $tags ) as $index => $id ) {
-			$queue = 0 === $index ? 'uetq' : 'uetq_' . $id;
+	public function emit_primary( array $slices, ConsentMode $consent ): void {
+		$index = 0;
 
-			wp_print_inline_script_tag(
-				'(function(w,d,t,r,u){var f,n,i;w[u]=w[u]||[],f=function(){'
-				. 'var o={ti:"' . $id . '"};o.q=w[u],w[u]=new UET(o),w[u].push("pageLoad")},'
-				. 'n=d.createElement(t),n.src=r,n.async=1,'
-				. 'n.onload=n.onreadystatechange=function(){var s=this.readyState;'
-				. 's&&s!=="loaded"&&s!=="complete"||(f(),n.onload=n.onreadystatechange=null,'
-				. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i))},'
-				. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i)})'
-				. '(window,document,"script","https://bat.bing.com/bat.js","' . $queue . '");'
-			);
+		foreach ( $slices as $slice ) {
+			foreach ( $slice->ids as $id ) {
+				$queue = 0 === $index ? 'uetq' : 'uetq_' . $id;
+				++$index;
+
+				wp_print_inline_script_tag(
+					'(function(w,d,t,r,u){var f,n,i;w[u]=w[u]||[],f=function(){'
+					. 'var o={ti:"' . $id . '"};o.q=w[u],w[u]=new UET(o),w[u].push("pageLoad")},'
+					. 'n=d.createElement(t),n.src=r,n.async=1,'
+					. 'n.onload=n.onreadystatechange=function(){var s=this.readyState;'
+					. 's&&s!=="loaded"&&s!=="complete"||(f(),n.onload=n.onreadystatechange=null,'
+					. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i))},'
+					. 'i=d.getElementsByTagName(t)[0],i.parentNode.insertBefore(n,i)})'
+					. '(window,document,"script","https://bat.bing.com/bat.js","' . $queue . '");',
+					$consent->attributes( array( $slice->type->consent ) )
+				);
+			}
 		}
 	}
 
@@ -60,10 +74,13 @@ class BingUetTransport implements TagTransport {
 	 * No no-JS half: Microsoft publishes none.
 	 *
 	 * @since 1.5.0
+	 * @since 1.6.0 Takes slices and the request's consent mode rather than a
+	 *              key => IDs map.
 	 *
-	 * @param array<string, array<int, string>> $tags Vendor key => validated IDs.
+	 * @param array<int, TagSlice> $slices Slices, in registry order.
+	 * @param ConsentMode          $consent Consent mode for this request.
 	 * @return void
 	 */
-	public function emit_noscript( array $tags ): void {
+	public function emit_noscript( array $slices, ConsentMode $consent ): void {
 	}
 }

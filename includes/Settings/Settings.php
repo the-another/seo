@@ -422,6 +422,26 @@ class Settings {
 	public const SITEMAP_CACHE_TTL_MAX = 31536000;
 
 	/**
+	 * Default lifetime of a stored consent decision, in days.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @var int
+	 */
+	public const CONSENT_LIFETIME_DEFAULT = 180;
+
+	/**
+	 * Longest lifetime a consent decision may be given, in days. Two years is
+	 * the outer bound regulators treat as re-asking at all; beyond it the
+	 * setting would be a way to never ask again.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @var int
+	 */
+	public const CONSENT_LIFETIME_MAX = 730;
+
+	/**
 	 * Cache-Control max-age for sitemap responses that have no subtype of
 	 * their own — the root index — and the fallback for every subtype
 	 * without an override.
@@ -677,5 +697,48 @@ class Settings {
 	 */
 	public function get_meta_pixel_id( string $host = '' ): string {
 		return $this->get_tracking_id( 'meta_pixel_id', $host );
+	}
+
+	/**
+	 * Whether visitors are asked before tracking tags are allowed to run.
+	 *
+	 * Defaults to false so that updating the plugin never silently stops an
+	 * existing site's tracking. Installer::activate() writes true for a fresh
+	 * install, where there is no established behaviour to preserve.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return bool Enabled.
+	 */
+	public function is_consent_enabled(): bool {
+		return (bool) $this->get( 'consent_enabled', false );
+	}
+
+	/**
+	 * How long a stored decision lasts before the visitor is asked again.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @return int Days, within the supported range.
+	 */
+	public function get_consent_lifetime_days(): int {
+		$days = (int) $this->get( 'consent_lifetime_days', self::CONSENT_LIFETIME_DEFAULT );
+
+		return max( 1, min( self::CONSENT_LIFETIME_MAX, $days ) );
+	}
+
+	/**
+	 * Privacy policy URL the consent banner links to, for one domain.
+	 *
+	 * Inherits the default domain's value when this domain has none, like the
+	 * tracking IDs and for the same reason: brands commonly share one policy.
+	 *
+	 * @since 1.6.0
+	 *
+	 * @param string $host Normalized host, '' for the default domain.
+	 * @return string URL or ''.
+	 */
+	public function get_consent_policy_url( string $host = '' ): string {
+		return $this->get_domain_value( 'consent_policy_url', $host, true );
 	}
 }

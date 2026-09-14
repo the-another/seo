@@ -1,0 +1,418 @@
+/**
+ * The consent gate.
+ *
+ * Every request here carries ?taseo_consent=on, which the mu-plugin fixture
+ * turns into a true answer to taseo_consent_enabled for that request alone.
+ * webmaster.spec.ts asserts the ungated output on the same install and must
+ * keep passing untouched — the two together are the proof that consent-off
+ * behaviour did not change.
+ *
+ * Values are seeded by tests/e2e/functional/environment/serve-wp.sh:
+ * G-E2E12345, GTM-E2E1234, pixel 123456789012345, AW-123456789, UET 12345678.
+ */
+
+import { test, expect } from '@wordpress/e2e-test-utils-playwright';
+import type { BrowserContext, Page } from '@playwright/test';
+
+const GATED = '/?taseo_consent=on';
+
+const THIRD_PARTY =
+	/googletagmanager\.com|connect\.facebook\.net|bat\.bing\.com|facebook\.com\/tr/;
+
+/**
+ * A user agent that is not a crawler's.
+ *
+ * The boot script refuses to ask a bot (assets/src/consent-boot/crawler.js),
+ * and its default pattern matches `headlesschrome` — which is exactly what
+ * this container's Chromium calls itself: "Mozilla/5.0 (X11; Linux x86_64)
+ * … HeadlessChrome/149.0.7827.0 Safari/537.36". That refusal is deliberate,
+ * unit-tested production behaviour (a Lighthouse run must not be shown a
+ * banner), so the browser is what has to look ordinary here, not the code
+ * under test. Only the absence of "Headless" matters; the version is this
+ * image's Chromium at the time of writing and need not track it.
+ */
+const VISITOR_UA =
+	'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.7827.0 Safari/537.36';
+
+/**
+ * The second half of looking like a person: navigator.webdriver.
+ *
+ * Playwright's Chromium reports `navigator.webdriver === true`, which
+ * isRealUser() reads as an automated browser and refuses just as firmly as a
+ * bot user agent — again by design, and covered by its own unit test. Without
+ * this the banner never renders under any circumstances and every assertion
+ * about it would pass vacuously by never finding one.
+ */
+async function asVisitor( page: Page ): Promise< void > {
+	await page.addInitScript( () => {
+		Object.defineProperty( window.navigator, 'webdriver', {
+			configurable: true,
+			get: () => false,
+		} );
+	} );
+}
+
+/**
+ * The gtag.js loaders this plugin emitted, as against the ones gtag.js goes
+ * on to request for itself.
+ *
+ * A page configuring two Google properties makes gtag.js fetch a second,
+ * product-specific loader of its own once it is running — observed here as
+ * `…/gtag/js?id=AW-123456789&cx=c&gtm=4e6992`. That is Google's documented
+ * multi-product behaviour, already recorded for the ungated page in
+ * webmaster.spec.ts, and it is neither emitted nor suppressible by this
+ * plugin. What the plugin emits is the bare form: an id and nothing else.
+ */
+function pluginLoaders( requests: string[] ): string[] {
+	return requests.filter( ( url ) =>
+		/^https:\/\/www\.googletagmanager\.com\/gtag\/js\?id=[^&]+$/.test( url )
+	);
+}
+
+/**
+ * Every third-party tracking request the page makes, recorded as it happens.
+ */
+function trackRequests( page: Page ): string[] {
+	const seen: string[] = [];
+
+	page.on( 'request', ( request ) => {
+		if ( THIRD_PARTY.test( request.url() ) ) {
+			seen.push( request.url() );
+		}
+	} );
+
+	return seen;
+}
+
+/**
+ * Seed a decision before the document runs, the way a returning visitor's
+ * browser already holds one.
+ */
+async function seedDecision(
+	page: Page,
+	cats: Record< string, boolean >
+): Promise< void > {
+	await page.addInitScript( ( value ) => {
+		window.localStorage.setItem(
+			'taseo_consent',
+			JSON.stringify( {
+				v: 1,
+				cats: value,
+				t: Math.floor( Date.now() / 1000 ),
+			} )
+		);
+	}, cats );
+}
+
+/**
+ * The same decision, in the one place this design promises never to put it.
+ *
+ * The stored record lives in localStorage, which is never transmitted — so two
+ * contexts holding different decisions send byte-identical requests and the
+ * server could not vary on them even if it tried. That makes an assertion that
+ * their responses match true by construction, and a test that cannot fail
+ * proves nothing. A cookie is what a regression to a server-side read would
+ * have to look at, under the name it would look for, so seeding a different one
+ * per context is what gives the byte-identity assertion something to catch.
+ */
+async function seedCookie(
+	context: BrowserContext,
+	cats: Record< string, boolean >
+): Promise< void > {
+	await context.addCookies( [
+		{
+			name: 'taseo_consent',
+			value: encodeURIComponent(
+				JSON.stringify( {
+					v: 1,
+					cats,
+					t: Math.floor( Date.now() / 1000 ),
+				} )
+			),
+			domain: 'localhost',
+			path: '/',
+		},
+	] );
+}
+
+/**
+ * The raw bytes the server sent for the document, before any script ran, and
+ * the cookies the request carried to get them.
+ */
+async function documentResponse(
+	page: Page
+): Promise< { body: string; cookies: string } > {
+	const [ response ] = await Promise.all( [
+		page.waitForResponse(
+			( r ) =>
+				r.request().resourceType() === 'document' &&
+				r.url().includes( 'taseo_consent=on' )
+		),
+		page.goto( GATED ),
+	] );
+
+	const headers = await response.request().allHeaders();
+
+	return { body: await response.text(), cookies: headers.cookie ?? '' };
+}
+
+test.describe( 'tracking consent', () => {
+	// Every test in here is a person visiting the site, so the browser has to
+	// be one: a real-looking user agent for the whole describe, and
+	// navigator.webdriver neutralized per page. The crawler test below opts
+	// back out by giving its own context a Googlebot user agent, which is what
+	// keeps that half exercising the real pattern rather than the accident of
+	// running under automation.
+	test.use( { userAgent: VISITOR_UA } );
+
+	test.beforeEach( async ( { page } ) => {
+		await asVisitor( page );
+	} );
+
+	test( 'a first visit asks, emits inert blocks, and contacts nobody', async ( {
+		page,
+	} ) => {
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+
+		expect( requests ).toEqual( [] );
+		await expect(
+			page.locator( 'script[type="text/plain"][data-taseo-consent]' )
+		).not.toHaveCount( 0 );
+		await expect( page.getByRole( 'dialog' ) ).toBeVisible();
+	} );
+
+	test( 'accepting analytics runs GA4 and leaves the pixel inert', async ( {
+		page,
+	} ) => {
+		await seedDecision( page, { analytics: true, marketing: false } );
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.waitForLoadState( 'networkidle' );
+
+		expect( requests.some( ( url ) => url.includes( 'gtag/js' ) ) ).toBe( true );
+		expect(
+			requests.some( ( url ) => url.includes( 'connect.facebook.net' ) )
+		).toBe( false );
+		await expect( page.getByRole( 'dialog' ) ).toHaveCount( 0 );
+	} );
+
+	test( 'accepting marketing never fetches a loader naming the GA4 property', async ( {
+		page,
+	} ) => {
+		await seedDecision( page, { analytics: false, marketing: true } );
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.waitForLoadState( 'networkidle' );
+
+		const loaders = requests.filter( ( url ) => url.includes( 'gtag/js' ) );
+
+		expect( loaders ).toHaveLength( 1 );
+		expect( loaders[ 0 ] ).toContain( 'AW-123456789' );
+		expect( loaders[ 0 ] ).not.toContain( 'G-E2E12345' );
+		// Broader than the loader: gtag.js names the property it measures to
+		// on /g/collect as well, so the promise is that no request of any kind
+		// carries the GA4 property for a visitor who refused analytics.
+		expect(
+			requests.some( ( url ) => url.includes( 'G-E2E12345' ) )
+		).toBe( false );
+		expect(
+			requests.some( ( url ) => url.includes( 'connect.facebook.net' ) )
+		).toBe( true );
+	} );
+
+	test( 'accepting everything loads one gtag and configures both properties', async ( {
+		page,
+	} ) => {
+		await seedDecision( page, { analytics: true, marketing: true } );
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.waitForLoadState( 'networkidle' );
+
+		// One loader from this plugin, not two: the group attribute makes the
+		// analytics and marketing loaders mutually exclusive, so a visitor who
+		// accepted both still gets a single copy of gtag.js. gtag.js's own
+		// follow-up request for the Ads product is not this plugin's output —
+		// see pluginLoaders() above.
+		expect( pluginLoaders( requests ) ).toHaveLength( 1 );
+
+		const html = await page.content();
+
+		expect( html ).toContain( "gtag('config', 'G-E2E12345')" );
+		expect( html ).toContain( "gtag('config', 'AW-123456789')" );
+	} );
+
+	test( 'rejecting everything contacts nobody and leaves the site usable', async ( {
+		page,
+	} ) => {
+		await seedDecision( page, { analytics: false, marketing: false } );
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.waitForLoadState( 'networkidle' );
+
+		expect( requests ).toEqual( [] );
+		await expect( page.locator( 'body' ) ).not.toBeEmpty();
+	} );
+
+	test( 'a visitor can come back and change their mind', async ( { page } ) => {
+		await seedDecision( page, { analytics: false, marketing: false } );
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.locator( '[data-taseo-consent-open]' ).click();
+		await page.getByRole( 'button', { name: 'Accept all' } ).click();
+		await page.waitForLoadState( 'networkidle' );
+
+		expect( requests.some( ( url ) => url.includes( 'gtag/js' ) ) ).toBe( true );
+	} );
+
+	test( 'the no-JS halves are not emitted while the gate is on', async ( {
+		page,
+	} ) => {
+		await page.goto( GATED );
+
+		await expect(
+			page.locator( 'noscript iframe[src*="ns.html"]' )
+		).toHaveCount( 0 );
+		await expect(
+			page.locator( 'noscript img[src*="facebook.com/tr"]' )
+		).toHaveCount( 0 );
+	} );
+
+	test( 'one visitor’s decision cannot reach another through a shared cache', async ( {
+		browser,
+	} ) => {
+		const accepted = await browser.newContext();
+		const refused = await browser.newContext();
+		const acceptedPage = await accepted.newPage();
+		const refusedPage = await refused.newPage();
+
+		await seedDecision( acceptedPage, { analytics: true, marketing: true } );
+		await seedDecision( refusedPage, { analytics: false, marketing: false } );
+		await seedCookie( accepted, { analytics: true, marketing: true } );
+		await seedCookie( refused, { analytics: false, marketing: false } );
+
+		const acceptedRequests = trackRequests( acceptedPage );
+		const refusedRequests = trackRequests( refusedPage );
+
+		const acceptedResponse = await documentResponse( acceptedPage );
+		const refusedResponse = await documentResponse( refusedPage );
+
+		await acceptedPage.waitForLoadState( 'networkidle' );
+		await refusedPage.waitForLoadState( 'networkidle' );
+
+		// The two requests differ in the only channel a server could read a
+		// decision from, and they still came back byte-identical: there is no
+		// variant for a full-page cache to store, mix up, or hand to the wrong
+		// visitor, and nothing on the server is looking. What differs is only
+		// what each browser then chose to do with the same bytes.
+		expect( acceptedResponse.cookies ).toContain( 'taseo_consent' );
+		expect( acceptedResponse.cookies ).not.toBe( refusedResponse.cookies );
+		expect( acceptedResponse.body ).toBe( refusedResponse.body );
+		expect( acceptedRequests.length ).toBeGreaterThan( 0 );
+		expect( refusedRequests ).toEqual( [] );
+
+		await accepted.close();
+		await refused.close();
+	} );
+
+	test( 'a crawler is not asked and is not tracked', async ( { browser } ) => {
+		const context = await browser.newContext( {
+			userAgent:
+				'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+		} );
+		const page = await context.newPage();
+
+		// Neutralized here too, deliberately: a context made by hand does not
+		// inherit the describe's visitor user agent, and without this the
+		// browser would be refused for being automated and the Googlebot user
+		// agent above would be decorative — the test would pass with the
+		// crawler pattern removed entirely.
+		await asVisitor( page );
+
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+		await page.waitForLoadState( 'networkidle' );
+
+		await expect( page.getByRole( 'dialog' ) ).toHaveCount( 0 );
+		expect( requests ).toEqual( [] );
+
+		await context.close();
+	} );
+} );
+
+test.describe( 'a category registered by other code', () => {
+	// The blocking contract is deliberately general: anything can mark its own
+	// script inert with data-taseo-consent and have the activator run it. Nothing
+	// in this plugin emits a functional tag, so without this fixture the path has
+	// no coverage at all — and it is exactly the kind of contract that keeps
+	// working by accident until a refactor quietly breaks it.
+	const REGISTERED = '/?taseo_consent=on&taseo_functional=on';
+
+	// Same as the block above: the gate refuses a browser that looks automated,
+	// so a test that forgets this asserts the crawler path and reports it as a
+	// missing banner.
+	test.use( { userAgent: VISITOR_UA } );
+
+	test.beforeEach( async ( { page } ) => {
+		await asVisitor( page );
+	} );
+
+	test( 'is offered beside the built-in ones and gates its own script', async ( {
+		page,
+	} ) => {
+		await page.goto( REGISTERED );
+
+		await page
+			.getByRole( 'button', { name: 'Preferences' } )
+			.click();
+
+		await expect(
+			page.locator( 'input[data-category="functional"]' )
+		).toBeVisible();
+
+		// Nothing has been accepted yet, so the third party's script must be inert.
+		expect( await page.evaluate( () => window.__taseoFunctionalRan ) ).toBeUndefined();
+
+		await page.evaluate( () =>
+			window.taseoConsent.set( { analytics: false, marketing: false, functional: true } )
+		);
+
+		expect( await page.evaluate( () => window.__taseoFunctionalRan ) ).toBe( true );
+	} );
+
+	test( 'strictly necessary is disclosed without a checkbox', async ( { page } ) => {
+		await page.goto( REGISTERED );
+
+		await page
+			.getByRole( 'button', { name: 'Preferences' } )
+			.click();
+
+		const necessary = page.locator( '[data-category="necessary"]' );
+
+		await expect( necessary ).toBeVisible();
+		await expect( necessary.locator( 'input' ) ).toHaveCount( 0 );
+	} );
+} );
+
+test.describe( 'tracking consent without JavaScript', () => {
+	test.use( { javaScriptEnabled: false } );
+
+	test( 'nothing fires and nothing breaks', async ( { page } ) => {
+		const requests = trackRequests( page );
+
+		await page.goto( GATED );
+
+		expect( requests ).toEqual( [] );
+		await expect(
+			page.locator( 'noscript iframe[src*="ns.html"]' )
+		).toHaveCount( 0 );
+		await expect( page.locator( 'body' ) ).not.toBeEmpty();
+	} );
+} );

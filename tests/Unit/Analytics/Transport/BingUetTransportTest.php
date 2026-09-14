@@ -5,26 +5,30 @@ namespace TheAnother\Plugin\SEO\Tests\Analytics\Transport;
 
 use Brain\Monkey;
 use Brain\Monkey\Functions;
+use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Analytics\TagRegistry;
+use TheAnother\Plugin\SEO\Analytics\TagSlice;
 use TheAnother\Plugin\SEO\Analytics\Transport\BingUetTransport;
 
 #[CoversClass( BingUetTransport::class )]
 class BingUetTransportTest extends TestCase {
+	use MockeryPHPUnitIntegration;
+	use RendersScriptTags;
 
 	private BingUetTransport $transport;
+
+	private TagRegistry $registry;
 
 	protected function setUp(): void {
 		parent::setUp();
 		Monkey\setUp();
 
 		$this->transport = new BingUetTransport();
+		$this->registry  = new TagRegistry();
 
-		Functions\when( 'wp_print_inline_script_tag' )->alias(
-			static function ( string $js ): void {
-				echo '<script>' . $js . '</script>';
-			}
-		);
+		$this->stub_script_tags();
 	}
 
 	protected function tearDown(): void {
@@ -36,12 +40,18 @@ class BingUetTransportTest extends TestCase {
 	 * Capture one emit call.
 	 *
 	 * @param string                            $method emit_primary|emit_noscript.
-	 * @param array<string, array<int, string>> $tags   Tags.
+	 * @param array<string, array<int, string>> $tags   Vendor key => IDs.
 	 * @return string Output.
 	 */
 	private function emit( string $method, array $tags ): string {
+		$slices = array();
+
+		foreach ( $tags as $key => $ids ) {
+			$slices[] = new TagSlice( $this->registry->get( $key ), $ids );
+		}
+
 		ob_start();
-		$this->transport->$method( $tags );
+		$this->transport->$method( $slices, $this->inactive_consent() );
 
 		return (string) ob_get_clean();
 	}
@@ -90,5 +100,28 @@ class BingUetTransportTest extends TestCase {
 			'',
 			$this->emit( 'emit_noscript', array( 'bing_uet' => array( '12345678' ) ) )
 		);
+	}
+
+	public function test_the_loader_is_inert_while_consent_mode_is_active(): void {
+		$slices = array( new TagSlice( $this->registry->get( 'bing_uet' ), array( '12345678' ) ) );
+
+		ob_start();
+		$this->transport->emit_primary( $slices, $this->active_consent() );
+		$head = (string) ob_get_clean();
+
+		$this->assertStringContainsString( 'type="text/plain"', $head );
+		$this->assertStringContainsString( 'data-taseo-consent="marketing"', $head );
+		$this->assertStringContainsString( '12345678', $head, 'The snippet bytes are unchanged; only the wrapper blocks them.' );
+	}
+
+	public function test_the_loader_is_live_while_consent_mode_is_inactive(): void {
+		$slices = array( new TagSlice( $this->registry->get( 'bing_uet' ), array( '12345678' ) ) );
+
+		ob_start();
+		$this->transport->emit_primary( $slices, $this->inactive_consent() );
+		$head = (string) ob_get_clean();
+
+		$this->assertStringNotContainsString( 'text/plain', $head );
+		$this->assertStringNotContainsString( 'data-taseo-consent', $head );
 	}
 }

@@ -10,6 +10,7 @@ use Mockery;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use TheAnother\Plugin\SEO\Analytics\ConsentMode;
 use TheAnother\Plugin\SEO\Analytics\TagOutput;
 use TheAnother\Plugin\SEO\Analytics\TagRegistry;
 use TheAnother\Plugin\SEO\Analytics\TagResolver;
@@ -63,8 +64,12 @@ class TagPipelineTest extends TestCase {
 		$domains = Mockery::mock( DomainRegistry::class );
 		$domains->shouldReceive( 'get_current_host' )->andReturn( 'example.com' )->byDefault();
 
+		$consent = Mockery::mock( ConsentMode::class );
+		$consent->shouldReceive( 'is_active' )->andReturn( false )->byDefault();
+		$consent->shouldReceive( 'attributes' )->andReturn( array() )->byDefault();
+
 		$registry     = new TagRegistry();
-		$this->output = new TagOutput( $registry, new TagResolver( $registry, $this->settings, $domains ) );
+		$this->output = new TagOutput( $registry, new TagResolver( $registry, $this->settings, $domains ), $consent );
 		$this->hooks  = new HookManager();
 
 		Functions\when( 'is_admin' )->justReturn( false );
